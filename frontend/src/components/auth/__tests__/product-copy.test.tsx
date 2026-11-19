@@ -137,7 +137,10 @@ describe('产品文案统一（研稿 · Paper Studio）', () => {
     expect(text).not.toContain('AI 办案成员')
     // 如实标注当前面向场景
     expect(text).toContain('按项目权限')
-    expect([...el.querySelectorAll('img')].map((i) => i.getAttribute('src'))).toEqual(expect.arrayContaining(['/lp/paper-latex.jpg', '/lp/paper-word.jpg', '/lp/paper-projects.jpg']))
+    const imgSrcs = [...el.querySelectorAll('img')].map((i) => i.getAttribute('src') ?? '')
+    expect(imgSrcs.some((s) => s.includes('paper-latex'))).toBe(true)
+    expect(imgSrcs.some((s) => s.includes('paper-word'))).toBe(true)
+    expect(imgSrcs.some((s) => s.includes('paper-projects'))).toBe(true)
   })
 
   it.each(['terms', 'privacy', 'copyright'])('公开说明页面 %s 使用论文场景且不含旧业务描述', async (page) => {

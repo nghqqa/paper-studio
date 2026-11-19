@@ -4,6 +4,9 @@ import { Button } from '@/components/ui/button'
 import { BrandMark } from '@/components/auth/AuthFrame'
 import { BRAND_CAPABILITIES, BRAND_NAME_FULL, BRAND_TAGLINE, brandCopyright } from '@/lib/brand'
 import { useStudio } from '@/store'
+import paperLatexImg from '@/assets/lp/paper-latex.webp'
+import paperWordImg from '@/assets/lp/paper-word.webp'
+import paperProjectsImg from '@/assets/lp/paper-projects.webp'
 
 /**
  * 产品落地页（anon 访客入口）：顶栏 + hero + 数字带 + 能力卡 + 深介栏 + 适用角色 + FAQ + 收尾 CTA + 页脚。
@@ -107,10 +110,14 @@ export function LandingPage() {
           </div>
           <p className="mt-3 text-xs text-fg-muted">开源自托管 · 自动化产出为辅助，最终内容由作者确认</p>
           <img
-            src="/lp/paper-latex.jpg"
+            src={paperLatexImg}
             alt="研稿 LaTeX 论文工作台：工程文件、源码和论文 PDF 预览"
-            className="mt-10 w-full max-w-3xl rounded-xl border border-border/60 shadow-sm"
-            loading="lazy"
+            width={1280}
+            height={720}
+            className="mt-10 aspect-video w-full max-w-3xl rounded-xl border border-border/60 bg-panel shadow-md dark:ring-1 dark:ring-white/10 dark:shadow-2xl"
+            loading="eager"
+            fetchPriority="high"
+            decoding="async"
           />
           <p className="mt-3 text-xs text-fg-muted">LaTeX 论文工作台 · 官方会议模板与 PDF 编译预览</p>
         </div>
@@ -149,10 +156,13 @@ export function LandingPage() {
       <section className="border-y border-border bg-sunken/50">
         <div className="mx-auto grid max-w-5xl items-center gap-8 px-4 py-14 md:grid-cols-2 md:py-18">
           <img
-            src="/lp/paper-word.jpg"
+            src={paperWordImg}
             alt="研稿 Word 论文工作台：中文期刊模板与原生文档编辑"
-            className="w-full rounded-xl border border-border/60 shadow-sm"
+            width={1280}
+            height={720}
+            className="aspect-video w-full rounded-xl border border-border/60 bg-panel shadow-sm dark:ring-1 dark:ring-white/10"
             loading="lazy"
+            decoding="async"
           />
           <div>
             <h3 className="text-lg font-semibold text-fg-strong md:text-xl">熟悉的 Word，完整的期刊模板</h3>
@@ -176,10 +186,13 @@ export function LandingPage() {
         <div className="mx-auto grid max-w-5xl items-center gap-8 px-4 py-14 md:grid-cols-2 md:py-18">
           <div className="md:order-2">
             <img
-              src="/lp/paper-projects.jpg"
+              src={paperProjectsImg}
               alt="研稿论文项目列表：文档类型、所有者、投稿目标与截止日期"
-              className="w-full rounded-xl border border-border/60 shadow-sm"
+              width={1280}
+              height={720}
+              className="aspect-video w-full rounded-xl border border-border/60 bg-panel shadow-sm dark:ring-1 dark:ring-white/10"
               loading="lazy"
+              decoding="async"
             />
           </div>
           <div className="md:order-1">

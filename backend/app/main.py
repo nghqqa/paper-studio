@@ -245,6 +245,8 @@ async def _security_headers(request: Request, call_next):
     # ETag 304 走快路径不传内容。hash 命名的 /assets/* 保留启发式缓存。
     if request.url.path == "/" or request.url.path.endswith(".html"):
         resp.headers["Cache-Control"] = "no-cache"
+    elif request.url.path.startswith("/assets/") and resp.status_code == 200:
+        resp.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     # DS 插件三桥（公式/AI 选区桥/文献引用桥）：config 由 web-apps（DS 源）跨源 fetch
     # （Plugins.getPlugins 对失败静默吞掉——缺 CORS 头时插件 iframe 直接不创建，无任何报错），
