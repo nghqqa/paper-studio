@@ -104,6 +104,7 @@ ROUTE_ROLE = {
     # 状态流转 reviewer 进门（与 agent/proposals 同门槛；真正改正文由编辑器 canEdit 把守） ----
     "/api/projects/{pid}/paper-proposals": "viewer",
     "/api/projects/{pid}/paper-proposals/generate": "viewer",
+    "/api/projects/{pid}/paper-proposals/disclosure": "viewer",
     "/api/projects/{pid}/paper-proposals/{proposal_id}": "viewer",
     "/api/projects/{pid}/paper-proposals/{proposal_id}/status": "reviewer",
 }

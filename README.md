@@ -10,6 +10,7 @@
     <a href="https://github.com/nghqqa/paper-studio/issues">Issues</a>
   </p>
   <p>
+    <a href="https://github.com/nghqqa/paper-studio/actions/workflows/ci.yml"><img src="https://github.com/nghqqa/paper-studio/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-166534" alt="License: Apache-2.0" /></a>
     <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB" alt="Python 3.11+" /></a>
     <a href="frontend/package.json"><img src="https://img.shields.io/badge/React-19-149ECA" alt="React 19" /></a>
@@ -36,7 +37,7 @@
   - **Scientific Figure Plugin**: Generate data charts (line, bar, scatter, pie) or draw method diagrams in **Excalidraw** (`.excalidraw` scene persisted + high-DPI PNG export) and insert/update directly in Word or publish into LaTeX `figures/`.
 
 ### Academic Workflow & Collaboration
-- **Proposal-Confirmation AI Contract**: AI never silently overwrites manuscript source. Every reading, polishing, rewriting, or LaTeX compile-fix suggestion is generated as an auditable diff proposal that requires explicit human review (accept / edit & accept / reject / undo). Supports both organization-wide AI quotas and per-user BYOK API keys.
+- **Proposal-Confirmation AI Contract & AI Usage Disclosure**: AI never silently overwrites manuscript source. Every reading, polishing, rewriting, or LaTeX compile-fix suggestion is generated as an auditable diff proposal that requires explicit human review (accept / edit & accept / reject / undo). Supports both organization-wide AI quotas, per-user BYOK API keys, and **one-click export of deterministic bilingual AI Usage Disclosure statements** (Markdown / LaTeX `\section*{AI Usage Disclosure}`) strictly verified against the project proposal log.
 - **Zotero v2 & Literature Library**: Import via BibTeX, DOI, arXiv, OpenAlex, Crossref, or Zotero (public groups and private/personal libraries with encrypted/masked per-user API keys and incremental refresh).
 - **Multi-Round Rebuttal & Response Letter**: Split reviewer comments into structured items, link to manuscript comment anchors, track multiple revision rounds, and export formatted Response Letters (`.md` / `.tex` / Word tab).
 - **Submission Preflight Checks**: Read-only rule sets for Chinese journals (`jcip-preflight`, `cn-general`), double-blind anonymization (`double-blind`), and LaTeX structural checks.

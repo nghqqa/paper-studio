@@ -2,6 +2,12 @@
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('@/components/attachments/AttachmentPdf', () => ({
+  default: () => null,
+  AttachmentPdf: () => null,
+}))
+
 import { StructPreviewPane, type PreviewState } from '../StructPreviewPane'
 
 /** 预览面板纯组件合约：状态标签/同链路声明/SHA 与版本/stale 过期标记/失败诊断与重试。 */

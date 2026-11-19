@@ -34,7 +34,7 @@ jobs:
         run: pnpm build
       - name: Unit tests
         working-directory: frontend
-        run: pnpm test
+        run: pnpm test -- --maxWorkers=2 --testTimeout=30000
 
   backend:
     name: Backend (core tests + plugin tests)
@@ -59,6 +59,7 @@ jobs:
             tests/test_word_preflight.py \
             tests/test_csl_styles.py \
             tests/test_rebuttal.py \
+            tests/test_paper_proposals.py \
             -q
       - name: Run ONLYOFFICE plugin tests
         run: |

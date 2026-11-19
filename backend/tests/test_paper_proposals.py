@@ -372,3 +372,72 @@ def test_domain_locate_and_analysis():
     # 状态机
     assert "applied" in pp.TRANSITIONS["pending"] and "undone" in pp.TRANSITIONS["applied"]
     assert not pp.TRANSITIONS["rejected"]
+
+
+def test_ai_usage_disclosure_report_and_permissions(env, monkeypatch):
+    """AI 使用披露声明：空台账如实声明未用 AI；采纳/人工改写/保护项/撤销精确统计；中英×MD/LaTeX 与权限矩阵。"""
+    c, pid = _setup(env, "disc-owner@pp.example.com")
+    # 1. 空台账：如实声明未采纳 AI 提案
+    r0 = c.get(f"/api/projects/{pid}/paper-proposals/disclosure")
+    assert r0.status_code == 200, r0.text
+    d0 = r0.json()
+    assert d0["summary"]["used_ai"] is False
+    assert d0["summary"]["applied_count"] == 0
+    assert "未采纳任何 AI" in d0["content"]
+    assert d0["filename"] == "ai-disclosure-zh.md"
+
+    # 2. 生成 3 条提案：1 条采纳（人工二次编辑 + 数值保护触发）、1 条采纳后撤销、1 条拒绝
+    main = _read_main(c, pid)
+    _mock_chat(monkeypatch, '{"text": "精度达到 98.5% 且延迟更低。", "rationale": "提升清晰度"}')
+    p1 = c.post(f"/api/projects/{pid}/paper-proposals/generate", json={
+        "mode": "latex", "file": "main.tex", "base_sha": main["sha"],
+        "original_text": "精度达到 95.0% 且延迟较低。", "action": "polish"}).json()["proposal"]["proposal_id"]
+    c.post(f"/api/projects/{pid}/paper-proposals/{p1}/status", json={
+        "status": "applied", "applied_text": "精度达到 95.0%，推理延迟进一步下降。"})
+
+    _mock_chat(monkeypatch, '{"text": "第二条建议文本。", "rationale": "精简"}')
+    p2 = c.post(f"/api/projects/{pid}/paper-proposals/generate", json={
+        "mode": "latex", "file": "main.tex", "base_sha": main["sha"],
+        "original_text": "第二条原始文本。", "action": "condense"}).json()["proposal"]["proposal_id"]
+    c.post(f"/api/projects/{pid}/paper-proposals/{p2}/status", json={"status": "applied"})
+    c.post(f"/api/projects/{pid}/paper-proposals/{p2}/status", json={"status": "undone"})
+
+    p3 = c.post(f"/api/projects/{pid}/paper-proposals/generate", json={
+        "mode": "latex", "file": "main.tex", "base_sha": main["sha"],
+        "original_text": "第三条原始文本。", "action": "deai"}).json()["proposal"]["proposal_id"]
+    c.post(f"/api/projects/{pid}/paper-proposals/{p3}/status", json={"status": "rejected"})
+
+    # 3. 中文 Markdown 汇总核验
+    rzh = c.get(f"/api/projects/{pid}/paper-proposals/disclosure?lang=zh&format=markdown")
+    assert rzh.status_code == 200
+    s = rzh.json()["summary"]
+    assert s["used_ai"] is True
+    assert s["total_proposals"] == 3
+    assert s["applied_count"] == 1
+    assert s["human_edited_count"] == 1
+    assert s["undone_count"] == 1
+    assert s["rejected_count"] == 1
+    assert s["protected_applied_count"] == 1
+    assert s["by_action"] == {"polish": 1}
+    assert "disc-owner@pp.example.com" not in rzh.json()["content"]  # 不泄露个人邮箱 PII
+
+    # 4. 英文 LaTeX 渲染与转义
+    ren = c.get(f"/api/projects/{pid}/paper-proposals/disclosure?lang=en&format=latex")
+    assert ren.status_code == 200
+    assert ren.json()["filename"] == "ai-disclosure-en.tex"
+    assert "\\section*{AI Usage Disclosure}" in ren.json()["content"]
+    assert "language polishing (1)" in ren.json()["content"]
+
+    # 5. 非法参数 422
+    assert c.get(f"/api/projects/{pid}/paper-proposals/disclosure?lang=fr").status_code == 422
+    assert c.get(f"/api/projects/{pid}/paper-proposals/disclosure?format=docx").status_code == 422
+
+    # 6. 权限矩阵：匿名 401 / 外人 404 / viewer 200
+    anon = TestClient(env["app"])
+    assert anon.get(f"/api/projects/{pid}/paper-proposals/disclosure").status_code == 401
+    outsider = env["register"]("disc-out@pp.example.com")
+    assert outsider.get(f"/api/projects/{pid}/paper-proposals/disclosure").status_code == 404
+    viewer = env["register"]("disc-view@pp.example.com")
+    r_inv = c.post(f"/api/projects/{pid}/invites", json={"email": "disc-view@pp.example.com", "role": "viewer"})
+    assert r_inv.status_code in (200, 201), r_inv.text
+    assert viewer.get(f"/api/projects/{pid}/paper-proposals/disclosure").status_code == 200

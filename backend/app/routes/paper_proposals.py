@@ -170,6 +170,17 @@ async def list_proposals(pid: str, request: Request, status: str | None = None, 
     return {"proposals": [p.model_dump(mode="json") for p in props]}
 
 
+@router.get("/paper-proposals/disclosure")
+async def get_disclosure(pid: str, request: Request, lang: str = "zh", format: str = "markdown"):
+    """只读导出 AI 使用披露声明（严格依据提案落盘台账，不调用 AI，不依赖机构 AI 开关）。"""
+    project = request.app.state.store.get(pid)
+    meta = getattr(project, "meta", None) or {}
+    sub = meta.get("submission") if isinstance(meta.get("submission"), dict) else {}
+    title = str(meta.get("title") or getattr(project, "title", "") or "").strip()
+    venue = str((sub or {}).get("venue") or "").strip()
+    return pp.build_disclosure(project.dir, pid, title=title, venue=venue, lang=lang, fmt=format)
+
+
 @router.get("/paper-proposals/{proposal_id}")
 async def get_proposal(pid: str, proposal_id: str, request: Request):
     project = request.app.state.store.get(pid)

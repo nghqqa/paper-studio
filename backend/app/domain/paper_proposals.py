@@ -23,6 +23,7 @@ import os
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -57,12 +58,30 @@ ACTION_LABELS = {
     "writing": "写作",
 }
 
+ACTION_LABELS_EN = {
+    "polish": "language polishing",
+    "academic": "academic style refinement",
+    "condense": "conciseness editing",
+    "expand": "explanatory expansion",
+    "custom": "custom revision",
+    "deai": "natural phrasing refinement",
+    "writing": "draft assistance",
+}
+
 PROTECTION_LABELS = {
     "numbers": "数值改动",
     "units": "单位改动",
     "citations": "引用键改动",
     "math": "公式改动",
     "refs": "ref/label 改动",
+}
+
+PROTECTION_LABELS_EN = {
+    "numbers": "numerical values",
+    "units": "measurement units",
+    "citations": "citation keys",
+    "math": "mathematical formulas",
+    "refs": "cross-references/labels",
 }
 
 
@@ -291,3 +310,220 @@ def locate(text: str, anchor: Anchor) -> dict:
             return {"ok": True, "start": s, "end": s + len(orig), "reason": "context"}
         return {"ok": False, "reason": "ambiguous"}
     return {"ok": False, "reason": "not_found"}
+
+
+# ---------------------------------------------------------------- AI 使用披露声明（只读确定性汇总） ----
+
+
+_LATEX_SPECIAL = str.maketrans({
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+})
+
+
+def _escape_latex(text: str) -> str:
+    return (text or "").translate(_LATEX_SPECIAL)
+
+
+def _iso_date(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def build_disclosure(
+    project_dir: str,
+    pid: str,
+    *,
+    title: str = "",
+    venue: str = "",
+    lang: str = "zh",
+    fmt: str = "markdown",
+) -> dict:
+    """基于 `.studio/paper-proposals/<pid>.jsonl` 生成确定性 AI 使用披露声明。
+
+    红线：只读、零模型调用、零虚构、不输出个人邮箱等 PII；仅依据真实落盘台账汇总。
+    """
+    if lang not in ("zh", "en"):
+        raise kind_error("validation", f"不支持的语言：{lang}（仅支持 zh / en）", detail=lang)
+    if fmt not in ("markdown", "latex"):
+        raise kind_error("validation", f"不支持的格式：{fmt}（仅支持 markdown / latex）", detail=fmt)
+
+    props = load(project_dir, pid)
+    by_status: dict[str, int] = {}
+    for p in props:
+        by_status[p.status] = by_status.get(p.status, 0) + 1
+
+    applied = [p for p in props if p.status == "applied"]
+    by_action: dict[str, int] = {}
+    protected_by_flag: dict[str, int] = {}
+    human_edited_count = 0
+    protected_applied_count = 0
+    models_seen: list[str] = []
+    files_seen: list[str] = []
+    timestamps: list[float] = []
+
+    for p in applied:
+        by_action[p.action] = by_action.get(p.action, 0) + 1
+        if p.applied_text is not None and p.applied_text.strip() != p.suggested_text.strip():
+            human_edited_count += 1
+        if p.protection_flags:
+            protected_applied_count += 1
+            for flag in p.protection_flags:
+                protected_by_flag[flag] = protected_by_flag.get(flag, 0) + 1
+        m = (p.model or "").strip()
+        if m and m not in models_seen:
+            models_seen.append(m)
+        fn = (p.anchor.file or "").strip()
+        if fn and fn not in files_seen:
+            files_seen.append(fn)
+        ts = p.applied_at or p.updated_at or p.created_at
+        if ts:
+            timestamps.append(float(ts))
+
+    time_range = None
+    if timestamps:
+        time_range = {"start": _iso_date(min(timestamps)), "end": _iso_date(max(timestamps))}
+
+    generated_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    summary = {
+        "used_ai": len(applied) > 0,
+        "total_proposals": len(props),
+        "applied_count": len(applied),
+        "human_edited_count": human_edited_count,
+        "rejected_count": by_status.get("rejected", 0),
+        "undone_count": by_status.get("undone", 0),
+        "pending_count": by_status.get("pending", 0),
+        "protected_applied_count": protected_applied_count,
+        "protected_by_flag": protected_by_flag,
+        "by_action": by_action,
+        "models": models_seen,
+        "files": files_seen,
+        "time_range": time_range,
+        "generated_at": generated_at,
+    }
+
+    action_order = ("polish", "academic", "condense", "expand", "deai", "writing", "custom")
+    if lang == "zh":
+        action_parts = [f"{ACTION_LABELS[a]}（{by_action[a]} 条）" for a in action_order if by_action.get(a)]
+        model_str = "、".join(models_seen) if models_seen else "未记录模型名称"
+        flag_parts = [f"{PROTECTION_LABELS.get(k, k)} {v} 次" for k, v in protected_by_flag.items()]
+        if not applied:
+            statement = (
+                "经 Paper Studio 平台提案审计台账核验，本稿件正文未采纳任何 AI 生成的修改或写作提案。"
+                f"（台账累计记录提案 {len(props)} 条，其中有效采纳 0 条，已拒绝 {summary['rejected_count']} 条，"
+                f"已撤销 {summary['undone_count']} 条。）稿件全部学术观点、实验数据与正文表述均由作者独立完成并承担全部学术责任。"
+            )
+        else:
+            date_clause = (
+                f"在 {time_range['start']} 至 {time_range['end']}（UTC）期间，"
+                if time_range and time_range["start"] != time_range["end"]
+                else (f"于 {time_range['start']}（UTC），" if time_range else "")
+            )
+            prot_clause = (
+                f"其中涉及受保护要素变更的 {protected_applied_count} 条提案（{'；'.join(flag_parts)}）"
+                "均触发了平台自动保护提示，并经作者逐条显式复核确认。"
+                if protected_applied_count
+                else "所有已采纳提案均未触发数值、单位、公式或引用键变更告警。"
+            )
+            statement = (
+                f"{date_clause}作者在稿件撰写与修订过程中借助 Paper Studio 的「提案-确认」辅助流程使用了 AI 工具"
+                f"（记录模型：{model_str}），具体用途限于{'、'.join(action_parts)}。"
+                f"平台台账累计生成提案 {len(props)} 条，经作者人工逐条审阅后最终有效采纳 {len(applied)} 条"
+                f"（其中 {human_edited_count} 条经作者二次人工改写后采纳；另拒绝 {summary['rejected_count']} 条、"
+                f"撤销 {summary['undone_count']} 条）。{prot_clause}"
+                "平台 AI 从未静默覆盖正文；全部研究设计、实验结果、逻辑论证与最终定稿均由作者核验并承担完整学术责任。"
+            )
+        if fmt == "markdown":
+            lines = ["## 人工智能使用声明（AI Usage Disclosure）", ""]
+            if title:
+                lines.append(f"- **稿件题目**：{title}")
+            if venue:
+                lines.append(f"- **目标期刊/会议**：{venue}")
+            lines.append(f"- **核验时间（UTC）**：{generated_at}")
+            lines.append(f"- **有效采纳 AI 提案**：{len(applied)} / {len(props)} 条（人工二次编辑 {human_edited_count} 条）")
+            if models_seen:
+                lines.append(f"- **涉及模型**：{model_str}")
+            lines.extend(["", statement, ""])
+            content = "\n".join(lines)
+        else:
+            meta_note = f"% Generated by Paper Studio on {generated_at} (applied={len(applied)}, total={len(props)})\n"
+            content = (
+                meta_note
+                + "\\section*{人工智能使用声明}\n"
+                + _escape_latex(statement)
+                + "\n"
+            )
+    else:
+        action_parts = [f"{ACTION_LABELS_EN[a]} ({by_action[a]})" for a in action_order if by_action.get(a)]
+        model_str = ", ".join(models_seen) if models_seen else "unspecified model"
+        flag_parts = [f"{PROTECTION_LABELS_EN.get(k, k)} ({v})" for k, v in protected_by_flag.items()]
+        if not applied:
+            statement = (
+                "Verified against the Paper Studio proposal audit log, no AI-generated revision or drafting "
+                f"proposals were accepted into this manuscript (total logged proposals: {len(props)}; "
+                f"accepted: 0; rejected: {summary['rejected_count']}; undone: {summary['undone_count']}). "
+                "All research ideas, data, analysis, and text were authored independently by the authors, "
+                "who take full responsibility for the content of the manuscript."
+            )
+        else:
+            date_clause = (
+                f"Between {time_range['start']} and {time_range['end']} (UTC), "
+                if time_range and time_range["start"] != time_range["end"]
+                else (f"On {time_range['start']} (UTC), " if time_range else "")
+            )
+            prot_clause = (
+                f"Of the accepted proposals, {protected_applied_count} triggered automated protection warnings "
+                f"({', '.join(flag_parts)}) and were explicitly reviewed and confirmed by the authors. "
+                if protected_applied_count
+                else "None of the accepted proposals triggered protection warnings for numbers, units, formulas, or citations. "
+            )
+            statement = (
+                f"{date_clause}the authors used AI-assisted editing tools ({model_str}) through Paper Studio's "
+                f"proposal-confirmation workflow strictly for {', '.join(action_parts)}. "
+                f"Out of {len(props)} generated proposals, {len(applied)} were accepted after human review "
+                f"({human_edited_count} further edited by the authors prior to acceptance; "
+                f"{summary['rejected_count']} rejected; {summary['undone_count']} undone). "
+                f"{prot_clause}"
+                "No AI output was applied silently without explicit human confirmation. The authors reviewed, "
+                "verified, and take full responsibility for all scientific claims, data, and final text."
+            )
+        if fmt == "markdown":
+            lines = ["## AI Usage Disclosure", ""]
+            if title:
+                lines.append(f"- **Manuscript**: {title}")
+            if venue:
+                lines.append(f"- **Target Venue**: {venue}")
+            lines.append(f"- **Audit Timestamp (UTC)**: {generated_at}")
+            lines.append(
+                f"- **Accepted AI Proposals**: {len(applied)} / {len(props)} "
+                f"(human-edited before acceptance: {human_edited_count})"
+            )
+            if models_seen:
+                lines.append(f"- **Models Recorded**: {model_str}")
+            lines.extend(["", statement, ""])
+            content = "\n".join(lines)
+        else:
+            meta_note = f"% Generated by Paper Studio on {generated_at} (applied={len(applied)}, total={len(props)})\n"
+            content = (
+                meta_note
+                + "\\section*{AI Usage Disclosure}\n"
+                + _escape_latex(statement)
+                + "\n"
+            )
+
+    ext = "tex" if fmt == "latex" else "md"
+    filename = f"ai-disclosure-{lang}.{ext}"
+    return {
+        "lang": lang,
+        "format": fmt,
+        "filename": filename,
+        "summary": summary,
+        "content": content,
+    }

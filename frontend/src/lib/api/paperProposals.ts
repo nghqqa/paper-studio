@@ -83,6 +83,31 @@ export const PROTECTION_LABELS: Record<string, string> = {
   refs: 'ref/label 改动',
 }
 
+export interface AiDisclosureSummary {
+  used_ai: boolean
+  total_proposals: number
+  applied_count: number
+  human_edited_count: number
+  rejected_count: number
+  undone_count: number
+  pending_count: number
+  protected_applied_count: number
+  protected_by_flag: Record<string, number>
+  by_action: Record<string, number>
+  models: string[]
+  files: string[]
+  time_range: { start: string; end: string } | null
+  generated_at: string
+}
+
+export interface AiDisclosureResponse {
+  lang: 'zh' | 'en'
+  format: 'markdown' | 'latex'
+  filename: string
+  summary: AiDisclosureSummary
+  content: string
+}
+
 export const paperProposalApi = {
   generate: (pid: string, body: {
     mode: 'latex' | 'word'
@@ -120,6 +145,16 @@ export const paperProposalApi = {
       `/api/projects/${encodeURIComponent(pid)}/paper-proposals/${encodeURIComponent(proposalId)}/verify-fix`,
       { method: 'POST', body: JSON.stringify({}) },
     ),
+  /** 只读生成 AI 使用披露声明（基于项目真实提案台账，支持中英 × Markdown/LaTeX）。 */
+  disclosure: (pid: string, params?: { lang?: 'zh' | 'en'; format?: 'markdown' | 'latex' }) => {
+    const q = new URLSearchParams()
+    if (params?.lang) q.set('lang', params.lang)
+    if (params?.format) q.set('format', params.format)
+    const qs = q.toString()
+    return req<AiDisclosureResponse>(
+      `/api/projects/${encodeURIComponent(pid)}/paper-proposals/disclosure${qs ? `?${qs}` : ''}`,
+    )
+  },
 }
 
 /** 论文精读（只读分析，不产生提案、不修改文档）。 */

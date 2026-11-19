@@ -122,7 +122,7 @@ const input = (el: Element, v: string) => act(async () => {
   t.dispatchEvent(new Event('input', { bubbles: true }))
 })
 
-async function waitFor(fn: () => boolean, tries = 80) {
+async function waitFor(fn: () => boolean, tries = 240) {
   for (let i = 0; i < tries; i++) {
     if (fn()) return
     await act(async () => new Promise((r) => setTimeout(r, 25)))

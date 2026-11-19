@@ -10,6 +10,7 @@
     <a href="https://github.com/nghqqa/paper-studio/issues">问题反馈</a>
   </p>
   <p>
+    <a href="https://github.com/nghqqa/paper-studio/actions/workflows/ci.yml"><img src="https://github.com/nghqqa/paper-studio/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/License-Apache_2.0-166534" alt="License: Apache-2.0" /></a>
     <a href="backend/pyproject.toml"><img src="https://img.shields.io/badge/Python-3.11%2B-3776AB" alt="Python 3.11+" /></a>
     <a href="frontend/package.json"><img src="https://img.shields.io/badge/React-19-149ECA" alt="React 19" /></a>
@@ -36,7 +37,7 @@
   - **科研图表与方法图**：支持折线/柱状/散点/饼图数据图以及 **Excalidraw 方法图**（持久化 `.excalidraw` 场景真源 + 高清 PNG 导出），一键插入/原位更新 Word 正文或发布至 LaTeX `figures/`。
 
 ### 2. 学术写作与团队协作闭环
-- **AI 提案-确认安全契约**：AI 绝不静默改写作者正文。所有精读、润色、改写与 LaTeX 编译错误修复均生成可审阅的差异提案，经人工采纳/编辑后采纳/拒绝/撤销，全程可追溯；支持机构级每日配额与个人自带 API Key（BYOK，凭据不明文回传）。
+- **AI 提案-确认安全契约与一键 AI 披露声明**：AI 绝不静默改写作者正文。所有精读、润色、改写与 LaTeX 编译错误修复均生成可审阅的差异提案，经人工采纳/编辑后采纳/拒绝/撤销，全程可追溯；支持机构级每日配额、个人自带 API Key（BYOK，凭据不明文回传），以及**基于真实提案台账一键导出中英双语 AI 使用披露声明**（Markdown / LaTeX `\section*{AI Usage Disclosure}`，零编造、可直接附于期刊/顶会投稿）。
 - **文献管理与 Zotero v2**：支持 BibTeX / 7714 文本导入、DOI/arXiv/Crossref/OpenAlex 检索，以及 Zotero 公开群组与个人/私有库增量刷新（用户级加密凭据隔离）。
 - **多轮 Rebuttal 与回复信**：审稿意见自动/手动拆条、关联批注锚点、多轮归档（只读历史）并导出 `.md` / `.tex` 或 Word 回复信。
 - **投稿前体检（Preflight）**：只读检查双语摘要与关键词、章节编号、模板占位残留、未处理修订/批注、引用完整性与双盲匿名化。
