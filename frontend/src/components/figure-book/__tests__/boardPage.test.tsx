@@ -94,6 +94,8 @@ beforeEach(() => {
   window.location.hash = '#/p/p1/board'
   updateScene.mockClear()
   sceneEls = [{ id: 'e1', type: 'rectangle' }]
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:mock-preview')
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {})
 })
 
 afterEach(async () => {
