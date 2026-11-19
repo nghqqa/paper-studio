@@ -150,7 +150,7 @@ ALLOWED_FONT_PREFIXES: tuple[str, ...] = (
 SENSITIVE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("private-vps-ip", re.compile(r"159\.75\.42\.106")),
     ("private-lab-ip", re.compile(r"10\.13\.2\.23")),
-    ("private-domain", re.compile(r"(?:paper|ds|ds-cdn)\.nghqqa\.cn")),
+    ("private-domain", re.compile(r"(?:ds|ds-cdn)\.nghqqa\.cn")),
     ("personal-qq-email", re.compile(r"2801511808@qq\.com", re.IGNORECASE)),
     ("personal-gmail", re.compile(r"q2801511808@gmail\.com", re.IGNORECASE)),
     ("personal-wechat", re.compile(r"x2801511808", re.IGNORECASE)),

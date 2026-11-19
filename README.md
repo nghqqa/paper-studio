@@ -4,9 +4,10 @@
   <p><strong>Self-hosted collaborative academic writing platform for research teams — native Word &amp; LaTeX in one workspace.</strong></p>
   <p>
     <a href="README.zh-CN.md"><strong>中文文档</strong></a> ·
+    <a href="https://paper.nghqqa.cn"><strong>Website</strong></a> ·
     <a href="#quick-start">Quick Start</a> ·
     <a href="#key-features">Features</a> ·
-    <a href="#honest-boundaries">Honest Boundaries</a> ·
+    <a href="#commercial-support--custom-deployment">Custom Support</a> ·
     <a href="https://github.com/nghqqa/paper-studio/issues">Issues</a>
   </p>
   <p>
@@ -99,6 +100,16 @@ We prefer being transparent about current technical boundaries:
 - **Word Citations & Equation Numbering**: Because ONLYOFFICE CE does not expose native Word citation/SEQ fields, citations and equation numbers are platform-managed text/tab-stops with one-click renumbering and integrity verification.
 - **Desktop Word / WPS Fidelity**: Paper Studio preserves font names in `.docx` without redistributing commercial fonts. Mount licensed fonts into `./fonts` on the server and verify final pagination in desktop Word/WPS before submission.
 - **LaTeX Concurrency**: LaTeX source editing uses optimistic locking (`base_sha` conflict detection) rather than real-time CRDT co-editing.
+
+## Commercial Support & Custom Deployment
+
+Paper Studio is free and open-source under **Apache-2.0**. For universities, research labs, hospitals, or institutes that need dedicated assistance, we also offer commercial support:
+
+- **Private / Air-Gapped Deployment**: On-premise installation, HTTPS/reverse-proxy tuning, font setup, and backup drills.
+- **Institutional Integration**: Campus SSO (CAS / LDAP / OIDC), custom AI gateway routing, and role/audit policy tailoring.
+- **Custom Journal & Thesis Templates**: Verified Word (`.docx`) and LaTeX template packs + venue-specific preflight rulesets.
+
+Visit our official site at **[paper.nghqqa.cn](https://paper.nghqqa.cn)** (contact details listed in the footer) or open a thread in **[GitHub Discussions](https://github.com/nghqqa/paper-studio/discussions)**.
 
 ## License & Acknowledgments
 

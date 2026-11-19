@@ -4,9 +4,10 @@
   <p><strong>面向科研团队的开源自托管论文协作平台——原生 Word 期刊模板与 LaTeX 工程收进同一个项目</strong></p>
   <p>
     <a href="README.md"><strong>English</strong></a> ·
+    <a href="https://paper.nghqqa.cn"><strong>官网入口</strong></a> ·
     <a href="#快速开始">快速开始</a> ·
     <a href="#核心能力">核心能力</a> ·
-    <a href="#已知边界">已知边界</a> ·
+    <a href="#私有化部署与定制服务">私有化定制</a> ·
     <a href="https://github.com/nghqqa/paper-studio/issues">问题反馈</a>
   </p>
   <p>
@@ -99,6 +100,16 @@ docker compose up -d
 - **Word 引用与公式编号**：受限于 ONLYOFFICE 社区版未开放原生 Word 引文域与 SEQ 域，目前采用平台托管文本/制表位机制，配合一键重排与完整性校验闭环。
 - **桌面 Word / WPS 版式保真**：仓库不分发受版权限制的商业中文字体；可在服务器 `./fonts` 目录挂载已授权字体，并在正式投稿前使用桌面 Word / WPS 核对最终分页。
 - **LaTeX 并发编辑**：采用基于 `base_sha` 的乐观并发冲突保护，暂不支持类似 Overleaf 的多人实时光标同编同一 `.tex` 文件。
+
+## 私有化部署与定制服务
+
+研稿（Paper Studio）核心代码基于 **Apache-2.0** 协议永久开源免费。若贵校课题组、学院、医院科研科或研究院需要省心的落地与定制支持，我们提供以下商业化服务：
+
+- **实验室 / 院系私有化部署**：内网/离线环境交付、HTTPS 反代与 ONLYOFFICE 调优、期刊授权字体配置与灾备备份方案。
+- **校内系统集成**：统一身份认证（CAS / LDAP / OIDC）对接、校内大模型网关接入、院系级配额与审计策略定制。
+- **专属模板与投稿规则定制**：学位论文 / 目标中文核心与英文顶会 Word & LaTeX 模板适配、专属投稿前检查规则集开发。
+
+有私有化部署或定制化需求，请访问官网 **[https://paper.nghqqa.cn](https://paper.nghqqa.cn)**（页面底部提供直接联系方式），或在 **[GitHub Discussions](https://github.com/nghqqa/paper-studio/discussions)** 留言沟通。
 
 ## 开源许可与致谢
 

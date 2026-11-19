@@ -142,6 +142,8 @@ export interface UiSlice extends UiPersisted {
   structWriterEnabled: boolean | null
   wordEditorEnabled: boolean | null
   wordEditorReady: boolean | null
+  /** 站点公开联系方式（/api/meta.contact；部署方通过环境变量可选配置） */
+  siteContact: { email: string; wechat: string; note: string }
   fetchMeta(): Promise<void>
   dialog: DialogId | null
   /** 「新建分案」上下文：非空时 CreateProjectDialog 以本案为母案建子案（W19 批7） */
@@ -277,14 +279,33 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
   structWriterEnabled: null,
   wordEditorEnabled: null,
   wordEditorReady: null,
+  siteContact: { email: '', wechat: '', note: '' },
   async fetchMeta() {
     set({ metaError: null })
     try {
       const r = await fetch('/api/meta', { cache: 'no-store' })
       if (!r.ok) throw new Error('工作区配置加载失败')
-      const m = (await r.json()) as { product: ProductMode; docx_export: boolean; struct_writer?: boolean; word_editor?: boolean; word_editor_ready?: boolean }
+      const m = (await r.json()) as {
+        product: ProductMode
+        docx_export: boolean
+        struct_writer?: boolean
+        word_editor?: boolean
+        word_editor_ready?: boolean
+        contact?: { email?: string; wechat?: string; note?: string }
+      }
       if (m.product !== 'paper' && m.product !== 'patent') throw new Error('工作区配置不完整')
-      set({ product: m.product, docxExportEnabled: Boolean(m.docx_export), structWriterEnabled: Boolean(m.struct_writer), wordEditorEnabled: Boolean(m.word_editor), wordEditorReady: Boolean(m.word_editor_ready) })
+      set({
+        product: m.product,
+        docxExportEnabled: Boolean(m.docx_export),
+        structWriterEnabled: Boolean(m.struct_writer),
+        wordEditorEnabled: Boolean(m.word_editor),
+        wordEditorReady: Boolean(m.word_editor_ready),
+        siteContact: {
+          email: (m.contact?.email || '').trim(),
+          wechat: (m.contact?.wechat || '').trim(),
+          note: (m.contact?.note || '').trim(),
+        },
+      })
     } catch { set({ metaError: '暂时无法连接工作区，请检查服务后重试。' }) }
   },
   outlineOpen: true,

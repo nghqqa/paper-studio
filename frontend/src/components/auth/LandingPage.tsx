@@ -3,6 +3,7 @@ import { ArrowRight, BookOpenCheck, CheckCircle2, FileText, GraduationCap, Landm
 import { Button } from '@/components/ui/button'
 import { BrandMark } from '@/components/auth/AuthFrame'
 import { BRAND_CAPABILITIES, BRAND_NAME_FULL, BRAND_TAGLINE, brandCopyright } from '@/lib/brand'
+import { useStudio } from '@/store'
 
 /**
  * 产品落地页（anon 访客入口）：顶栏 + hero + 数字带 + 能力卡 + 深介栏 + 适用角色 + FAQ + 收尾 CTA + 页脚。
@@ -58,6 +59,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 }
 
 export function LandingPage() {
+  const siteContact = useStudio((s) => s.siteContact)
+  const contactEmail = siteContact.email || import.meta.env.VITE_CONTACT_EMAIL || ''
+  const contactWechat = siteContact.wechat || ''
+  const contactNote = siteContact.note || ''
   useEffect(() => {
     document.title = `${BRAND_NAME_FULL} — 论文写作与审阅工作空间`
   }, [])
@@ -73,6 +78,7 @@ export function LandingPage() {
             <a href="#features" className="text-sm text-fg-muted hover:text-fg transition-colors max-md:hidden">功能</a>
             <a href="#scenes" className="text-sm text-fg-muted hover:text-fg transition-colors max-md:hidden">场景</a>
             <a href="#faq" className="text-sm text-fg-muted hover:text-fg transition-colors max-md:hidden">FAQ</a>
+            <a href="https://github.com/nghqqa/paper-studio" target="_blank" rel="noreferrer" className="text-sm text-fg-muted hover:text-fg transition-colors max-sm:hidden">GitHub</a>
             <LoginLink />
             <Button asChild size="sm">
               <a href="#/login">进入工作台</a>
@@ -267,13 +273,16 @@ export function LandingPage() {
             <a href="#/legal/privacy" className="hover:text-fg transition-colors">隐私政策</a>
             <a href="#/legal/copyright" className="hover:text-fg transition-colors">版权与免责声明</a>
           </span>
-          <span className="flex items-center gap-4">
-            <a href="https://github.com/nghqqa/paper-studio" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-fg transition-colors"><Mail className="size-3.5" aria-hidden />GitHub</a>
-            <a href="https://github.com/nghqqa/paper-studio/issues" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-fg transition-colors"><MessageSquare className="size-3.5" aria-hidden />反馈与讨论</a>
-            {import.meta.env.VITE_CONTACT_EMAIL && (
-              <a href={`mailto:${import.meta.env.VITE_CONTACT_EMAIL}`} className="flex items-center gap-1.5 hover:text-fg transition-colors">{import.meta.env.VITE_CONTACT_EMAIL}</a>
+          <span className="flex flex-wrap items-center gap-4">
+            <a href="https://github.com/nghqqa/paper-studio" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-fg transition-colors">GitHub</a>
+            <a href="https://github.com/nghqqa/paper-studio/issues" target="_blank" rel="noreferrer" className="flex items-center gap-1.5 hover:text-fg transition-colors">反馈与讨论</a>
+            {contactEmail && (
+              <a href={`mailto:${contactEmail}`} className="flex items-center gap-1.5 hover:text-fg transition-colors"><Mail className="size-3.5" aria-hidden />{contactEmail}</a>
             )}
-            <span className="flex items-center gap-1.5"><Landmark className="size-3.5" aria-hidden />Apache-2.0 开源可自托管</span>
+            {contactWechat && (
+              <span className="flex items-center gap-1.5" title="微信号"><MessageSquare className="size-3.5" aria-hidden />微信 {contactWechat}</span>
+            )}
+            <span className="flex items-center gap-1.5"><Landmark className="size-3.5" aria-hidden />{contactNote || 'Apache-2.0 开源可自托管'}</span>
           </span>
         </div>
       </footer>
