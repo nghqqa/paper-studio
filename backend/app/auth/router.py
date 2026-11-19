@@ -102,7 +102,11 @@ if config.AUTH_ON:
                 await session.commit()
                 await session.refresh(demo_user)
         # 首次进入若名下无项目，自动生成 1 份全功能演示论文
-        store = request.app.state.store
+        store = getattr(request.app.state, "store", None)
+        if store is None:
+            from app.main import store as _legacy_store
+
+            store = _legacy_store
         visible = await auth.visible_pids(demo_user, store.list_ids())
         if not visible:
             from app.domain import showcase
