@@ -1,0 +1,89 @@
+# Paper Studio (研稿) — Self-hosted deployment
+#
+# Quick start (LaTeX + AI + Zotero + Figures + Rebuttal):
+#   cp .env.example .env   # set PAPER_STUDIO_SECRET
+#   docker compose up -d
+#
+# Full mode (adds native Word editing via ONLYOFFICE Docs CE, AGPLv3):
+#   # also set ONLYOFFICE_JWT_SECRET and PAPER_STUDIO_ONLYOFFICE_URL in .env
+#   docker compose --profile word up -d
+name: paper-studio
+
+services:
+  app:
+    image: ${PAPER_STUDIO_IMAGE:-ghcr.io/nghqqa/paper-studio:latest}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APT_MIRROR: ${APT_MIRROR:-}
+        PYPI_MIRROR: ${PYPI_MIRROR:-}
+        NPM_MIRROR: ${NPM_MIRROR:-}
+    ports:
+      - "${PAPER_PORT:-8000}:8000"
+    volumes:
+      - paper-data:/data
+    environment:
+      PAPER_STUDIO_AUTH: ${PAPER_STUDIO_AUTH:-on}
+      PAPER_STUDIO_PRODUCT: paper
+      PAPER_STUDIO_SECRET: ${PAPER_STUDIO_SECRET:?Please set PAPER_STUDIO_SECRET in .env (>=32 random chars)}
+      PAPER_STUDIO_COOKIE_SECURE: ${PAPER_STUDIO_COOKIE_SECURE:-off}
+      PAPER_STUDIO_TEMPLATE_AUTO_ACCEPT: ${PAPER_STUDIO_TEMPLATE_AUTO_ACCEPT:-on}
+      PAPER_STUDIO_DOCX_EXPORT: ${PAPER_STUDIO_DOCX_EXPORT:-on}
+      PAPER_STUDIO_DOCX_EXPORT_RUNTIME: local
+      PAPER_STUDIO_LATEX_CONCURRENCY: ${PAPER_STUDIO_LATEX_CONCURRENCY:-1}
+      PAPER_STUDIO_DOCX_EXPORT_CONCURRENCY: ${PAPER_STUDIO_DOCX_EXPORT_CONCURRENCY:-1}
+      PAPER_STUDIO_LATEX_RLIMIT_AS_GB: ${PAPER_STUDIO_LATEX_RLIMIT_AS_GB:-2}
+      PAPER_STUDIO_ARTIFACT_KEEP: ${PAPER_STUDIO_ARTIFACT_KEEP:-20}
+      PAPER_STUDIO_WORD_EDITOR: ${PAPER_STUDIO_WORD_EDITOR:-on}
+      PAPER_STUDIO_ONLYOFFICE_URL: ${PAPER_STUDIO_ONLYOFFICE_URL:-http://127.0.0.1:9980}
+      PAPER_STUDIO_ONLYOFFICE_INTERNAL_URL: ${PAPER_STUDIO_ONLYOFFICE_INTERNAL_URL:-http://onlyoffice}
+      PAPER_STUDIO_PUBLIC_ORIGIN: ${PAPER_STUDIO_PUBLIC_ORIGIN:-http://127.0.0.1:${PAPER_PORT:-8000}}
+      PAPER_STUDIO_ONLYOFFICE_PUBLIC_URL: ${PAPER_STUDIO_ONLYOFFICE_PUBLIC_URL:-http://app:8000}
+      PAPER_STUDIO_ONLYOFFICE_JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:-}
+      TZ: ${TZ:-Asia/Shanghai}
+    mem_limit: ${BACKEND_MEM:-2g}
+    cpus: ${BACKEND_CPUS:-2}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  # Optional: ONLYOFFICE Docs Community Edition (AGPLv3, up to 20 concurrent connections).
+  # Enable via `docker compose --profile word up -d` or `COMPOSE_PROFILES=word` in .env.
+  onlyoffice:
+    profiles: ["word"]
+    image: onlyoffice/documentserver:${ONLYOFFICE_IMAGE_TAG:-10.0.0}
+    ports:
+      - "${ONLYOFFICE_BIND:-0.0.0.0}:${ONLYOFFICE_PORT:-9980}:80"
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${ONLYOFFICE_JWT_SECRET:?Please set ONLYOFFICE_JWT_SECRET in .env when using --profile word}
+      JWT_HEADER: Authorization
+      JWT_IN_BODY: "true"
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      ALLOW_META_IP_ADDRESS: "false"
+      GENERATE_FONTS: "true"
+    volumes:
+      - onlyoffice-data:/var/www/onlyoffice/Data
+      - onlyoffice-cache:/var/lib/onlyoffice
+      # Optional: mount licensed journal fonts here (e.g. SimSun/SimHei) without rebuilding.
+      - ${ONLYOFFICE_FONTS_DIR:-./fonts}:/usr/share/fonts/truetype/custom:ro
+    shm_size: 256m
+    mem_limit: ${ONLYOFFICE_MEM:-4g}
+    cpus: ${ONLYOFFICE_CPUS:-2}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1/healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+
+volumes:
+  paper-data:
+  onlyoffice-data:
+  onlyoffice-cache:

@@ -1,0 +1,24 @@
+{
+  "name": "科研图表",
+  "nameLocale": { "en": "Research charts", "zh": "科研图表" },
+  "guid": "asc.{52544330-8A1E-4B2C-9A15-3F7D6E2C1B90}",
+  "version": "1.0.0",
+  "minVersion": "10.0.0",
+  "variations": [
+    {
+      "description": "科研图表：数据生成新图或插入项目图表库快照",
+      "url": "index.html",
+      "icons": ["icon.svg", "icon.svg"],
+      "type": "panelRight",
+      "isVisual": true,
+      "isInsideMode": true,
+      "isModal": false,
+      "isViewer": false,
+      "isDisplayedInViewer": false,
+      "EditorsSupport": ["word"],
+      "initDataType": "none",
+      "initData": "",
+      "buttons": []
+    }
+  ]
+}

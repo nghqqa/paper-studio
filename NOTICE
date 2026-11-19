@@ -1,0 +1,38 @@
+研稿 · Paper Studio
+Copyright 2026 Paper Studio Contributors
+
+本项目源代码以 Apache License 2.0 发布（见 LICENSE 文件）。
+
+上游致谢与衍生声明（Apache-2.0 §4）
+------------------------------------
+本项目演进自开源项目 Patent Studio（https://github.com/wookat/patent-studio，
+Copyright 2026 wookat，Apache License 2.0）。在原始工作空间、提案-确认安全契约
+与基础设施之上，重构并扩展为面向科研论文写作与审阅的 Paper Studio 平台。
+
+第三方组件与数据许可
+--------------------
+1. ONLYOFFICE Docs 社区版（可选独立容器）
+   采用 AGPLv3 许可，作为独立进程与容器部署，不与本项目代码静态或动态链接；
+   部署与二次修改时请遵守 ONLYOFFICE 上游许可条款。
+
+2. 引文样式（backend/app/csl/*.csl）
+   来自 Zotero Citation Style Language 官方样式仓库
+   （https://github.com/citation-style-language/styles），
+   采用 CC BY-SA 3.0 许可，各文件内保留原始 <rights> 声明。
+
+3. 内置 LaTeX 模板种子（backend/app/latex_seed/*）
+   各模板源码遵循其原始上游许可（如 CTAN IEEEtran/llncs/elsarticle 为 LPPL，
+   ACL/ICLR/CVPR/NeurIPS 遵循各自官方作者套件条款），逐项记录于对应目录的
+   SOURCES.md 文件中。
+
+4. 内置开源中文学术 Word 模板（backend/app/word_templates/jcip/template.docx）
+   由 backend/scripts/gen_cn_academic_word_template.py 原创生成，采用 Apache-2.0
+   许可，不包含任何第三方期刊原始文档。
+
+5. 前端核心开源依赖
+   KaTeX、Excalidraw、CodeMirror 6 等均遵循各自 MIT 许可协议。
+
+6. 字体声明
+   本仓库不分发任何商业或受限字体文件。容器内 LaTeX 编译使用随 TeXLive 分发的
+   开源 Fandol 字体（GUST Font License / LPPL）；Word 渲染所需商业字体请由部署方
+   自行获得授权后挂载至容器自定义字体目录。

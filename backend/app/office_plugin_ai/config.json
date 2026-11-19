@@ -1,0 +1,25 @@
+{
+  "name": "论文助手选区桥",
+  "guid": "asc.{C4D8E2F1-A3B5-4C6D-8E9F-0A1B2C3D4E5F}",
+  "version": "1.1.2",
+  "minVersion": "10.0.0",
+  "variations": [
+    {
+      "description": "把编辑器选中文本推送给论文助手侧栏（应用内原生面板），不显示插件界面",
+      "url": "index.html",
+      "icons": [
+        "icon.svg",
+        "icon.svg"
+      ],
+      "isViewer": false,
+      "EditorsSupport": [
+        "word"
+      ],
+      "isVisual": false,
+      "isSystem": true,
+      "initDataType": "none",
+      "type": "background",
+      "buttons": []
+    }
+  ]
+}

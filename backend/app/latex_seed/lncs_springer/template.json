@@ -1,0 +1,11 @@
+{
+ "id": "lncs_springer",
+ "name": "Springer LNCS（ECCV 等）",
+ "desc": "LNCS 会议/丛书格式（ECCV/ECAI 等）",
+ "main": "main.tex",
+ "engine": "pdflatex",
+ "language": "英文",
+ "kind": "会议",
+ "venue": "Springer",
+ "verify": "verified"
+}

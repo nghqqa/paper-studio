@@ -1,0 +1,21 @@
+{
+ "profile": "jcip",
+ "mode": "tab",
+ "content_sha256": "a7b3f65b1867a9d80ccc4376643c9346984436c938dd8b6f258cae98687b3a3e",
+ "content_version": "v002-8d95fb",
+ "resource_digests": {},
+ "docx_sha256": "131f0f9b84d60a831ef1335a90fff9c77ddccbbd87364ad90f365d8178ebc825",
+ "latex_sha256": "6f4502f04c6556146633bcf3d727f9d01f0737f41a77cb0ca5b0e459033660df",
+ "numbering": {
+  "equations": null,
+  "figures": null,
+  "tables": null
+ },
+ "eqnum_paragraphs": 1,
+ "pandoc": "unavailable: module 'app.config' has no attribute 'PANDOC_BIN'",
+ "pid": "struct-paper",
+ "artifact": "paper-a7b3f65b1867-tab.docx",
+ "at": 1792501112,
+ "stale": false,
+ "engine": "pandoc+numbering/layout.lua（编号为静态文本，非 Word 域）"
+}

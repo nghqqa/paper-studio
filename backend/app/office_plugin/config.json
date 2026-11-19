@@ -1,0 +1,25 @@
+{
+  "name": "LaTeX公式",
+  "nameLocale": { "en": "LaTeX equations", "zh": "LaTeX公式" },
+  "guid": "asc.{A9E36E21-B3F6-4D8D-B19A-61CF0E853725}",
+  "version": "1.0.0",
+  "minVersion": "10.0.0",
+  "baseUrl": "",
+  "variations": [
+    {
+      "description": "LaTeX公式",
+      "url": "index.html",
+      "icons": ["icon.svg", "icon.svg"],
+      "type": "panelRight",
+      "isVisual": true,
+      "isInsideMode": true,
+      "isModal": false,
+      "isViewer": false,
+      "isDisplayedInViewer": false,
+      "EditorsSupport": ["word"],
+      "initDataType": "none",
+      "initData": "",
+      "buttons": []
+    }
+  ]
+}

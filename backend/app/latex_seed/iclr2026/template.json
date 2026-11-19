@@ -1,0 +1,14 @@
+{
+ "id": "iclr2026",
+ "name": "ICLR 2026",
+ "desc": "ICLR 2026 官方会议样式",
+ "main": "main.tex",
+ "engine": "pdflatex",
+ "language": "英文",
+ "kind": "会议",
+ "venue": "ICLR",
+ "year": "2026",
+ "mode": "review（默认匿名+行号）/final（\\iclrfinalcopy）",
+ "source": "github.com/ICLR/Master-Template iclr2026/",
+ "verify": "verified"
+}

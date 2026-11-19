@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "case_no": "",
+  "kind": "invention",
+  "status": "drafting",
+  "owner_user_id": null,
+  "client": "",
+  "applicants": [],
+  "inventors": [],
+  "tags": [],
+  "dates": {
+    "opened": "2026-10-20",
+    "target_filing": null,
+    "filed": null,
+    "application_no": null,
+    "publication": null,
+    "exam_request": null,
+    "grant": null
+  },
+  "priority": [],
+  "attorney": null,
+  "reviewer": null,
+  "client_contact": "",
+  "fee_status": null,
+  "deadlines": [],
+  "confirmations": [],
+  "archived": false,
+  "related": []
+}

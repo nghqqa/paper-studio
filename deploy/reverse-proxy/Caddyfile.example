@@ -1,0 +1,19 @@
+# Paper Studio — Caddy HTTPS Reverse Proxy Example
+# Replace paper.example.com and ds.example.com with your own domains.
+# Remember to set in .env:
+#   PAPER_STUDIO_COOKIE_SECURE=on
+#   PAPER_STUDIO_PUBLIC_ORIGIN=https://paper.example.com
+#   PAPER_STUDIO_ONLYOFFICE_URL=https://ds.example.com
+#   PAPER_STUDIO_ONLYOFFICE_PUBLIC_URL=http://app:8000   # inside same Docker network
+
+paper.example.com {
+    encode gzip zstd
+    reverse_proxy 127.0.0.1:8000
+}
+
+ds.example.com {
+    reverse_proxy 127.0.0.1:9980 {
+        header_up X-Forwarded-Host {host}
+        header_up X-Forwarded-Proto https
+    }
+}

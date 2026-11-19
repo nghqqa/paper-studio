@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LaTeX公式</title>
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="style.css">
+  <script src="vendor/katex/katex.min.js" defer></script>
+  <script src="core.js" defer></script>
+  <script src="native.js" defer></script>
+  <script src="app.js" defer></script>
+  <script src="views.js" defer></script>
+</head>
+<body>
+  <main>
+    <div id="plugin-scroll" class="plugin-scroll" role="region" aria-label="公式内容" tabindex="0">
+    <nav class="views" aria-label="插件视图">
+      <button type="button" class="view-tab active" data-view="view-formula">公式</button>
+    </nav>
+    <div class="content">
+    <div id="view-formula" class="view">
+    <header><p>输入 LaTeX，插入可编辑的 Word 原生公式。</p></header>
+    <p id="native-status" class="hint"></p>
+    <div id="status" class="status" role="status" aria-live="polite">正在连接文档编辑器…</div>
+    <section aria-labelledby="input-title">
+      <div class="section-title"><h2 id="input-title">新建公式</h2><span class="title-actions"><button id="auto-number" class="text-button" type="button" disabled>自动编号</button><button id="reset" class="text-button" type="button">新建</button></span></div>
+      <label for="latex">LaTeX 表达式</label>
+      <textarea id="latex" spellcheck="false" rows="4" placeholder="例如：\frac{a+b}{c}；带编号：E=mc^2#(2)"></textarea>
+      <div class="snippets" aria-label="常用公式">
+        <button type="button" data-snippet="\frac{a}{b}">分式</button>
+        <button type="button" data-snippet="x_{i}^{2}">上下标</button>
+        <button type="button" data-snippet="\sum_{i=1}^{n} x_i">求和</button>
+        <button type="button" data-snippet="\begin{pmatrix} a &amp; b \\ c &amp; d \end{pmatrix}">矩阵</button>
+      </div>
+      <label for="placement">插入方式</label>
+      <select id="placement"><option value="inline">行内公式 · 跟随正文</option><option value="display">独立公式 · 单独居中</option></select>
+      <div class="preview-title">公式预览</div>
+      <div id="preview" class="preview" aria-label="公式预览">在上方输入 LaTeX</div>
+      <p id="preview-error" class="error" role="alert" hidden></p>
+      <p class="hint">公式字号跟随正文光标处的设置。预览采用 KaTeX；文档中的排版由 Word 数学引擎完成，支持的 LaTeX 命令可能略有不同。</p>
+      <p class="hint">带编号公式使用无表格排版；分式与求和符号按行内公式样式显示。公式换行后，可使用下方的「编号另起一行」让编号单独靠右。</p>
+      <div id="target-info" class="target-info" hidden></div>
+    </section>
+    <section class="document-formulas" aria-labelledby="list-title">
+      <div class="section-title"><h2 id="list-title">文中公式 <span id="formula-count" class="count"></span></h2><span class="title-actions"><button id="check-refs" class="text-button" type="button" disabled>引用核对</button><button id="renumber-all" class="text-button" type="button" disabled>全文重编号</button><button id="refresh" class="text-button" type="button" disabled>刷新</button></span></div>
+      <p class="hint">点击一条公式，读取其 LaTeX 并定位所在段落；修改后点击“更新原公式”。带编号的公式可复制“式(n)”引用文本；正文双击公式也可定位到这里。</p>
+      <div id="formula-list" class="formula-list"><p class="empty">连接后显示文档中的原生公式。</p></div>
+      <div id="refs-report" class="refs-report" hidden></div>
+    </section>
+    <section class="document-formulas" aria-labelledby="number-title">
+      <div class="section-title"><h2 id="number-title">长公式编号</h2><button id="number-next-line" class="text-button" type="button" disabled>编号另起一行</button></div>
+      <p class="hint">将光标放在无表格编号公式段落中，点击后让编号单独靠右。适用于公式换行或编号位置拥挤的情况。</p>
+    </section>
+    <section class="document-formulas" aria-labelledby="legacy-title">
+      <div class="section-title"><h2 id="legacy-title">旧公式排版</h2><button id="convert-current" class="text-button" type="button" disabled>移除当前公式表格</button></div>
+      <p class="hint">先把光标放在旧版编号公式表格中，再点击转换。保留公式与编号，支持撤销；普通数据表格不会转换。</p>
+    </section>
+    </div><!-- /view-formula -->
+    </div><!-- /plugin-scroll -->
+    <footer class="action-bar" aria-label="公式操作">
+      <button id="submit" class="primary" type="button" aria-describedby="submit-hint" disabled>插入到光标位置</button>
+      <p id="submit-hint" class="hint">先在正文放置光标，Ctrl / ⌘ + Enter 确认。</p>
+    </footer>
+  </main>
+</body>
+</html>

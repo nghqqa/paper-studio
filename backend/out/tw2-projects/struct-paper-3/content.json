@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "title": "t",
+  "title_en": "",
+  "authors": "",
+  "affil": "",
+  "abstract_zh": "",
+  "abstract_en": "",
+  "keywords": "",
+  "body": [
+    {
+      "type": "h1",
+      "text": "引言"
+    },
+    {
+      "type": "p",
+      "text": ""
+    }
+  ]
+}

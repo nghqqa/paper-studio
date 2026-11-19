@@ -1,0 +1,41 @@
+%% Elsevier 期刊骨架（Pattern Recognition 等用 elsarticle 类）
+\documentclass[preprint,12pt]{elsarticle}
+
+\journal{Pattern Recognition}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Paper Title Here}
+
+\author[first]{First Author}
+\affiliation[first]{organization={University Name},
+            city={City},
+            country={Country}}
+\ead{author@example.com}
+
+\begin{abstract}
+Replace this text with your abstract.
+\end{abstract}
+
+\begin{keyword}
+keyword one \sep keyword two
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+Your introduction goes here. Inline math such as $x^2$ works as usual.
+
+\begin{equation}
+G = \frac{1}{n}\sum_{i=1}^{n} w_i x_i
+\label{eq:g}
+\end{equation}
+
+As shown in Eq.~\ref{eq:g}, the weighted average is defined.
+
+\section{Conclusion}
+Conclusion goes here.
+
+\end{document}

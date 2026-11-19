@@ -1,0 +1,3 @@
+# Windows 上 autocrlf 会把 shell 脚本写成 CRLF，镜像 entrypoint 因 shebang 带回车无法执行。
+# 强制所有 shell 脚本检出为 LF（对接手人环境一律生效）。
+*.sh text eol=lf

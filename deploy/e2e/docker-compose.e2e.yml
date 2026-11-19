@@ -1,0 +1,75 @@
+# 研稿 · E2E 回归隔离栈（与生产 8000 完全隔离：独立 compose 项目 / 端口 / 数据卷 / 独立密钥）。
+# 由 deploy/e2e/run_e2e.py 上传到服务器 ~/paper-e2e/ 并用 .env.e2e 驱动；不用于生产。
+# 镜像与生产同 tag（回归对象=发版候选镜像）；密钥由 run_e2e.py 首次启动时随机生成。
+name: paper-e2e
+
+services:
+  app:
+    image: paper-studio:${PAPER_IMAGE_TAG:-v0.4.1}
+    ports:
+      - "${E2E_APP_PORT:-8011}:8000"
+    volumes:
+      - e2e-data:/data
+    environment:
+      PATENT_STUDIO_AUTH: "on"
+      PATENT_STUDIO_PRODUCT: paper
+      PATENT_STUDIO_SECRET: ${PATENT_STUDIO_SECRET:?请在 .env.e2e 设置}
+      PATENT_STUDIO_COOKIE_SECURE: "off"
+      PATENT_STUDIO_DOCX_EXPORT: "on"
+      PATENT_STUDIO_DOCX_EXPORT_RUNTIME: local
+      PATENT_STUDIO_LATEX_CONCURRENCY: "1"
+      PATENT_STUDIO_DOCX_EXPORT_CONCURRENCY: "1"
+      PATENT_STUDIO_LATEX_RLIMIT_AS_GB: "2"
+      PATENT_STUDIO_ARTIFACT_KEEP: "20"
+      # 模板上传/替换后自动验收 + 缩略图（E2E 断言依赖，与生产同开）
+      PATENT_STUDIO_TEMPLATE_AUTO_ACCEPT: "on"
+      # Word 主线：浏览器走宿主映射端口；DS 回调/拉文档走容器网络。
+      PATENT_STUDIO_WORD_EDITOR: "on"
+      PATENT_STUDIO_ONLYOFFICE_URL: ${PATENT_STUDIO_ONLYOFFICE_URL:?请在 .env.e2e 设置}
+      PATENT_STUDIO_ONLYOFFICE_INTERNAL_URL: http://onlyoffice
+      PATENT_STUDIO_PUBLIC_ORIGIN: ${PATENT_STUDIO_PUBLIC_ORIGIN:?请在 .env.e2e 设置}
+      PATENT_STUDIO_ONLYOFFICE_PUBLIC_URL: http://app:8000
+      PATENT_STUDIO_ONLYOFFICE_JWT_SECRET: ${E2E_JWT_SECRET:?请在 .env.e2e 设置}
+      # 实验室出站慢（Zotero/AI 中转）：放宽外部源超时，避免回归套件误 SKIP
+      PATENT_STUDIO_LIBRARY_SOURCE_TIMEOUT: "30"
+      TZ: Asia/Shanghai
+    mem_limit: 4g
+    cpus: "2"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  onlyoffice:
+    image: onlyoffice/documentserver:${E2E_DS_IMAGE_TAG:-10.0.0}
+    ports:
+      - "${E2E_DS_PORT:-9981}:80"
+    environment:
+      JWT_ENABLED: "true"
+      JWT_SECRET: ${E2E_JWT_SECRET:?请在 .env.e2e 设置}
+      JWT_HEADER: Authorization
+      JWT_IN_BODY: "true"
+      ALLOW_PRIVATE_IP_ADDRESS: "true"
+      ALLOW_META_IP_ADDRESS: "false"
+      GENERATE_FONTS: "true"
+    volumes:
+      - e2e-ds-data:/var/www/onlyoffice/Data
+      - e2e-ds-cache:/var/lib/onlyoffice
+    shm_size: 256m
+    mem_limit: 4g
+    cpus: "2"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1/healthcheck"]
+      interval: 15s
+      timeout: 5s
+      start_period: 120s
+      retries: 12
+
+volumes:
+  e2e-data:
+  e2e-ds-data:
+  e2e-ds-cache:

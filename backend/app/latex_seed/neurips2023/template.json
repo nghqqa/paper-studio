@@ -1,0 +1,14 @@
+{
+ "id": "neurips2023",
+ "name": "NeurIPS（2023 版样式）",
+ "desc": "NeurIPS 官方样式（2024/2025 官方直链不可达，如实标注 2023 版）",
+ "main": "main.tex",
+ "engine": "pdflatex",
+ "language": "英文",
+ "kind": "会议",
+ "venue": "NeurIPS",
+ "year": "2023",
+ "mode": "review/final（[final] 选项已开）",
+ "source": "media.neurips.cc/Conferences/NeurIPS2023/Styles",
+ "verify": "verified"
+}

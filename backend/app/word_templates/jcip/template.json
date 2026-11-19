@@ -1,0 +1,9 @@
+{
+  "id": "jcip",
+  "name": "中文学术论文模板（通用开源版）",
+  "license": "Apache-2.0",
+  "docx_sha256": "c14cf5d1ed9270529fca09f01229b925d2e24cf653582bd25fe886881fe1688a",
+  "generated_by": "backend/scripts/gen_cn_academic_word_template.py",
+  "updated_at": "2026-11-19",
+  "source": "Original Apache-2.0 Chinese academic Word template authored for Paper Studio; administrators can upload any target journal .docx template in Admin -> Paper Templates."
+}

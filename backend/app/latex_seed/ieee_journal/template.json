@@ -1,0 +1,11 @@
+{
+ "id": "ieee_journal",
+ "name": "IEEE 期刊（TPAMI 等）",
+ "desc": "IEEEtran journal 模式（TPAMI/TITS/TIP 等）",
+ "main": "main.tex",
+ "engine": "pdflatex",
+ "language": "英文",
+ "kind": "期刊",
+ "venue": "IEEE",
+ "verify": "verified"
+}

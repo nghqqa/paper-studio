@@ -1,0 +1,380 @@
+/* Shared with the Node tests. The document command is deliberately self-contained:
+ * ONLYOFFICE serializes its function body into the editor's Office API context. */
+(function (root, factory) {
+  if (typeof module === "object" && module.exports) module.exports = factory();
+  else root.PaperStudioMath = factory();
+})(typeof globalThis !== "undefined" ? globalThis : this, function () {
+  "use strict";
+
+  function normalizeLatex(value) {
+    var text = String(value || "").trim();
+    var delimiters = [["$$", "$$"], ["\\[", "\\]"], ["\\(", "\\)"], ["$", "$"]];
+    for (var i = 0; i < delimiters.length; i += 1) {
+      var pair = delimiters[i];
+      if (text.length >= pair[0].length + pair[1].length && text.indexOf(pair[0]) === 0 && text.slice(-pair[1].length) === pair[1]) {
+        text = text.slice(pair[0].length, -pair[1].length).trim();
+        break;
+      }
+    }
+    if (!text) throw new Error("请输入 LaTeX 表达式。");
+    if (text.length > 20000) throw new Error("单条公式最多支持 20,000 个字符。");
+    if (/\u0000/.test(text)) throw new Error("公式包含无效字符。");
+    return text;
+  }
+
+  function serverScriptUrl(value) {
+    var url = new URL(value);
+    if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash) {
+      throw new Error("文档服务地址无效，请检查 ONLYOFFICE 配置。");
+    }
+    return url.href.replace(/\/+$/, "") + "/sdkjs-plugins/v1/plugins.js";
+  }
+
+  async function configuredServerScriptUrl(fetcher, pageUrl) {
+    // Never take an executable script origin from location.search. A visitor can
+    // supply arbitrary query parameters, even though config.json normally does not.
+    // Only the same-origin backend's fixed settings response can select the SDK.
+    var page = new URL(pageUrl);
+    var settings = new URL("settings.json", page);
+    var response = await fetcher(settings.href, {credentials: "omit", cache: "no-store", redirect: "error"});
+    if (!response.ok) throw new Error("无法读取公式插件设置，请检查文档服务配置。");
+    var data = await response.json();
+    if (!data || typeof data.document_server_url !== "string") throw new Error("公式插件缺少文档服务设置，请联系管理员。");
+    return serverScriptUrl(data.document_server_url);
+  }
+
+  function startSdkHandshake(host, readyState) {
+    // ONLYOFFICE's plugins.js installs a window.onload function that fetches
+    // config.json and posts "initialize" to the editor. This SDK is loaded only
+    // after our asynchronous settings fetch, so the page's load event may already
+    // have happened. Preserve the SDK handler and run it once in either order.
+    var sdkOnload = host.onload;
+    if (typeof sdkOnload !== "function") return;
+    var started = false;
+    host.onload = function (event) {
+      if (started) return;
+      started = true;
+      return sdkOnload.call(host, event);
+    };
+    if (readyState === "complete") host.onload();
+  }
+
+  /* 面板展示判断：context 是否包含公式本体与编号之外的信息（周边散文）。
+   * 独立公式段落的段落文本就是「latex + 编号」，此时不重复展示 context 行。 */
+  function contextAddsInfo(formula) {
+    var context = String(formula && formula.context || "").trim();
+    if (!context) return false;
+    var stripped = context;
+    if (formula && formula.label) {
+      stripped = stripped.split("(" + formula.label + ")").join(" ").split("（" + formula.label + "）").join(" ");
+    }
+    var bare = stripped.replace(/\s+/g, "");
+    var latexBare = String(formula && formula.latex || "").replace(/\s+/g, "");
+    return bare !== latexBare && bare.length >= 2;
+  }
+
+  /* No references to plugin-scope functions, DOM, network, or private SDK fields.
+   * A write validates an exact content snapshot plus paragraph identity, path and
+   * the previous formula text inside the SAME macro that performs the write.
+   * Any intervening edit requires the user to refresh and select again. */
+  function documentCommand(payload) {
+    "use strict";
+    if (!payload && typeof Asc !== "undefined" && Asc.scope) payload = Asc.scope.paperStudioMathPayload;
+    payload = payload || {};
+    if (typeof Api === "undefined" || typeof Api.CreateMath !== "function") {
+      return {ok: false, code: "unsupported", message: "公式编辑需要 ONLYOFFICE Docs 10.0 或更高版本。"};
+    }
+    var doc = Api.GetDocument();
+    if (!doc || typeof doc.GetAllParagraphs !== "function") {
+      return {ok: false, code: "unsupported", message: "当前文档不支持读取原生公式。"};
+    }
+
+    function kind(element) {
+      return element && typeof element.GetClassType === "function" ? element.GetClassType() : "unknown";
+    }
+    function identity(element) {
+      return element && typeof element.GetInternalId === "function" ? String(element.GetInternalId()) : "";
+    }
+    function textOf(element, format) {
+      return element && typeof element.GetText === "function" ? String(element.GetText(format) || "") : "";
+    }
+    /* 编号标签：编号公式段落在 math 元素之后带有制表符与“(2)”式纯文本标签。
+     * 只认整段尾部严格匹配的括号标签，散文里的括号数字不会被误判。 */
+    function parseLabelFromRuns(texts) {
+      var joined = texts.join("");
+      var match = /^\s*[（(]\s*([0-9][0-9.、\-]*[a-zA-Z]?)\s*[）)]\s*$/.exec(joined);
+      return match ? match[1] : null;
+    }
+    /* “2-1”→{prefix:"2-",tail:"1"}；“1”→{prefix:"",tail:"1"}；“2.1a”→{prefix:"2.",tail:"1a"}。 */
+    function splitLabelNumber(label) {
+      var match = /^(.*?)(\d+[a-zA-Z]?)$/.exec(String(label || ""));
+      return match ? {prefix: match[1], tail: match[2]} : null;
+    }
+    function splitTail(tail) {
+      var match = /^(\d+)([a-zA-Z]*)$/.exec(tail || "");
+      return match ? {number: parseInt(match[1], 10), letters: match[2]} : null;
+    }
+    /* 与上一条同组前缀的下一个编号：沿用前缀，数字 +1，尾字母保持各条原样。 */
+    function nextLabelAfter(label) {
+      var split = splitLabelNumber(label);
+      if (!split) return null;
+      var tail = splitTail(split.tail);
+      if (!tail || tail.letters) return null;
+      return split.prefix + (tail.number + 1);
+    }
+    function findEquationRefs(texts) {
+      var refs = [];
+      var pattern = /[式式]\s*[（(]\s*([0-9][0-9.、\-]*[a-zA-Z]?)\s*[）)]/g;
+      for (var i = 0; i < texts.length; i += 1) {
+        pattern.lastIndex = 0;
+        var match = pattern.exec(texts[i]);
+        while (match) {
+          refs.push({label: match[1], paragraphIndex: i});
+          match = pattern.exec(texts[i]);
+        }
+      }
+      return refs;
+    }
+    function scan() {
+      var paragraphs = doc.GetAllParagraphs();
+      var formulas = [];
+      var signature = [];
+      function children(container, paragraph, paragraphIndex, path, depth) {
+        if (depth > 32) throw new Error("文档内容嵌套过深，无法安全定位公式。");
+        var result = [];
+        var count = container.GetElementsCount();
+        for (var index = 0; index < count; index += 1) {
+          var element = container.GetElement(index);
+          var type = kind(element);
+          var position = path.concat([index]);
+          if (type === "math") {
+            if (typeof element.GetText !== "function") throw new Error("当前编辑器不能读取公式，请使用 ONLYOFFICE Docs 10.0 或更高版本。");
+            var latex = textOf(element, "latex");
+            result.push([type, latex]);
+            var item = {
+              paragraphIndex: paragraphIndex,
+              paragraphId: identity(paragraph),
+              path: position,
+              latex: latex,
+              context: textOf(paragraph).replace(/\s+/g, " ").trim().slice(0, 180),
+              label: null,
+              _parent: container,
+              _paragraph: paragraph,
+              _index: index,
+              _labelRunIndex: -1,
+              _labelRunText: ""
+            };
+            /* 仅顶层公式读编号标签（嵌套在内容控件里的公式没有紧邻的标签 run）。 */
+            if (position.length === 1) {
+              var labelRuns = [];
+              for (var j = index + 1; j < count; j += 1) labelRuns.push(textOf(container.GetElement(j)));
+              item.label = parseLabelFromRuns(labelRuns);
+              for (var k = index + 1; k < count; k += 1) {
+                var runText = textOf(container.GetElement(k));
+                if (item.label && (runText.indexOf("（" + item.label + "）") !== -1 || runText.indexOf("(" + item.label + ")") !== -1)) {
+                  item._labelRunIndex = k;
+                  item._labelRunText = runText;
+                  break;
+                }
+              }
+            }
+            formulas.push(item);
+          } else if (element && typeof element.GetElementsCount === "function" && typeof element.GetElement === "function") {
+            result.push([type, identity(element), children(element, paragraph, paragraphIndex, position, depth + 1)]);
+          } else {
+            result.push([type, identity(element), textOf(element)]);
+          }
+        }
+        return result;
+      }
+      for (var p = 0; p < paragraphs.length; p += 1) {
+        var paragraph = paragraphs[p];
+        var paragraphId = identity(paragraph);
+        if (!paragraphId) throw new Error("编辑器未提供段落身份，已停止公式修改以保护文档。");
+        signature.push([paragraphId, textOf(paragraph), children(paragraph, paragraph, p, [], 0)]);
+      }
+      return {formulas: formulas, version: JSON.stringify(signature)};
+    }
+    function publicFormula(item) {
+      return {paragraphIndex: item.paragraphIndex, paragraphId: item.paragraphId, path: item.path, latex: item.latex, context: item.context, label: item.label};
+    }
+    function listResult(snapshot) {
+      return {ok: true, version: snapshot.version, formulas: snapshot.formulas.map(publicFormula)};
+    }
+    function checkedTarget(snapshot) {
+      if (typeof payload.version !== "string" || payload.version !== snapshot.version) return null;
+      var target = payload.target;
+      if (!target || !Array.isArray(target.path) || !target.paragraphId) return null;
+      var path = JSON.stringify(target.path);
+      for (var i = 0; i < snapshot.formulas.length; i += 1) {
+        var item = snapshot.formulas[i];
+        if (item.paragraphId === target.paragraphId && item.paragraphIndex === target.paragraphIndex && JSON.stringify(item.path) === path && item.latex === target.latex) return item;
+      }
+      return null;
+    }
+    function createMath() {
+      var latex = typeof payload.latex === "string" ? payload.latex.trim() : "";
+      if (!latex || latex.length > 20000 || /\u0000/.test(latex)) throw new Error("LaTeX 表达式为空、过长或包含无效字符。");
+      var math = Api.CreateMath(latex, "latex");
+      if (!math || kind(math) !== "math" || !textOf(math, "latex").trim()) throw new Error("文档编辑器无法转换这条公式，请检查 LaTeX 命令。");
+      return math;
+    }
+    function insertionFontSize(anchor) {
+      // The effective caret may carry a direct size or inherit a journal style.
+      // Paragraph.GetTextPr alone does not resolve that inheritance.
+      var readers = [
+        function () {return doc.GetRangeBySelect().GetTextPr();},
+        function () {return anchor.GetTextPr();},
+        function () {return anchor.GetRange().GetTextPr();},
+        function () {return anchor.GetStyle().GetTextPr();},
+        function () {return doc.GetDefaultTextPr();}
+      ];
+      for (var i = 0; i < readers.length; i++) {
+        try {
+          var size = readers[i]().GetFontSize();
+          if (Number.isFinite(size) && size > 0 && size <= 3276) return size;
+        } catch (error) { /* Try the next public formatting source. */ }
+      }
+      return null;
+    }
+
+    if (payload.action === "list") return listResult(scan());
+    if (payload.action === "insert") {
+      var newMath = createMath();
+      var paragraph = Api.CreateParagraph();
+      if (paragraph.AddElement(newMath) === false) throw new Error("无法创建公式段落。");
+      if (payload.placement === "display") {
+        paragraph.SetJc("center");
+        var anchor = typeof doc.GetCurrentParagraph === "function" ? doc.GetCurrentParagraph() : null;
+        if (!anchor || typeof anchor.InsertParagraph !== "function") throw new Error("当前光标位置不能插入独立公式，请先点击可编辑正文。");
+        var fontSize = insertionFontSize(anchor);
+        if (fontSize) paragraph.SetFontSize(fontSize);
+        // In Docs 10.0.0-169, InsertContent prefers inserting into an existing
+        // math run when the caret remains inside a previous equation, even if
+        // isInline is false. InsertParagraph creates an actual sibling instead.
+        if (!anchor.InsertParagraph(paragraph, "after", true)) throw new Error("独立公式插入失败，请检查正文是否可编辑。");
+        var insertedRange = typeof paragraph.GetRange === "function" ? paragraph.GetRange() : null;
+        if (insertedRange && typeof insertedRange.MoveCursorToPos === "function") insertedRange.MoveCursorToPos(0);
+      } else {
+        // Use the editor's native equation-at-caret operation for inline input.
+        // Generic paragraph paste may promote a math-only paragraph to a display
+        // block or merge it into an existing math object before considering inline.
+        if (typeof doc.AddMathEquation !== "function" || doc.AddMathEquation(payload.latex, "latex") === false) {
+          throw new Error("插入失败，请先在可编辑正文中放置光标。");
+        }
+      }
+      return {ok: true, latex: textOf(newMath, "latex")};
+    }
+    if (payload.action === "select" || payload.action === "replace") {
+      var snapshot = scan();
+      var current = checkedTarget(snapshot);
+      if (!current) return {ok: false, code: "stale", message: "文档内容已变化。请刷新公式清单，重新选择后再修改；你的输入已保留。"};
+      if (payload.action === "select") {
+        // The deployed 10.0 API exposes cursor movement on ApiRange, not on
+        // ApiParagraph. Use a collapsed caret and never Select the whole paragraph.
+        // If a host lacks range navigation, reading/editing the verified target
+        // remains available without moving the caret.
+        var range = typeof current._paragraph.GetRange === "function" ? current._paragraph.GetRange() : null;
+        var located = !!(range && typeof range.MoveCursorToPos === "function" && range.MoveCursorToPos(0));
+        return {ok: true, located: located};
+      }
+      var parent = current._parent;
+      if (typeof parent.AddElement !== "function" || typeof parent.RemoveElement !== "function") {
+        return {ok: false, code: "unsupported", message: "该公式所在的内容控件不能通过插件编辑。"};
+      }
+      var replacement = createMath();
+      // Preserve a uniform paragraph's actual size even when the caret has
+      // moved elsewhere since selecting this formula. Do not normalize mixed
+      // font sizes or change surrounding text and numbering.
+      var replacementFontSize = null;
+      try {
+        replacementFontSize = current._paragraph.GetRange().GetTextPr().GetFontSize();
+      } catch (error) { /* Older hosts retain the existing inheritance path. */ }
+      if (Number.isFinite(replacementFontSize) && replacementFontSize > 0 && replacementFontSize <= 3276) {
+        var fontHolder = Api.CreateParagraph();
+        if (fontHolder.AddElement(replacement) === false) throw new Error("无法保留原公式字号，原公式未修改。");
+        fontHolder.SetFontSize(replacementFontSize);
+      }
+      // Insert first. A failed conversion or insertion never removes the original.
+      // Both mutations share one macro; explicitly clean up if removing the old
+      // object fails, rather than assuming every thrown macro error rolls back.
+      if (parent.AddElement(replacement, current._index) === false) throw new Error("公式所在位置不可编辑，原公式未修改。");
+      if (parent.RemoveElement(current._index + 1) === false) {
+        parent.RemoveElement(current._index);
+        throw new Error("原公式更新失败，请检查该位置是否被锁定。");
+      }
+      return {ok: true, latex: textOf(replacement, "latex")};
+    }
+    if (payload.action === "suggest-label") {
+      var snapshot = scan();
+      var lastLabel = null;
+      for (var s = 0; s < snapshot.formulas.length; s += 1) {
+        if (snapshot.formulas[s].label) lastLabel = snapshot.formulas[s].label;
+      }
+      /* 带尾字母的编号（如图版子图 1a）不参与自动递增，避免猜错用户的子图规则。 */
+      return {ok: true, label: lastLabel ? nextLabelAfter(lastLabel) : "1"};
+    }
+    if (payload.action === "check-refs") {
+      var snapshot = scan();
+      var defined = [], seen = {}, duplicates = [];
+      for (var d = 0; d < snapshot.formulas.length; d += 1) {
+        var label = snapshot.formulas[d].label;
+        if (!label) continue;
+        if (seen[label] && duplicates.indexOf(label) === -1) duplicates.push(label);
+        if (!seen[label]) { seen[label] = true; defined.push(label); }
+      }
+      var texts = [], paragraphs = doc.GetAllParagraphs();
+      for (var pr = 0; pr < paragraphs.length; pr += 1) texts.push(textOf(paragraphs[pr]));
+      var refs = findEquationRefs(texts);
+      var referenced = {};
+      for (var rf = 0; rf < refs.length; rf += 1) referenced[refs[rf].label] = true;
+      var missing = refs.filter(function (ref) { return !seen[ref.label]; });
+      var unreferenced = defined.filter(function (label) { return !referenced[label]; });
+      return {ok: true, definedCount: defined.length, referencedCount: refs.length, missing: missing, duplicates: duplicates, unreferenced: unreferenced};
+    }
+    if (payload.action === "renumber") {
+      var snapshot = scan();
+      if (payload.version !== snapshot.version) return {ok: false, code: "stale", message: "文档内容已变化。请刷新公式清单后重试。"};
+      if (typeof Api.CreateRun !== "function") return {ok: false, code: "unsupported", message: "当前编辑器不支持改写编号文本。"};
+      var counters = {}, changed = [], skipped = [];
+      for (var rn = 0; rn < snapshot.formulas.length; rn += 1) {
+        var item = snapshot.formulas[rn];
+        if (!item.label) continue;
+        var split = splitLabelNumber(item.label);
+        var tail = split && splitTail(split.tail);
+        /* 带尾字母的编号（如图版子图 1a）是刻意自定义的序列，不参与自动重编。 */
+        if (!tail || tail.letters || item._labelRunIndex < 0 || !item._labelRunText) { skipped.push(item.label); continue; }
+        if (!(split.prefix in counters)) { counters[split.prefix] = tail.number; continue; } /* 首条作为组基号保持不变 */
+        counters[split.prefix] += 1;
+        var newLabel = split.prefix + counters[split.prefix];
+        if (newLabel === item.label) continue;
+        var open = item._labelRunText.indexOf("（" + item.label + "）") !== -1 ? "（" : "(";
+        var close = open === "（" ? "）" : ")";
+        var newRunText = item._labelRunText.replace(open + item.label + close, open + newLabel + close);
+        if (newRunText === item._labelRunText) { skipped.push(item.label); counters[split.prefix] -= 1; continue; }
+        var run = Api.CreateRun();
+        if (!run || typeof run.AddText !== "function" || run.AddText(newRunText) === false) throw new Error("无法生成新编号文本，全文编号未修改。");
+        if (item._parent.AddElement(run, item._labelRunIndex) === false) throw new Error("编号位置不可编辑，全文编号未修改。");
+        if (item._parent.RemoveElement(item._labelRunIndex + 1) === false) {
+          item._parent.RemoveElement(item._labelRunIndex);
+          throw new Error("旧编号移除失败，全文编号未修改。");
+        }
+        changed.push({from: item.label, to: newLabel, paragraphIndex: item.paragraphIndex});
+      }
+      return {ok: true, changed: changed, skipped: skipped};
+    }
+    if (payload.action === "goto") {
+      /* 引用核对报告的「点击定位」：把光标移到指定段落开头，只读不写。 */
+      var index = typeof payload.paragraphIndex === "number" ? payload.paragraphIndex : -1;
+      var targets = doc.GetAllParagraphs();
+      var target = targets[index];
+      if (!target || typeof target.GetRange !== "function") return {ok: false, code: "unsupported", message: "当前编辑器不支持段落定位。"};
+      var range = target.GetRange();
+      var located = !!(range && typeof range.MoveCursorToPos === "function" && range.MoveCursorToPos(0));
+      return {ok: true, located: located};
+    }
+    return {ok: false, code: "invalid", message: "未知公式操作。"};
+  }
+
+  return {normalizeLatex: normalizeLatex, serverScriptUrl: serverScriptUrl, configuredServerScriptUrl: configuredServerScriptUrl, startSdkHandshake: startSdkHandshake, contextAddsInfo: contextAddsInfo, documentCommand: documentCommand};
+});

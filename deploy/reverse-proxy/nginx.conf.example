@@ -1,0 +1,60 @@
+# Paper Studio — Nginx HTTPS Reverse Proxy Example
+# Replace paper.example.com, ds.example.com and TLS certificate paths.
+# Remember to set in .env:
+#   PAPER_STUDIO_COOKIE_SECURE=on
+#   PAPER_STUDIO_PUBLIC_ORIGIN=https://paper.example.com
+#   PAPER_STUDIO_ONLYOFFICE_URL=https://ds.example.com
+#   PAPER_STUDIO_ONLYOFFICE_PUBLIC_URL=http://app:8000
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name paper.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/paper.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/paper.example.com/privkey.pem;
+
+    client_max_body_size 64m;
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript image/svg+xml;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 300s;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    server_name ds.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/ds.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ds.example.com/privkey.pem;
+
+    client_max_body_size 64m;
+
+    location / {
+        proxy_pass http://127.0.0.1:9980;
+        proxy_http_version 1.1;
+        # Critical: ONLYOFFICE relies on X-Forwarded-Proto=https to generate https:// cache/script URLs
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 300s;
+    }
+}

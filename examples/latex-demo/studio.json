@@ -1,0 +1,10 @@
+{
+  "document_type": "paper",
+  "source_format": "latex",
+  "latex": {
+    "main": "bare_conf.tex",
+    "engine": "pdflatex"
+  },
+  "title": "LaTeX 示例（IEEEtran bare_conf）",
+  "style": {}
+}

@@ -1,0 +1,11 @@
+{
+ "id": "ieee",
+ "name": "IEEE 会议（IEEEtran）",
+ "desc": "IEEEtran bare_conf 示例（合法分发：IEEEtran v1.8b，LPPL 1.3）",
+ "main": "bare_conf.tex",
+ "engine": "pdflatex",
+ "language": "英文",
+ "kind": "会议",
+ "venue": "IEEE",
+ "verify": "verified"
+}

@@ -1,0 +1,11 @@
+{
+ "id": "blank",
+ "name": "空白中文论文",
+ "desc": "最小 ctex 骨架（标题/作者/一节引言）",
+ "main": "main.tex",
+ "engine": "xelatex",
+ "language": "中文",
+ "kind": "通用",
+ "venue": "通用",
+ "verify": "verified"
+}

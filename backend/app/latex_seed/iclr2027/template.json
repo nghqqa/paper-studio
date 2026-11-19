@@ -1,0 +1,14 @@
+{
+  "id": "iclr2027",
+  "name": "ICLR 2027",
+  "desc": "官方完整排版指南与示例，含公式命令、引用库和会议样式",
+  "main": "iclr2027_conference.tex",
+  "engine": "pdflatex",
+  "language": "英文",
+  "kind": "会议",
+  "venue": "ICLR",
+  "year": "2027",
+  "mode": "review（默认匿名+行号）/final",
+  "source": "github.com/ICLR/Master-Template iclr2027/",
+  "verify": "verified"
+}

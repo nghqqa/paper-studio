@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/logo-mark.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <title>研稿 · Paper Studio — 论文写作与审阅工作空间</title>
+    <!-- SEO -->
+    <meta name="description" content="研稿 · Paper Studio 支持 Word 期刊模板、可编辑数学公式、LaTeX 工程与 PDF 编译预览，统一管理论文项目、投稿计划和团队协作，支持私有化部署。" />
+    <meta name="keywords" content="论文写作,LaTeX,论文协作,导师批注,学术写作,PDF预览,自动保存,草稿恢复,科研团队,论文审阅,paper studio,研稿" />
+    <meta name="author" content="研稿 · Paper Studio" />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
+    <meta name="application-name" content="研稿 · Paper Studio" />
+    <meta name="theme-color" content="#2563eb" />
+    <!-- Open Graph -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="研稿 · Paper Studio" />
+    <meta property="og:title" content="研稿 · Paper Studio — 论文写作与审阅工作空间" />
+    <meta property="og:description" content="研稿 · Paper Studio 支持 Word 期刊模板、可编辑数学公式、LaTeX 工程与 PDF 编译预览，统一管理论文项目、投稿计划和团队协作，支持私有化部署。" />
+    <meta property="og:locale" content="zh_CN" />
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="研稿 · Paper Studio — 论文写作与审阅工作空间" />
+    <meta name="twitter:description" content="研稿 · Paper Studio 支持 Word 期刊模板、可编辑数学公式、LaTeX 工程与 PDF 编译预览，统一管理论文项目、投稿计划和团队协作，支持私有化部署。" />
+    <!-- GEO：供 AI 引擎/LLM 抓取的语义化产品说明 -->
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "研稿 · Paper Studio",
+  "alternateName": "研稿",
+  "url": "https://github.com/nghqqa/paper-studio",
+  "applicationCategory": "BusinessApplication",
+  "operatingSystem": "Web",
+  "inLanguage": "zh-CN",
+  "description": "研稿 · Paper Studio 支持 Word 期刊模板、可编辑数学公式、LaTeX 工程与 PDF 编译预览，统一管理论文项目、投稿计划和团队协作，支持私有化部署。",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "CNY"
+  },
+  "featureList": "Word 期刊模板, 可编辑数学公式, LaTeX 工程与 PDF 预览, 协作批注, 投稿计划, 模板管理, 项目权限, 私有化部署"
+}
+    </script>
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "研稿是做什么的？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "研稿面向科研团队，支持 Word 期刊模板、原生数学公式、LaTeX 源码与 PDF 预览，并统一管理论文项目、投稿计划和团队协作。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "哪些人适合用研稿？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "研究生、导师、个人作者与科研团队。作者负责写作和修订，合作者可按项目权限编辑、审阅或只读，共同完成投稿前的迭代。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "能保证论文录用吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "不能。研稿只提供写作、编译与批注协作工具，不构成学术评价或录用保证；论文质量与投稿决策由作者与导师把握。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "我的论文数据安全吗？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "论文与批注数据存于部署方自有存储，项目按成员角色授权。需要注意：编译在本机或部署方配置的引擎上完成，若启用远端服务，相关材料会发送到对应服务商——通道由部署方决定。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "支持哪些内容？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "可以导入 DOCX 或 LaTeX ZIP 工程，也可以选择内置中文学术 Word 模板、ACL、ICLR、IEEE 等 LaTeX 示例，并支持科研数据图表、方法图绘制、Zotero 文献库与多轮审稿回复管理。管理员可上传和管理团队模板。"
+      }
+    }
+  ]
+}
+    </script>
+    <style>
+      /* R24-01 启动兜底：JS 落地前（慢网冷启）不再裸白屏。React 挂载后自动替换 #root 内容。 */
+      .boot-splash {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        font-family: system-ui, -apple-system, sans-serif;
+        color: #6b7280;
+        background: #fff;
+      }
+      @media (prefers-color-scheme: dark) {
+        .boot-splash {
+          background: #0f1115;
+          color: #9ca3af;
+        }
+      }
+      .boot-splash .ring {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 3px solid #d1d5db;
+        border-top-color: #2563eb;
+        animation: boot-spin 0.9s linear infinite;
+      }
+      .boot-splash .brand {
+        font-size: 15px;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+      @keyframes boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .boot-splash .ring {
+          animation: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot-splash" role="status" aria-label="加载中">
+        <div class="ring" aria-hidden="true"></div>
+        <div class="brand">研稿 · Paper Studio</div>
+      </div>
+    </div>
+    <script>
+window.__errs = [];
+window.addEventListener('error', function (e) { window.__errs.push('err:' + e.message + ' @' + (e.filename || '') + ':' + (e.lineno || 0)) })
+window.addEventListener('unhandledrejection', function (e) { window.__errs.push('rej:' + String(e.reason).slice(0, 300)) })
+</script>
+<script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

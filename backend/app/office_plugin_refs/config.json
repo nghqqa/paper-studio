@@ -1,0 +1,25 @@
+{
+  "name": "文献引用桥",
+  "guid": "asc.{B7E1F4C2-8D3A-4E5F-9A6B-1C2D3E4F5A6B}",
+  "version": "1.0.0",
+  "minVersion": "10.0.0",
+  "variations": [
+    {
+      "description": "在编辑器内插入/收集文献引用与参考文献表（应用内文献面板经服务端任务箱驱动）",
+      "url": "index.html",
+      "icons": [
+        "icon.svg",
+        "icon.svg"
+      ],
+      "isViewer": false,
+      "EditorsSupport": [
+        "word"
+      ],
+      "isVisual": false,
+      "isSystem": true,
+      "initDataType": "none",
+      "type": "background",
+      "buttons": []
+    }
+  ]
+}

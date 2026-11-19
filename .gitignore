@@ -1,0 +1,68 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# node
+node_modules/
+frontend/dist/
+# studio artifacts
+examples/*/.studio/
+examples/*/*.docx
+examples/*/*.pdf
+examples/*/content.md.bak-*
+# docs/{abstract,claims,description}.md 是 content.md 的镜像；docs/figures.md 是附图真源，纳入版本
+examples/*/docs/abstract.md
+examples/*/docs/claims.md
+examples/*/docs/description.md
+examples/*/project.json
+examples/*/case.json
+examples/.studio/
+examples/*/reviews/
+studio.db*
+data/
+.lo_profile/
+# secrets
+.env
+deploy/**/.env
+.venv-cache/venv/
+docs/text-corpus/pdfs/
+
+# E2E 会话产物（本地验证用，不入库）
+.e2e-backend.log
+.e2e-vite.log
+.e2e-projects/
+.e2e-downloads/
+
+# 本机 SSH 访问凭据（不入库）
+deploy/paper/.ssh-local.json
+public/pdfjs/
+frontend/public/pdfjs/
+docx-proto/data/
+*.log
+
+# v0.4 隔离验收环境（本地）
+.iso-v04/
+
+# 本地目视验收临时栈（scratch 后端数据）
+backend/scratch-projects/
+backend/scratch-studio.db*
+
+# LaTeX 导入暂存目录（账号库同级，不入库）
+backend/.import-staging/
+
+.import-staging/
+
+# E2E 回归产物（报告/临时）不入库
+deploy/e2e/reports/
+
+# 安全事件处置材料本地留存（不上传 GitHub）
+deploy/paper/incident-*.md
+deploy/paper/harden-lab-server.sh
+deploy/paper/purge-ultra.sh
+deploy/e2e/debug-docx.py
+
+# 开源清洁导出产物目录（本地推送用，不入私有仓）
+.oss-release/

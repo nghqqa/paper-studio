@@ -1,0 +1,11 @@
+{
+ "id": "elsevier_journal",
+ "name": "Elsevier 期刊",
+ "desc": "elsarticle（Pattern Recognition/Neurocomputing 等）",
+ "main": "main.tex",
+ "engine": "pdflatex",
+ "language": "英文",
+ "kind": "期刊",
+ "venue": "Elsevier",
+ "verify": "verified"
+}

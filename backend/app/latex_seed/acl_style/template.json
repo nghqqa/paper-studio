@@ -1,0 +1,14 @@
+{
+ "id": "acl_style",
+ "name": "ACL/EMNLP/NAACL",
+ "desc": "官方完整排版示例，包含图表、公式与参考文献",
+ "main": "acl_latex.tex",
+ "engine": "pdflatex",
+ "language": "英文",
+ "kind": "会议",
+ "venue": "ACL",
+ "year": "2026（master 滚动）",
+ "mode": "review（默认匿名）/final",
+ "source": "github.com/acl-org/acl-style-files@master",
+ "verify": "verified"
+}

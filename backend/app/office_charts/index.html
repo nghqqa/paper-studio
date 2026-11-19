@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>科研图表</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="core.js" defer></script>
+  <script src="charts-core.js" defer></script>
+  <script src="connect-charts.js" defer></script>
+  <script src="charts.js" defer></script>
+</head>
+<body>
+  <main>
+    <div id="plugin-scroll" class="plugin-scroll" role="region" aria-label="科研图表内容" tabindex="0">
+      <div id="view-charts" class="view">
+      <header><p>选取本项目图表，或输入数据生成新图。先在正文空白段落放置光标。</p></header>
+      <section aria-labelledby="charts-library-title">
+        <div class="section-title"><h2 id="charts-library-title">本项目图表库</h2><button id="charts-library-refresh" class="text-button" type="button" disabled>刷新</button></div>
+        <p id="charts-library-status" class="hint" role="status">正在连接当前项目…</p>
+        <label for="charts-library-select">选择已保存的图表</label>
+        <select id="charts-library-select" disabled><option value="">请选择图表</option></select>
+        <div id="charts-library-preview" class="chart-library-preview"></div>
+        <label for="charts-width">插入宽度</label>
+        <select id="charts-width"><option value="80">8 厘米（适合双栏论文）</option><option value="120">12 厘米</option><option value="160">16 厘米</option></select>
+        <p class="hint">保持图片比例，宽度不超过所在分栏。插入普通图片后可在 Word 中调整大小；库中图源改动后，可用「检查正文图表」比对并替换正文旧图。</p>
+        <button id="charts-library-insert" class="primary" type="button" disabled>插入所选图表</button>
+        <div class="section-title"><h2>正文图表更新</h2><button id="charts-library-check" class="text-button" type="button" disabled>检查正文图表</button></div>
+        <label for="charts-library-update-select">与图表库比对后可更新的正文图</label>
+        <select id="charts-library-update-select" disabled><option value="">先检查正文图表</option></select>
+        <button id="charts-library-update" class="primary" type="button" disabled>更新所选正文图</button>
+      </section>
+      <details class="chart-create">
+        <summary>输入数据生成新图</summary>
+      <section>
+        <label for="charts-type">图表类型</label>
+        <select id="charts-type">
+          <option value="line">折线图</option>
+          <option value="bar">柱状图</option>
+          <option value="scatter">散点图</option>
+          <option value="pie">饼图（单系列）</option>
+        </select>
+        <label for="charts-title">标题（可选）</label>
+        <input id="charts-title" placeholder="例如：两组方法精度对比" />
+        <label for="charts-x">X 轴说明（可选）</label>
+        <input id="charts-x" placeholder="例如：训练轮次" />
+        <label for="charts-y">Y 轴说明（可选）</label>
+        <input id="charts-y" placeholder="例如：准确率" />
+        <label for="charts-data">数据 JSON</label>
+        <textarea id="charts-data" rows="6" spellcheck="false">{"categories":["基线"," ours"],"series":[{"name":"精度","values":[0.82,0.91]}]}</textarea>
+        <p class="hint">首行示例即格式：JSON 数组，categories 为横轴标签，series 为系列名与数值。</p>
+        <button id="charts-render" class="primary" type="button">生成预览</button>
+        <p id="charts-status" class="hint" role="status"></p>
+        <div id="charts-preview"></div>
+        <button id="charts-insert" class="primary" type="button" disabled>插入到文档</button>
+        <button id="charts-download" class="text-button" type="button" hidden>下载 PNG</button>
+      </section>
+      </details>
+    </div>
+    </div><!-- /plugin-scroll -->
+  </main>
+</body>
+</html>

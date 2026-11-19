@@ -1,0 +1,83 @@
+/* LaTeX 工作台 = 自有恒浅世界（源码 + PDF 纸面工作场景，暗主题下仍保持纸白工作台，同 --paper 恒白哲学）。
+   值取自设计系统原始层（g 阶 / brand，.dark 不覆盖 ⇒ 两主题下同值）；
+   状态族与调优 fg 在本作用域钉回 :root §1.4 字面值——.dark 会整族覆盖，不钉则暗主题下
+   浅色调状态字（danger/warn 0.8 亮度）落在白底上不可读。 */
+.latex-workspace {
+  color-scheme: light;
+  /* 四层面 + 前景 + 边（→ :root 原始层） */
+  --bg-app: var(--g1);
+  --bg-panel: var(--g0);
+  --bg-sunken: var(--g2);
+  --bg-elevated: var(--g0);
+  --bg-hover: var(--g2);
+  --bg-active: var(--g3);
+  --bg-selected: var(--brand-100);
+  --fg: var(--g9);
+  --fg-strong: var(--g10);
+  --fg-muted: var(--g7);
+  --fg-subtle: oklch(0.530 0.016 255); /* :root 调优值（g6 仅 4.32:1） */
+  --fg-disabled: var(--g5);
+  --fg-icon: var(--g8);
+  --fg-on-brand: var(--g0);
+  --border: var(--g3);
+  --border-strong: var(--g4);
+  /* 品牌 = 产品绿（v0.4.1 前此处误用藏蓝 hex，与全站品牌割裂） */
+  --primary: var(--brand-600);
+  --primary-hover: var(--brand-700);
+  --primary-active: var(--brand-800);
+  --primary-soft: var(--brand-100);
+  --primary-foreground: var(--g0);
+  --link: var(--brand-700);
+  --ring: var(--brand-600);
+  --paper-canvas: var(--g2);
+  --sh-sm: 0 1px 2px oklch(0 0 0 / 0.06);
+  /* 状态族（:root §1.4 字面值钉浅） */
+  --info-fg: oklch(0.470 0.150 258);
+  --info-bg: oklch(0.955 0.025 258);
+  --info-dot: oklch(0.600 0.170 258);
+  --ok-fg: oklch(0.440 0.120 152);
+  --ok-bg: oklch(0.955 0.030 155);
+  --ok-dot: oklch(0.580 0.150 152);
+  --warn-fg: oklch(0.480 0.130 70);
+  --warn-bg: oklch(0.965 0.040 85);
+  --warn-dot: oklch(0.600 0.150 70);
+  --danger-fg: oklch(0.480 0.180 27);
+  --danger-bg: oklch(0.960 0.025 25);
+  --danger-dot: oklch(0.600 0.210 27);
+  --danger-solid: oklch(0.480 0.180 27);
+  --danger-solid-hover: oklch(0.430 0.180 27);
+  --violet-fg: oklch(0.460 0.160 300);
+  --violet-bg: oklch(0.960 0.025 300);
+  --violet-dot: oklch(0.620 0.180 300);
+  --teal-fg: oklch(0.450 0.100 190);
+  --teal-bg: oklch(0.955 0.030 190);
+  --teal-dot: oklch(0.580 0.110 190);
+  --orange-fg: oklch(0.500 0.160 45);
+  --orange-bg: oklch(0.965 0.035 50);
+  --orange-dot: oklch(0.580 0.170 45);
+  /* shadcn 别名层声明在 :root、以 :root 的族值求值（暗主题下已代入暗值）——
+     本作用域用到的别名须重新指向上面钉浅的族值 */
+  --warning: var(--warn-dot);
+  --warning-foreground: var(--warn-fg);
+  --warning-soft: var(--warn-bg);
+  --destructive: var(--danger-fg);
+  --success: var(--brand-700);
+}
+
+/* 顶栏：白底工具条（与画布 g1 分层） */
+.latex-workspace [data-testid="latex-topbar"] { background: var(--bg-panel); }
+.latex-brand { display: flex; align-items: center; gap: 8px; margin-right: 14px; color: var(--brand-700); font-size: 20px; font-weight: 700; }
+.latex-brand img { width: 28px; height: 28px; border-radius: 6px; }
+
+/* 工程文件侧栏（宽度与文件页签工具条/Issues 页签配合；内边距由各分区自持） */
+.latex-workspace [data-testid="latex-files"] { width: 240px; background: var(--bg-app); }
+
+.latex-workspace [data-testid="latex-pdf-empty"] { padding: 40px 24px; text-align: center; line-height: 1.8; }
+.latex-workspace [data-testid="latex-build-status"] { min-height: 40px; background: var(--bg-app); }
+.latex-workspace .cm-editor { font-size: 13px; }
+.latex-workspace .cm-line { line-height: 1.8; }
+@media (max-width: 1000px) {
+  .latex-brand { margin-right: 4px; font-size: 16px; }
+  .latex-workspace [data-testid="latex-files"] { width: 184px; }
+  .latex-workspace [data-testid="latex-topbar"] { gap: 4px; }
+}
