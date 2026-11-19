@@ -34,7 +34,7 @@ jobs:
         run: pnpm build
       - name: Unit tests
         working-directory: frontend
-        run: pnpm test -- --maxWorkers=2 --testTimeout=30000
+        run: pnpm exec vitest run --maxWorkers=2 --testTimeout=30000
 
   backend:
     name: Backend (core tests + plugin tests)

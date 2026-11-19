@@ -122,7 +122,7 @@ const input = (el: Element, v: string) => act(async () => {
   t.dispatchEvent(new Event('input', { bubbles: true }))
 })
 
-async function waitFor(fn: () => boolean, tries = 240) {
+async function waitFor(fn: () => boolean, tries = 160) {
   for (let i = 0; i < tries; i++) {
     if (fn()) return
     await act(async () => new Promise((r) => setTimeout(r, 25)))
@@ -168,7 +168,7 @@ describe('BoardPage（W17：Excalidraw 画板页）', () => {
       return json({})
     })
     const el = await mount(<BoardPage pid="p1" src="flow1" />)
-    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement).value === 'flow1')
+    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement | null)?.value === 'flow1')
     await waitFor(() => updateScene.mock.calls.length > 0)
 
     await click(el.querySelector('[data-testid="board-export"]'))
@@ -230,7 +230,7 @@ describe('BoardPage（W17：Excalidraw 画板页）', () => {
       return json({})
     })
     const el = await mount(<BoardPage pid="p1" src="net2" />) /* 冷开 URL 下覆盖判定走 GET /figures 而非 store */
-    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement).value === 'net2')
+    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement | null)?.value === 'net2')
     // spec 模式：不上 excalidraw，中心区是交互画布
     await waitFor(() => el.querySelector('[data-testid="spec-canvas"]') !== null)
     expect(el.querySelector('[data-testid="board-canvas-stub"]')).toBeNull()
@@ -290,7 +290,7 @@ describe('BoardPage（W17：Excalidraw 画板页）', () => {
       return json({})
     })
     const el = await mount(<BoardPage pid="p1" src="net2" />)
-    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement).value === 'net2')
+    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement | null)?.value === 'net2')
     await click(el.querySelector('[data-testid="board-src-toggle"]'))
     await waitFor(() => el.querySelector('[data-testid="spec-block-label-A"]') !== null)
 
@@ -319,7 +319,7 @@ describe('BoardPage（W17：Excalidraw 画板页）', () => {
       return json({})
     })
     const el = await mount(<BoardPage pid="p1" src="flow1" />)
-    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement).value === 'flow1')
+    await waitFor(() => (el.querySelector('[data-testid="board-name"]') as HTMLInputElement | null)?.value === 'flow1')
 
     await click(el.querySelector('[data-testid="board-export"]'))
     await waitFor(() => el.querySelector('[data-testid="board-export-confirm"]') !== null)
