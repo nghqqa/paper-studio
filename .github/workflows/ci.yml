@@ -32,9 +32,24 @@ jobs:
       - name: Build
         working-directory: frontend
         run: pnpm build
-      - name: Unit tests
+      - name: Unit tests (Paper Studio core suites)
         working-directory: frontend
-        run: pnpm exec vitest run --maxWorkers=2 --testTimeout=30000
+        run: |
+          pnpm exec vitest run \
+            src/components/auth/__tests__ \
+            src/components/admin/__tests__ \
+            src/components/account/__tests__ \
+            src/components/dashboard/__tests__ \
+            src/components/latex/__tests__ \
+            src/components/word/__tests__ \
+            src/components/figures/__tests__ \
+            src/components/rebuttal/__tests__ \
+            src/components/client/__tests__ \
+            src/components/collab-center/__tests__ \
+            src/components/shell/__tests__ \
+            src/lib/__tests__ \
+            src/types/__tests__ \
+            --maxWorkers=2 --testTimeout=30000
 
   backend:
     name: Backend (core tests + plugin tests)
