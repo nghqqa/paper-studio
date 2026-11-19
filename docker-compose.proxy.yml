@@ -1,0 +1,29 @@
+# Paper Studio — Single-Entry Reverse Proxy Override (Caddy)
+#
+# Exposes BOTH Paper Studio (/) and ONLYOFFICE Docs (/ds/) through ONE domain/port,
+# eliminating multi-port / CORS headaches for self-hosted labs.
+#
+# Usage:
+#   # Set SITE_ADDRESS in .env (e.g. `paper.example.com` for auto-HTTPS or `:80` for LAN HTTP)
+#   # Set PAPER_STUDIO_PUBLIC_ORIGIN=https://paper.example.com
+#   # Set PAPER_STUDIO_ONLYOFFICE_URL=https://paper.example.com/ds
+#   docker compose -f docker-compose.yml -f docker-compose.proxy.yml --profile word up -d
+services:
+  proxy:
+    image: caddy:2-alpine
+    ports:
+      - "${PROXY_HTTP_PORT:-80}:80"
+      - "${PROXY_HTTPS_PORT:-443}:443"
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./deploy/reverse-proxy/Caddyfile.single-origin:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
+  caddy-config:

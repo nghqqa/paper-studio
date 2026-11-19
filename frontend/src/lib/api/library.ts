@@ -172,6 +172,37 @@ export interface SourceCandidate {
 
 const enc = encodeURIComponent
 
+export interface CitationVerifyDiff {
+  field: string
+  local: string
+  remote: string
+}
+
+export interface CitationVerifyItem {
+  reference_id: string
+  citation_key: string
+  status: 'verified' | 'mismatch' | 'retracted' | 'unverified' | 'error'
+  source: string | null
+  title_similarity: number
+  matched_title: string
+  matched_year: string
+  matched_doi: string
+  retraction_status: string
+  diffs: CitationVerifyDiff[]
+  reason: string
+  checked_at: number
+}
+
+export interface CitationVerifyReport {
+  checked_at: number | null
+  total: number
+  batch_size: number
+  truncated: boolean
+  max_batch: number
+  counts: { verified: number; mismatch: number; retracted: number; unverified: number; error: number }
+  items: CitationVerifyItem[]
+}
+
 export const libraryApi = {
   get: (pid: string) => req<LibraryReply>(`/api/projects/${enc(pid)}/library`),
   reindex: (pid: string) =>
@@ -276,4 +307,11 @@ export const libraryApi = {
     ),
   exportUrl: (pid: string, format: 'bibtex' | 'csl-json') =>
     `/api/projects/${enc(pid)}/library/export?format=${format}`,
+  getVerify: (pid: string) =>
+    req<CitationVerifyReport>(`/api/projects/${enc(pid)}/library/verify`),
+  runVerify: (pid: string, referenceIds?: string[]) =>
+    req<CitationVerifyReport>(`/api/projects/${enc(pid)}/library/verify`, {
+      method: 'POST',
+      body: JSON.stringify({ reference_ids: referenceIds ?? null }),
+    }),
 }

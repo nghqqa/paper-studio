@@ -76,6 +76,9 @@ jobs:
             tests/test_rebuttal.py \
             tests/test_paper_proposals.py \
             -q
+          uv run pytest tests/test_showcase_demo.py -q
+          uv run pytest tests/test_citation_verify.py -q
+          uv run pytest tests/test_admin_doctor.py -q
       - name: Run ONLYOFFICE plugin tests
         run: |
           node --test backend/app/office_plugin/tests/*.test.cjs

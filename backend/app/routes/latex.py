@@ -442,6 +442,21 @@ async def create_jcip_demo(request: Request, body: dict | None = None, user: aut
     return _out(project)
 
 
+@demo_router.post("/api/projects/showcase-demo")
+async def create_showcase_demo(request: Request, body: dict | None = None, user: auth.CurrentUser = None):
+    """一键创建全功能演示论文（含 LaTeX + 真实 DOI 文献 + AI 提案台账 + Rebuttal 审稿回复）。"""
+    if config.AUTH_ON and user is None:
+        raise auth.login_required()
+    from app.domain import showcase
+
+    store = request.app.state.store
+    req_pid = str((body or {}).get("id") or "").strip() or None
+    project = await asyncio.to_thread(showcase.create_showcase_project, store, req_pid)
+    await auth.grant_owner(project.id, user)
+    events.emit("case.created", pid=project.id, actor=events.actor_of(user), data={"title": project.title})
+    return _out(project)
+
+
 # --- 受限 LaTeX ZIP 工程导入（两段式：upload 校验暂存 → create 建项） ---
 # 边界见 domain/latex_import.py：限额/穿越/符号链接/嵌套归档/重名/内部路径全部显式拒绝；
 # 平台自行生成 studio.json（不信任上传配置）；先暂存校验，创建为最后一步，失败不留半成品。

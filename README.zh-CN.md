@@ -39,11 +39,12 @@
 
 ### 2. 学术写作与团队协作闭环
 - **AI 提案-确认安全契约与一键 AI 披露声明**：AI 绝不静默改写作者正文。所有精读、润色、改写与 LaTeX 编译错误修复均生成可审阅的差异提案，经人工采纳/编辑后采纳/拒绝/撤销，全程可追溯；支持机构级每日配额、个人自带 API Key（BYOK，凭据不明文回传），以及**基于真实提案台账一键导出中英双语 AI 使用披露声明**（Markdown / LaTeX `\section*{AI Usage Disclosure}`，零编造、可直接附于期刊/顶会投稿）。
-- **文献管理与 Zotero v2**：支持 BibTeX / 7714 文本导入、DOI/arXiv/Crossref/OpenAlex 检索，以及 Zotero 公开群组与个人/私有库增量刷新（用户级加密凭据隔离）。
+- **文献管理、Zotero v2 与参考文献真实性核验（防 AI 幻觉）**：支持 BibTeX / 7714 文本导入、DOI/arXiv/Crossref/OpenAlex 检索，以及 Zotero 公开群组与个人/私有库增量刷新；内置一键**「参考文献真实性核验」**，自动比对权威元数据标出「源已核验 / 字段偏差 / 未检出 / 权威源撤稿」，与「AI 披露声明」构成科研合规双保险。
 - **多轮 Rebuttal 与回复信**：审稿意见自动/手动拆条、关联批注锚点、多轮归档（只读历史）并导出 `.md` / `.tex` 或 Word 回复信。
 - **投稿前体检（Preflight）**：只读检查双语摘要与关键词、章节编号、模板占位残留、未处理修订/批注、引用完整性与双盲匿名化。
 - **权限角色与免登录导师审阅页**：`owner / editor / reviewer / viewer` 服务端强制鉴权；支持签发有时效、可吊销的公开审阅链接，导师免登录即可查看 PDF、页级批注并确认定稿。
-- **管理员模板库**：内置 Apache-2.0 原创中文学术 Word 模板及 IEEE / ACL / ICLR / CVPR / NeurIPS / LNCS / Elsevier 等 LaTeX 种子模板；管理员可上传任意目标期刊 `.docx` 或 LaTeX ZIP，支持元信息编辑、原子替换版本、自动编译/转换验收与封面缩略图。
+- **管理员模板库与系统诊断（System Doctor）**：内置 Apache-2.0 原创中文学术 Word 模板及 IEEE / ACL / ICLR / CVPR / NeurIPS / LNCS / Elsevier 等 LaTeX 种子模板；管理员可上传/替换模板并自动编译验收生成封面缩略图；内置**「系统诊断」**面板一键体检鉴权安全、磁盘、TeXLive/Pandoc、ONLYOFFICE 连通性与 AI 网关配置。
+- **零门槛上手与免注册体验模式**：空首页一键加载「全功能演示论文」（预置 LaTeX + 真实 DOI 文献 + AI 提案台账 + 审稿回复）；支持可选开启 `PAPER_STUDIO_DEMO_MODE=on` 为官网提供免注册一键体验入口。
 
 ## 快速开始
 
@@ -71,7 +72,13 @@ docker compose up -d
 docker compose --profile word up -d
 ```
 
-如需配置 HTTPS 域名反代，可直接复用 [`deploy/reverse-proxy/`](deploy/reverse-proxy/) 下的 Caddy / Nginx 示例配置（已包含 ONLYOFFICE 所需的 WebSocket 与 `X-Forwarded-Proto` 转发头）。
+如需**单域名同源反代**（自动将 `/ds/` 转发至 ONLYOFFICE，无需额外暴露多端口），直接使用内置扩展编排即可：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.proxy.yml --profile word up -d
+```
+
+更多 Caddy / Nginx 独立域名反代配置见 [`deploy/reverse-proxy/`](deploy/reverse-proxy/)。
 
 ### 方式三：本地从源码构建（支持国内镜像加速）
 

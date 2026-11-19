@@ -39,11 +39,12 @@
 
 ### Academic Workflow & Collaboration
 - **Proposal-Confirmation AI Contract & AI Usage Disclosure**: AI never silently overwrites manuscript source. Every reading, polishing, rewriting, or LaTeX compile-fix suggestion is generated as an auditable diff proposal that requires explicit human review (accept / edit & accept / reject / undo). Supports both organization-wide AI quotas, per-user BYOK API keys, and **one-click export of deterministic bilingual AI Usage Disclosure statements** (Markdown / LaTeX `\section*{AI Usage Disclosure}`) strictly verified against the project proposal log.
-- **Zotero v2 & Literature Library**: Import via BibTeX, DOI, arXiv, OpenAlex, Crossref, or Zotero (public groups and private/personal libraries with encrypted/masked per-user API keys and incremental refresh).
+- **Zotero v2 & Citation Fact-Checking**: Import via BibTeX, DOI, arXiv, OpenAlex, Crossref, or Zotero (public groups and private/personal libraries with encrypted/masked per-user API keys and incremental refresh). Includes **one-click Citation Fact-Check** against Crossref/OpenAlex/arXiv to catch hallucinated references, mismatched years/authors, and retracted papers.
 - **Multi-Round Rebuttal & Response Letter**: Split reviewer comments into structured items, link to manuscript comment anchors, track multiple revision rounds, and export formatted Response Letters (`.md` / `.tex` / Word tab).
 - **Submission Preflight Checks**: Read-only rule sets for Chinese journals (`jcip-preflight`, `cn-general`), double-blind anonymization (`double-blind`), and LaTeX structural checks.
 - **Role-Based Access & Guest Review Links**: `owner` / `editor` / `reviewer` / `viewer` permissions enforced server-side, plus token-scoped passwordless public review pages for advisors (PDF preview, page-level annotations, final sign-off).
-- **Admin Template Library**: Upload, edit metadata, atomically replace versions, auto-verify (real LaTeX compile / ONLYOFFICE conversion), and generate cover thumbnails for both Word and LaTeX templates.
+- **Admin Template Library & System Doctor**: Upload, edit metadata, atomically replace versions, auto-verify (real LaTeX compile / ONLYOFFICE conversion), and generate cover thumbnails; built-in **System Doctor** checks auth security, disk space, TeXLive/Pandoc/Poppler, ONLYOFFICE health, and AI gateway status in one click.
+- **Instant Onboarding & Demo Mode**: One-click **Showcase Demo Paper** preloaded with LaTeX, real DOI citations, AI proposal audit records, and Rebuttal items; optional `PAPER_STUDIO_DEMO_MODE=on` for passwordless guest sandboxes.
 
 ## Quick Start
 
@@ -72,7 +73,13 @@ Open `http://localhost:8000` in your browser. The **first registered account** a
 docker compose --profile word up -d
 ```
 
-For HTTPS reverse proxy configurations (Caddy & Nginx, including WebSocket and `X-Forwarded-Proto` headers required by ONLYOFFICE), see [`deploy/reverse-proxy/`](deploy/reverse-proxy/).
+For single-domain HTTPS deployments (exposing both Paper Studio at `/` and ONLYOFFICE at `/ds/` through one Caddy reverse proxy), use the included override:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.proxy.yml --profile word up -d
+```
+
+Additional Caddy & Nginx templates are provided in [`deploy/reverse-proxy/`](deploy/reverse-proxy/).
 
 ### 3. Build Locally (Optional)
 
@@ -100,6 +107,7 @@ We prefer being transparent about current technical boundaries:
 - **Word Citations & Equation Numbering**: Because ONLYOFFICE CE does not expose native Word citation/SEQ fields, citations and equation numbers are platform-managed text/tab-stops with one-click renumbering and integrity verification.
 - **Desktop Word / WPS Fidelity**: Paper Studio preserves font names in `.docx` without redistributing commercial fonts. Mount licensed fonts into `./fonts` on the server and verify final pagination in desktop Word/WPS before submission.
 - **LaTeX Concurrency**: LaTeX source editing uses optimistic locking (`base_sha` conflict detection) rather than real-time CRDT co-editing.
+- **UI Language**: The web interface is currently in Simplified Chinese (full English i18n is on the post-1.0 roadmap; bilingual AI Usage Disclosure export is already built in).
 
 ## Commercial Support & Custom Deployment
 

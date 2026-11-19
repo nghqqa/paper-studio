@@ -1,8 +1,10 @@
-import { useEffect } from 'react'
-import { ArrowRight, BookOpenCheck, CheckCircle2, FileText, GraduationCap, Landmark, Mail, MessageSquare, RefreshCw, Server, ShieldCheck, Users } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ArrowRight, BookOpenCheck, CheckCircle2, FileText, GraduationCap, Landmark, Mail, MessageSquare, RefreshCw, Server, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { BrandMark } from '@/components/auth/AuthFrame'
 import { BRAND_CAPABILITIES, BRAND_NAME_FULL, BRAND_TAGLINE, brandCopyright } from '@/lib/brand'
+import { accountApi } from '@/lib/api/account'
+import { enterWorkspace } from '@/components/auth/session'
 import { useStudio } from '@/store'
 import paperLatexImg from '@/assets/lp/paper-latex.webp'
 import paperWordImg from '@/assets/lp/paper-word.webp'
@@ -63,12 +65,24 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
 
 export function LandingPage() {
   const siteContact = useStudio((s) => s.siteContact)
+  const demoMode = useStudio((s) => s.demoMode)
+  const [demoBusy, setDemoBusy] = useState(false)
   const contactEmail = siteContact.email || import.meta.env.VITE_CONTACT_EMAIL || ''
   const contactWechat = siteContact.wechat || ''
   const contactNote = siteContact.note || ''
   useEffect(() => {
     document.title = `${BRAND_NAME_FULL} — 论文写作与审阅工作空间`
   }, [])
+  const onDemoEnter = async () => {
+    setDemoBusy(true)
+    try {
+      await accountApi.demoLogin()
+      await useStudio.getState().loadMe()
+      await enterWorkspace(null)
+    } finally {
+      setDemoBusy(false)
+    }
+  }
   return (
     <main className="min-h-dvh bg-app">
       {/* 顶栏 */}
@@ -100,10 +114,15 @@ export function LandingPage() {
           <p className="mt-4 max-w-[56ch] text-base text-fg-muted md:text-lg">
             {BRAND_TAGLINE}。Word 沿用期刊模板，LaTeX 保留原生工程；公式、批注、投稿计划和保存版本都围绕同一篇论文管理。
           </p>
-          <div className="mt-8 flex items-center gap-3">
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Button asChild size="lg">
               <a href="#/login">开始使用 <ArrowRight className="size-4" aria-hidden /></a>
             </Button>
+            {demoMode && (
+              <Button variant="secondary" size="lg" loading={demoBusy} loadingLabel="进入体验中…" onClick={() => void onDemoEnter()} data-testid="landing-demo-btn">
+                <Sparkles className="size-4" aria-hidden /> 免注册一键体验
+              </Button>
+            )}
             <Button asChild variant="secondary" size="lg">
               <a href="#features">了解功能</a>
             </Button>

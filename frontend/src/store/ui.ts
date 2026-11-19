@@ -142,6 +142,8 @@ export interface UiSlice extends UiPersisted {
   structWriterEnabled: boolean | null
   wordEditorEnabled: boolean | null
   wordEditorReady: boolean | null
+  /** 是否开启官网免注册一键体验模式（/api/meta.demo_mode） */
+  demoMode: boolean
   /** 站点公开联系方式（/api/meta.contact；部署方通过环境变量可选配置） */
   siteContact: { email: string; wechat: string; note: string }
   fetchMeta(): Promise<void>
@@ -279,6 +281,7 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
   structWriterEnabled: null,
   wordEditorEnabled: null,
   wordEditorReady: null,
+  demoMode: false,
   siteContact: { email: '', wechat: '', note: '' },
   async fetchMeta() {
     set({ metaError: null })
@@ -291,6 +294,7 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
         struct_writer?: boolean
         word_editor?: boolean
         word_editor_ready?: boolean
+        demo_mode?: boolean
         contact?: { email?: string; wechat?: string; note?: string }
       }
       if (m.product !== 'paper' && m.product !== 'patent') throw new Error('工作区配置不完整')
@@ -300,6 +304,7 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
         structWriterEnabled: Boolean(m.struct_writer),
         wordEditorEnabled: Boolean(m.word_editor),
         wordEditorReady: Boolean(m.word_editor_ready),
+        demoMode: Boolean(m.demo_mode),
         siteContact: {
           email: (m.contact?.email || '').trim(),
           wechat: (m.contact?.wechat || '').trim(),

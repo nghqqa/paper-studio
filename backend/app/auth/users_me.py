@@ -89,6 +89,8 @@ async def update_me(body: MeIn, user: CurrentUser):
         mgr = UserManager(SQLAlchemyUserDatabase(s, User))
         me = await s.get(User, user.id)
         if body.password is not None:
+            if me.email == config.DEMO_USER_EMAIL:
+                raise HTTPException(403, error_detail("forbidden", "体验账号不支持修改密码", detail="password"))
             form = OAuth2PasswordRequestForm(username=me.email, password=body.password.current)
             if await mgr.authenticate(form) is None:
                 raise HTTPException(403, error_detail("forbidden", "当前密码不正确", detail="password"))

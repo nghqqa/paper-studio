@@ -26,7 +26,7 @@ from pydantic import BaseModel, Field
 
 from app import config
 from app.auth import CurrentUser, login_required
-from app.domain import events, org, org_audit
+from app.domain import doctor, events, org, org_audit
 from app.domain.org import ORG_NAME_MAX, load_org, save_org
 from app.errors import error_detail, kind_error, not_implemented
 from app.schemas import AiProviderTestIn, OrgAuditResponse, OrgSettings, OrgSettingsPatch
@@ -269,3 +269,10 @@ async def get_audit_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": 'attachment; filename="org-audit.csv"'},
     )
+
+
+@router.get("/doctor")
+async def admin_doctor(user: CurrentUser):
+    """平台部署健康诊断（超管只读；不返回任何密钥原文）。"""
+    _require_superuser(user)
+    return await doctor.run_doctor()

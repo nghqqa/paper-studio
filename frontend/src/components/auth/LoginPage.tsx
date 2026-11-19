@@ -1,10 +1,11 @@
 import { useEffect, useId, useState, type FormEvent } from 'react'
-import { CircleAlert, Eye, EyeOff, Info } from 'lucide-react'
+import { CircleAlert, Eye, EyeOff, Info, Sparkles } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
+import { accountApi } from '@/lib/api/account'
 import { readHashPid } from '@/lib/hash'
 import { cn, touchHit } from '@/lib/utils'
 import { pageTitle } from '@/lib/brand'
@@ -38,6 +39,8 @@ export function LoginPage() {
   const login = useStudio((s) => s.login)
   const register = useStudio((s) => s.register)
   const error = useStudio((s) => s.authError)
+  const demoMode = useStudio((s) => s.demoMode)
+  const [demoBusy, setDemoBusy] = useState(false)
   const [mode, setMode] = useState<Mode>('login')
   const isDesktop = useIsDesktop()
   const [email, setEmail] = useState('')
@@ -240,6 +243,29 @@ export function LoginPage() {
             <Button type="submit" size="xl" className="w-full" loading={busy} loadingLabel="请稍候…" data-testid="login-submit">
               {mode === 'login' ? '登录' : '注册并登录'}
             </Button>
+            {demoMode && (
+              <Button
+                type="button"
+                variant="secondary"
+                size="lg"
+                className="w-full"
+                loading={demoBusy}
+                loadingLabel="进入体验工作台…"
+                onClick={async () => {
+                  setDemoBusy(true)
+                  try {
+                    await accountApi.demoLogin()
+                    await useStudio.getState().loadMe()
+                    await enterWorkspace(returnPid)
+                  } finally {
+                    setDemoBusy(false)
+                  }
+                }}
+                data-testid="login-demo-btn"
+              >
+                <Sparkles className="size-4" aria-hidden /> 免注册一键体验演示工作台
+              </Button>
+            )}
           </form>
 
           <div className="mt-4 flex items-center justify-between gap-3 text-xs text-fg-muted">

@@ -443,6 +443,7 @@ async def meta():
         "struct_writer": config.STRUCT_WRITER_ON,  # 结构化中文论文（实验，默认关闭）
         "word_editor": config.WORD_EDITOR_ON,
         "word_editor_ready": word_documents.ready(),
+        "demo_mode": config.DEMO_MODE,
         "contact": {
             "email": config.CONTACT_EMAIL,
             "wechat": config.CONTACT_WECHAT,

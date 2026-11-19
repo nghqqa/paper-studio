@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Download, Eraser, FilePlus2,
-  Loader2, ListOrdered, Plus, Quote, RotateCw, Search, ShieldAlert, Sparkles, Trash2,
+  Loader2, ListOrdered, Plus, Quote, RotateCw, Search, ShieldAlert, ShieldCheck, Sparkles, Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import {
   libraryApi,
+  type CitationVerifyItem,
+  type CitationVerifyReport,
   type ImportReply,
   type LibraryEntry,
   type LibraryReply,
@@ -83,6 +85,40 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [expanded, setExpanded] = useState<string | null>(null)
   const [citeCommand, setCiteCommand] = useState('')
+  const [verifyReport, setVerifyReport] = useState<CitationVerifyReport | null>(null)
+  const [verifyBusy, setVerifyBusy] = useState(false)
+
+  const verifyMap = useMemo(() => {
+    const m = new Map<string, CitationVerifyItem>()
+    for (const it of verifyReport?.items ?? []) m.set(it.reference_id, it)
+    return m
+  }, [verifyReport])
+
+  const loadVerifyCache = useCallback(async () => {
+    try {
+      const r = await libraryApi.getVerify(pid)
+      if (r.total > 0) setVerifyReport(r)
+    } catch { /* 旧接口无缓存时静默忽略 */ }
+  }, [pid])
+
+  const runFactCheck = useCallback(async () => {
+    setVerifyBusy(true)
+    setError('')
+    try {
+      const targetIds = selected.size > 0 ? Array.from(selected) : undefined
+      const r = await libraryApi.runVerify(pid, targetIds)
+      setVerifyReport(r)
+      setNotice(
+        `真实性核验完成：已核验 ${r.counts.verified} · 偏差 ${r.counts.mismatch} · 未检出 ${r.counts.unverified}`
+        + (r.counts.retracted ? ` · 已撤稿 ${r.counts.retracted}` : '')
+        + (r.truncated ? `（单次上限 ${r.max_batch} 条）` : ''),
+      )
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setVerifyBusy(false)
+    }
+  }, [pid, selected])
 
   const refresh = useCallback(async () => {
     setBusy(true)
@@ -106,7 +142,8 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
 
   useEffect(() => {
     void refresh()
-  }, [refresh, reloadSignal])
+    void loadVerifyCache()
+  }, [refresh, loadVerifyCache, reloadSignal])
 
   const entries = lib?.entries ?? []
   const filtered = useMemo(() => {
@@ -145,7 +182,19 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
         文献
         <span>{entries.length}</span>
         {lib?.mode === 'bib' && <span className="text-2xs">来源：{lib.bib_files.join('、') || '（无 .bib）'}</span>}
-        <Button variant="ghost" size="sm" className="ml-auto h-6 px-1.5" onClick={() => void refresh()} data-testid="library-refresh" title="重新解析 .bib">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-6 gap-1 px-1.5 text-2xs"
+          disabled={verifyBusy || entries.length === 0}
+          onClick={() => void runFactCheck()}
+          data-testid="library-verify-btn"
+          title="通过 Crossref / OpenAlex / arXiv 核验参考文献真实性（防 AI 幻觉）"
+        >
+          {verifyBusy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <ShieldCheck aria-hidden className="size-3" />}
+          真实性核验
+        </Button>
+        <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => void refresh()} data-testid="library-refresh" title="重新解析 .bib">
           {busy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <RotateCw aria-hidden className="size-3" />}
         </Button>
       </div>
@@ -292,6 +341,7 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
                         {e.year && <span>· {e.year}</span>}
                         {e.venue && <span className="truncate">· {e.venue}</span>}
                         <VerifiedBadge entry={e} />
+                        <FactCheckBadge item={verifyMap.get(e.reference_id)} />
                       </span>
                     </button>
                     <button className="shrink-0 p-0.5 text-fg-muted" onClick={() => setExpanded(expanded === e.reference_id ? null : e.reference_id)} aria-label="详情">
@@ -314,6 +364,44 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
 
       {tab === 'diagnostics' && <DiagnosticsTab lib={lib} onGoList={(rid) => { setExpanded(rid); setTab('list') }} />}
     </div>
+  )
+}
+
+function FactCheckBadge({ item }: { item?: CitationVerifyItem }) {
+  if (!item) return null
+  if (item.status === 'verified') {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-ok/10 px-1 text-ok" title={item.reason} data-testid={`factcheck-badge-${item.citation_key}`}>
+        <ShieldCheck aria-hidden className="size-3" /> 源已核验
+      </span>
+    )
+  }
+  if (item.status === 'retracted') {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-danger/10 px-1 text-danger" title={item.reason} data-testid={`factcheck-badge-${item.citation_key}`}>
+        <ShieldAlert aria-hidden className="size-3" /> 权威源撤稿
+      </span>
+    )
+  }
+  if (item.status === 'mismatch') {
+    const detail = item.diffs.map((d) => `${d.field}: ${d.local} → ${d.remote}`).join('; ')
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-warning/15 px-1 text-warning" title={`${item.reason}${detail ? ` (${detail})` : ''}`} data-testid={`factcheck-badge-${item.citation_key}`}>
+        <AlertTriangle aria-hidden className="size-3" /> 字段偏差
+      </span>
+    )
+  }
+  if (item.status === 'unverified') {
+    return (
+      <span className="inline-flex items-center gap-0.5 rounded bg-danger/10 px-1 text-danger" title={item.reason} data-testid={`factcheck-badge-${item.citation_key}`}>
+        <CircleAlert aria-hidden className="size-3" /> 未检出
+      </span>
+    )
+  }
+  return (
+    <span className="inline-flex items-center gap-0.5 rounded bg-sunken px-1 text-fg-muted" title={item.reason} data-testid={`factcheck-badge-${item.citation_key}`}>
+      核验异常
+    </span>
   )
 }
 

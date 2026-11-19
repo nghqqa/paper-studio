@@ -52,9 +52,14 @@ class ShareIn(BaseModel):
 if config.AUTH_ON:
     from app.auth import acl
     from app.auth.schemas import UserCreate, UserRead
-    from app.auth.users import auth_backend, fastapi_users
-    from app.auth.db import get_user_manager
+    from app.auth.users import auth_backend, fastapi_users, get_jwt_strategy
+    from app.auth.db import SessionLocal, UserManager, get_user_manager, init_db
+    from app.auth.models import User
     from fastapi_users import exceptions as user_exceptions
+    from fastapi_users.db import SQLAlchemyUserDatabase
+    from sqlalchemy import select
+    import asyncio
+    import secrets
 
     class SetupPasswordIn(BaseModel):
         token: str = Field(min_length=1, max_length=4096)
@@ -71,6 +76,40 @@ if config.AUTH_ON:
         except user_exceptions.InvalidPasswordException:
             raise HTTPException(422, error_detail("validation", "密码不符合要求"))
         return {"ok": True}
+
+    @router.post("/auth/demo-login")
+    async def demo_login(request: Request):
+        """免注册一键体验登录（仅 PAPER_STUDIO_DEMO_MODE=on 时开放；隔离非超管账号，首次自动种 1 份演示论文）。"""
+        if not config.DEMO_MODE:
+            raise HTTPException(404, error_detail("not_found", "当前站点未开启免注册体验模式"))
+        await init_db()
+        async with SessionLocal() as session:
+            demo_user = (
+                await session.execute(select(User).where(User.email == config.DEMO_USER_EMAIL))
+            ).scalar_one_or_none()
+            if demo_user is None:
+                mgr = UserManager(SQLAlchemyUserDatabase(session, User))
+                demo_user = User(
+                    email=config.DEMO_USER_EMAIL,
+                    hashed_password=mgr.password_helper.hash(secrets.token_urlsafe(32)),
+                    is_active=True,
+                    is_superuser=False,
+                    is_verified=True,
+                    display_name="体验访客",
+                    title="研究员",
+                )
+                session.add(demo_user)
+                await session.commit()
+                await session.refresh(demo_user)
+        # 首次进入若名下无项目，自动生成 1 份全功能演示论文
+        store = request.app.state.store
+        visible = await auth.visible_pids(demo_user, store.list_ids())
+        if not visible:
+            from app.domain import showcase
+
+            project = await asyncio.to_thread(showcase.create_showcase_project, store)
+            await auth.grant_owner(project.id, demo_user)
+        return await auth_backend.login(get_jwt_strategy(), demo_user)
 
     router.include_router(fastapi_users.get_register_router(UserRead, UserCreate), prefix="/auth")
     router.include_router(fastapi_users.get_auth_router(auth_backend), prefix="/auth/cookie")

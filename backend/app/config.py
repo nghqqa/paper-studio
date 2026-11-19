@@ -157,3 +157,7 @@ LIBRARY_ALLOWED_HOSTS = ("api.crossref.org", "api.openalex.org", "export.arxiv.o
 CONTACT_EMAIL = _env("PAPER_STUDIO_CONTACT_EMAIL", "PATENT_STUDIO_CONTACT_EMAIL", "").strip()
 CONTACT_WECHAT = _env("PAPER_STUDIO_CONTACT_WECHAT", "PATENT_STUDIO_CONTACT_WECHAT", "").strip()
 CONTACT_NOTE = _env("PAPER_STUDIO_CONTACT_NOTE", "PATENT_STUDIO_CONTACT_NOTE", "").strip()
+
+# 免注册一键体验模式（默认关闭；开启后开放 POST /api/auth/demo-login 隔离非超管访客账号）
+DEMO_MODE = _env("PAPER_STUDIO_DEMO_MODE", "PATENT_STUDIO_DEMO_MODE", "off").strip().lower() == "on"
+DEMO_USER_EMAIL = "demo@demo.paperstudio.org"

@@ -258,6 +258,12 @@ export const latexApi = {
       '/api/projects/jcip-demo',
       { method: 'POST', body: JSON.stringify({}) },
     ),
+  /** 全功能演示论文（含 LaTeX + 真实 DOI 文献 + AI 提案台账 + Rebuttal 审稿回复） */
+  createShowcaseDemo: () =>
+    req<{ id: string; title: string; source_format: string; latex: { main: string; engine: string } }>(
+      '/api/projects/showcase-demo',
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
 
   /* ---- 工程文件面板（v0.4.2 CoCraft 式）：新建 / 上传 / ZIP 合并 / 整包下载 / Issues ---- */
   createFile: (pid: string, rel: string, content = '') =>

@@ -24,7 +24,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app import auth, atomic, config
-from app.domain import gbt7714, library, library_sources, zotero_credentials, zotero_sources as zotero
+from app.domain import citation_verify, gbt7714, library, library_sources, zotero_credentials, zotero_sources as zotero
 from app.domain.library import (
     KEY_RE,
     RID_RE,
@@ -1110,3 +1110,28 @@ async def ai_suggest(pid: str, rid: str, request: Request, user: auth.CurrentUse
     ent.suggested_model = result.model
     await _persist_entry(project, index, ent, mode)
     return {"suggested": suggested, "model": result.model, "note": "AI 建议未验证；采纳前请先经外部来源查询比对确认"}
+
+
+# ---------------------------------------------------------------- 参考文献真实性核验（Citation Fact-Check） ----
+
+
+class VerifyIn(BaseModel):
+    reference_ids: list[str] | None = Field(default=None, max_length=100)
+
+
+@router.get("/library/verify")
+async def get_citation_verify(pid: str, request: Request):
+    """读取最近一次文献真实性核验缓存（只读）。"""
+    project, _store = _project(request, pid)
+    _require_paperish(project)
+    return await asyncio.to_thread(citation_verify.load_cached, project.dir)
+
+
+@router.post("/library/verify")
+async def run_citation_verify(pid: str, request: Request, body: VerifyIn | None = None):
+    """批量通过 Crossref / OpenAlex / arXiv 核验项目文献真实性（单次最多 25 条，只读不改正文）。"""
+    project, _store = _project(request, pid)
+    _require_paperish(project)
+    index = await _current_index(project)
+    rids = body.reference_ids if body and body.reference_ids else None
+    return await citation_verify.verify_entries(project.dir, index.entries, rids=rids)

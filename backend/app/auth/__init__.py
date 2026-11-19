@@ -94,6 +94,7 @@ ROUTE_ROLE = {
     # ---- v0.4 智能文献管理：读/外部查询 viewer；写（提交/编辑/删除/合并/建bib）走默认 editor ----
     "/api/projects/{pid}/library/import": "viewer",  # 解析预览，不落盘
     "/api/projects/{pid}/library/lookup": "viewer",  # 外部元数据查询，不落盘
+    "/api/projects/{pid}/library/verify": "viewer",  # 参考文献真实性核验（只读+写缓存）
     "/api/projects/{pid}/library/reindex": "viewer",  # 只写 .studio 缓存视图
     "/api/projects/{pid}/library/citations": "viewer",
     "/api/projects/{pid}/library/export": "viewer",

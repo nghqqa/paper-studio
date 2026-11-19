@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Bot, Building2, LayoutTemplate, ScrollText, Tags, Users } from 'lucide-react'
+import { Bot, Building2, LayoutTemplate, ScrollText, Stethoscope, Tags, Users } from 'lucide-react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Tag } from '@/components/ui/tag'
 import { SubNav, useHashTab, type SubNavItem } from '@/components/account/SubNav'
@@ -15,12 +15,13 @@ import { cn } from '@/lib/utils'
 import type { Org } from '@/types/account'
 import { AiPanel } from './AiPanel'
 import { AuditPanel } from './AuditPanel'
+import { DoctorPanel } from './DoctorPanel'
 import { MemberTable } from './MemberTable'
 import { OrgPanel } from './OrgPanel'
 import { PaperTemplatesPanel } from './PaperTemplatesPanel'
 
-export type AdminTab = 'members' | 'org' | 'audit' | 'ai' | 'templates'
-export const ADMIN_TABS: readonly AdminTab[] = ['members', 'org', 'audit', 'ai', 'templates']
+export type AdminTab = 'members' | 'org' | 'audit' | 'ai' | 'templates' | 'doctor'
+export const ADMIN_TABS: readonly AdminTab[] = ['members', 'org', 'audit', 'ai', 'templates', 'doctor']
 
 const NAV: readonly SubNavItem<AdminTab>[] = [
   { value: 'members', label: '成员', icon: <Users aria-hidden />, href: '#/admin?tab=members', 'data-testid': 'admin-tab-members' },
@@ -28,6 +29,7 @@ const NAV: readonly SubNavItem<AdminTab>[] = [
   { value: 'audit', label: '审计', icon: <ScrollText aria-hidden />, href: '#/admin?tab=audit', 'data-testid': 'admin-tab-audit' },
   { value: 'ai', label: 'AI', icon: <Bot aria-hidden />, href: '#/admin?tab=ai', 'data-testid': 'admin-tab-ai' },
   { value: 'templates', label: '论文模板', icon: <LayoutTemplate aria-hidden />, href: '#/admin?tab=templates', 'data-testid': 'admin-tab-templates' },
+  { value: 'doctor', label: '系统诊断', icon: <Stethoscope aria-hidden />, href: '#/admin?tab=doctor', 'data-testid': 'admin-tab-doctor' },
 ]
 
 const TITLE: Record<AdminTab, { h: string; p: string }> = {
@@ -36,6 +38,7 @@ const TITLE: Record<AdminTab, { h: string; p: string }> = {
   audit: { h: '审计', p: '登录、案卷、分享、下载、AI 外发与递交等关键操作的留痕，可按条件导出 CSV。' },
   ai: { h: 'AI', p: '机构级 AI 外发开关、模型路由与用量预算。' },
   templates: { h: '论文模板库', p: '管理 Word 和 LaTeX 完整模板。添加后供全平台新建项目使用。' },
+  doctor: { h: '系统诊断', p: '一键体检部署环境、编译工具链、ONLYOFFICE 连通性与安全配置。' },
 }
 
 /**
@@ -101,7 +104,7 @@ export function AdminPage() {
         />
       ) : (
         <div className={isDesktop ? 'flex items-start gap-10' : 'grid gap-section-m'} data-testid="admin-card" data-tab={tab}>
-          <SubNav items={NAV.filter((item) => paper || item.value !== 'templates').map((item) => paper && item.value === 'org' ? { ...item, label: '团队设置' } : item)} value={tab} onValueChange={setTab} aria-label={paper ? '平台管理' : '机构管理'} className={isDesktop ? 'sticky top-0 w-settings-nav' : undefined} />
+          <SubNav items={NAV.filter((item) => paper || (item.value !== 'templates' && item.value !== 'doctor')).map((item) => paper && item.value === 'org' ? { ...item, label: '团队设置' } : item)} value={tab} onValueChange={setTab} aria-label={paper ? '平台管理' : '机构管理'} className={isDesktop ? 'sticky top-0 w-settings-nav' : undefined} />
           <div className={cn('grid min-w-0 flex-1 gap-6', tab !== 'members' && tab !== 'audit' && tab !== 'templates' && 'max-w-form')}>
             <header>
               <h2 className="text-xl font-semibold text-fg-strong" data-testid="admin-section-title">
@@ -183,6 +186,7 @@ export function AdminPage() {
             {tab === 'audit' && <AuditPanel />}
             {tab === 'ai' && <AiPanel />}
             {tab === 'templates' && <PaperTemplatesPanel mobile={!isDesktop} />}
+            {tab === 'doctor' && <DoctorPanel />}
           </div>
         </div>
       )}

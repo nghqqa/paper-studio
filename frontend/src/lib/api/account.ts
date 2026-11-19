@@ -3,6 +3,22 @@ import type { AuditEntry, Pat, PatCreated, User } from '../types'
 import type { AdminUser, AdminUserIn, MeIn, Org } from '@/types/account'
 import type { AiUsageSummary, OrgAuditQuery, OrgAuditResponse, OrgSettings } from '@/types/org'
 
+export interface DoctorCheck {
+  id: string
+  name: string
+  status: 'ok' | 'warn' | 'error' | 'off'
+  summary: string
+  hint: string
+}
+
+export interface DoctorReport {
+  overall: 'ok' | 'warn' | 'error'
+  checked_at: number
+  product: string
+  demo_mode: boolean
+  checks: DoctorCheck[]
+}
+
 export const accountApi = {
   me: () => req<User | undefined>('/api/users/me'),
   register: (email: string, password: string, display_name = '') =>
@@ -18,12 +34,15 @@ export const accountApi = {
     await handle<void>(r)
   },
   logout: () => req<void>('/api/auth/cookie/logout', { method: 'POST' }),
+  /** 免注册一键体验登录（仅 PAPER_STUDIO_DEMO_MODE=on 站点可用） */
+  demoLogin: () => req<void>('/api/auth/demo-login', { method: 'POST' }),
   putMe: (body: MeIn) => req<User>('/api/users/me', { method: 'PUT', body: JSON.stringify(body) }),
   adminUsers: () => req<AdminUser[]>('/api/admin/users'),
   updateAdminUser: (userId: string, patch: AdminUserIn) =>
     req<AdminUser>(`/api/admin/users/${encodeURIComponent(userId)}`, { method: 'PUT', body: JSON.stringify(patch) }),
   org: () => req<Org>('/api/admin/org'),
   putOrg: (body: Org) => req<Org>('/api/admin/org', { method: 'PUT', body: JSON.stringify(body) }),
+  doctor: () => req<DoctorReport>('/api/admin/doctor'),
 
   /* ---- R8 实时协同（docs/plan/11 §3；后端 app/collab/routes.py）---- */
   /** 房间状态；PATENT_STUDIO_COLLAB=off ⇒ {enabled:false, rooms:[]}；G1 未落地 ⇒ 501 */
