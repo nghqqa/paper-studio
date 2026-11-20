@@ -20,9 +20,10 @@ RULESET_ID = "jcip-preflight"
 RULESET_VERSION = "1"
 DEFAULT_RULESET = RULESET_ID
 
-# 模板占位段前缀（取自 jcip template.docx 原文）——残留即"仍是模板占位"
+# 模板占位段前缀（取自 jcip template.docx 原文）——残留即"仍是模板占位"。
+# 注意：「文章编号：1003-0077（2017）00-0000-00」由编辑部录用排期后填写，
+# 作者投稿与终稿保留默认占位完全合规，不列入残留告警。
 _PLACEHOLDERS = (
-    "文章编号：1003-0077",
     "中文标题题目三号",
     "Author1 , author1,2",
     "摘要：中文摘要100-300字",
@@ -53,7 +54,7 @@ _SRC_CN_CITATION = "通用投稿规范（模板未明示）：正文顺序引用
 # --- double-blind/1 来源（同上：通用双盲评审规范，不做"是否够匿名"的语义判断） ---
 _SRC_BLIND = "通用双盲评审规范（模板未明示）：送审稿不应残留作者/单位身份或资助信息"
 
-_CITE_RE = re.compile(r"\[([0-9]{1,3}(?:\s*[,，]\s*[0-9]{1,3})*)\]")
+_CITE_RE = re.compile(r"\[([0-9]{1,3}(?:\s*(?:[,，]|[-–—~])\s*[0-9]{1,3})*)\]")
 _ENTRY_RE = re.compile(r"^\[([0-9]{1,3})\]")
 _SECTION_RE = re.compile(r"^\d+(\.\s*\d+)?\s+\S")
 
@@ -136,14 +137,62 @@ def _load_doc(docx_bytes: bytes):
         return None, str(e)
 
 
-def _iter_texts(container):
-    """正文所有文本（含表格单元格，含嵌套）：引用与屏蔽词扫描的完整范围（本轮审查问题 2）。"""
+def _para_has_numpr(para) -> bool:
+    """判断段落是否启用了 Word 自动编号列表（自身 pPr/numPr 或样式继承 numPr）。"""
+    p_el = getattr(para, "_p", None)
+    if p_el is not None:
+        ppr = p_el.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr")
+        if ppr is not None and ppr.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numPr") is not None:
+            return True
+    style = getattr(para, "style", None)
+    s_el = getattr(style, "_element", None)
+    if s_el is not None:
+        ppr = s_el.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr")
+        if ppr is not None and ppr.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}numPr") is not None:
+            return True
+    return False
+
+
+def _iter_text_records(container, *, in_table: bool = False):
+    """正文所有文本记录 (text, is_list_item, in_table)（含表格单元格，含嵌套）。"""
     for para in container.paragraphs:
-        yield para.text
+        yield para.text, _para_has_numpr(para), in_table
     for table in container.tables:
         for row in table.rows:
             for cell in row.cells:
-                yield from _iter_texts(cell)
+                yield from _iter_text_records(cell, in_table=True)
+
+
+def _iter_texts(container):
+    """正文所有文本（含表格单元格，含嵌套）：引用与屏蔽词扫描的完整范围（本轮审查问题 2）。"""
+    for text, _is_list, _in_tbl in _iter_text_records(container):
+        yield text
+
+
+def _is_ref_heading(text: str) -> bool:
+    compact = re.sub(r"\s+", "", text)
+    if compact.startswith("参考文献") and len(compact) <= 12:
+        return True
+    return text.strip().lower() in ("references", "reference")
+
+
+def _expand_cite_group(raw: str) -> list[int]:
+    """解析 [1,2] / [1-3] / [1,3–5] 为顺序编号列表。"""
+    nums: list[int] = []
+    for seg in re.split(r"[,，]", raw):
+        seg = seg.strip()
+        if not seg:
+            continue
+        m_rng = re.match(r"^(\d{1,3})\s*[-–—~]\s*(\d{1,3})$", seg)
+        if m_rng:
+            lo, hi = int(m_rng.group(1)), int(m_rng.group(2))
+            if 1 <= lo <= hi <= 999 and (hi - lo) <= 50:
+                nums.extend(range(lo, hi + 1))
+        elif seg.isdigit():
+            n = int(seg)
+            if 1 <= n <= 999:
+                nums.append(n)
+    return nums
 
 
 def _frag(text: str, start: int, width: int = 34, ctx: int = 10) -> str:
@@ -152,13 +201,21 @@ def _frag(text: str, start: int, width: int = 34, ctx: int = 10) -> str:
     return text[lo:min(len(text), start + width)].replace("\n", " ").strip()
 
 
-def _citation_integrity_item(all_texts: list[str], is_placeholder, rule_id: str, source: str) -> dict:
+def _citation_integrity_item(
+    records: list[tuple[str, bool, bool]],
+    is_placeholder,
+    rule_id: str,
+    source: str,
+) -> dict:
     """文献编号完整性（顺序标引 + 表条目对账；范围严格界定，本轮审查问题 2）。
     在合并文本流（段落+表格单元格）上定位：托管块只认唯一完整头尾之间的条目；
     孤立/重复/倒置标记明确告警；无托管块退回「参考文献」标题后的**连续条目区**
-    （首个非条目段即止——附录编号不得补齐缺失文献）；正文引用扫描含表格内文本。
+    （兼容显式 `[n]` 文本前缀与 Word 自动编号 `<w:numPr>` 列表，跳过紧邻空行或英文
+    `References` 副标题，首个非条目段即止——附录编号不得补齐缺失文献）；
+    正文引用扫描含表格内文本及 `[1-3]` 范围引用，文献表未解析到条目时仍如实统计正文引用数。
     jcip 与 cn-general 共用同一实现，仅 rule_id/来源不同。"""
     try:
+        all_texts = [r[0] for r in records]
         _HEAD = "[参考文献-平台生成]"
         _TAIL = "[参考文献-平台生成]（完）"
         head_idx = next((i for i, t in enumerate(all_texts)
@@ -166,8 +223,10 @@ def _citation_integrity_item(all_texts: list[str], is_placeholder, rule_id: str,
         tail_idx = next((i for i, t in enumerate(all_texts) if t.strip().startswith(_TAIL)), None)
         marker_problem = ""
         bib_entries: list[int] = []
-        cite_stop = len(all_texts)
         managed_ok = False
+        ref_idx = None
+        entry_start = -1
+        entry_end = -1
         if head_idx is not None or tail_idx is not None:
             # 托管块：只认唯一完整头尾之间的条目；异常形态明确告警，附录编号不补位
             if head_idx is None:
@@ -186,42 +245,57 @@ def _citation_integrity_item(all_texts: list[str], is_placeholder, rule_id: str,
                     marker_problem = f"存在重复的托管块标记（头 {dup_head + 1}/尾 {dup_tail + 1} 个）"
             if not marker_problem and head_idx is not None and tail_idx is not None:
                 managed_ok = True
-                cite_stop = head_idx
-                for t in all_texts[head_idx + 1:tail_idx]:
-                    m = _ENTRY_RE.match(t.strip())
+                for t, is_list, _in_tbl in records[head_idx + 1:tail_idx]:
+                    s = t.strip()
+                    m = _ENTRY_RE.match(s)
                     if m:
                         bib_entries.append(int(m.group(1)))
+                    elif is_list and s:
+                        bib_entries.append(len(bib_entries) + 1)
         if not managed_ok:
             # 无托管块（或托管块异常）时退回「参考文献」标题段的连续条目区
-            ref_idx = next((i for i, t in enumerate(all_texts)
-                            if t.strip().startswith("参考文献") and len(t.strip()) <= 12), None)
+            ref_idx = next((i for i, (t, _l, in_tbl) in enumerate(records)
+                            if not in_tbl and _is_ref_heading(t)), None)
             if ref_idx is not None:
-                cite_stop = ref_idx
-                for t in all_texts[ref_idx + 1:]:
-                    m = _ENTRY_RE.match(t.strip())
-                    if not m:
+                i = ref_idx + 1
+                # 允许标题后紧跟空行或中英双标题（如 参考文献 + References）
+                while i < len(records) and not records[i][2]:
+                    s = records[i][0].strip()
+                    if not s or s.lower() in ("references", "reference"):
+                        i += 1
+                        continue
+                    break
+                entry_start = i
+                while i < len(records) and not records[i][2]:
+                    s = records[i][0].strip()
+                    is_list = records[i][1]
+                    m = _ENTRY_RE.match(s)
+                    if m:
+                        bib_entries.append(int(m.group(1)))
+                        i += 1
+                    elif is_list and s:
+                        bib_entries.append(len(bib_entries) + 1)
+                        i += 1
+                    else:
                         break  # 连续条目区结束：其后附录编号不再计入
-                    bib_entries.append(int(m.group(1)))
+                entry_end = i
         cited_seq: list[int] = []
         if managed_ok:
-            # 引用扫描=除托管块（头..尾）以外的全部文本：块前正文+块后附录正文都算，
-            # 条目区本身（"[1] 文献一"形态）不计为引用
+            # 引用扫描=除托管块（头..尾）以外的全部文本：块前正文+块后附录正文+表格都算
             cite_texts = all_texts[:head_idx] + all_texts[tail_idx + 1:]
         elif ref_idx is not None and bib_entries:
-            cite_texts = list(all_texts)
-            entry_end = ref_idx + 1 + len(bib_entries)
-            cite_texts = [t for i, t in enumerate(all_texts) if not (ref_idx + 1 <= i < entry_end)]
+            cite_texts = [t for i, t in enumerate(all_texts) if not (entry_start <= i < entry_end)]
+        elif ref_idx is not None:
+            # 文献表未解析出条目时，仍扫描标题前的正文与全部表格引用，不再误报「正文引用 0 处」
+            cite_texts = [t for i, (t, _l, in_tbl) in enumerate(records) if i < ref_idx or in_tbl]
         else:
             # 无文献表可定位：引用扫描无从对账——条目以 unknown 落条目（见下）
             cite_texts = []
         for t in cite_texts:
             if is_placeholder(t):
                 continue
-            for m in _CITE_RE.finditer(t):   # 段内/表格单元格内多个 [n] 都要收集
-                for part in re.split(r"[,，]", m.group(1)):
-                    num = int(part)
-                    if 1 <= num <= 999:
-                        cited_seq.append(num)
+            for m in _CITE_RE.finditer(t):   # 段内/表格单元格内多个 [n]/[1-3] 都要收集
+                cited_seq.extend(_expand_cite_group(m.group(1)))
         if marker_problem:
             return {"rule_id": rule_id, "status": "warn",
                     "evidence": (marker_problem + "——请手动处理后重试")[:300], "source": source}
@@ -278,8 +352,9 @@ def run_checks(docx_bytes: bytes) -> dict:
         parse_error = f"段落提取失败：{doc_err}"
         return {"items": _unknown_items_jcip(parse_error), "parse_error": parse_error}
 
-    all_texts = list(_iter_texts(doc))
-    paragraphs = [t for t in all_texts]
+    text_records = list(_iter_text_records(doc))
+    all_texts = [r[0] for r in text_records]
+    paragraphs = all_texts
     items: list[dict] = []
 
     def add(rule_id: str, ok: bool, evidence: str, source: str) -> None:
@@ -361,7 +436,7 @@ def run_checks(docx_bytes: bytes) -> dict:
             add_unknown("jcip-comment", "comments.xml 无法按 XML 解析，批注检查不能完整进行", _SRC_COMMENT)
 
     # --- 文献编号完整性：jcip 与 cn-general 共用同一实现（仅 rule_id/来源不同） ---
-    items.append(_citation_integrity_item(all_texts, is_placeholder,
+    items.append(_citation_integrity_item(text_records, is_placeholder,
                                           "jcip-citation-integrity", _SRC_CITATION))
 
     return {"items": items}
@@ -383,7 +458,8 @@ def run_cn_general(docx_bytes: bytes, blind_terms=()) -> dict:
         parse_error = f"段落提取失败：{doc_err}"
         return {"items": _unknown_items_cn(parse_error), "parse_error": parse_error}
 
-    all_texts = list(_iter_texts(doc))
+    text_records = list(_iter_text_records(doc))
+    all_texts = [r[0] for r in text_records]
     items: list[dict] = []
 
     def add(rule_id: str, ok: bool, evidence: str, source: str) -> None:
@@ -426,7 +502,7 @@ def run_cn_general(docx_bytes: bytes, blind_terms=()) -> dict:
             add_unknown("cn-comment", "comments.xml 无法按 XML 解析，批注检查不能完整进行", _SRC_CN_COMMENT)
 
     # --- 正文引用与文献表对账（与 jcip 共用实现；待办占位段不参与引用扫描） ---
-    items.append(_citation_integrity_item(all_texts, lambda t: bool(_CN_RESIDUE_RE.search(t)),
+    items.append(_citation_integrity_item(text_records, lambda t: bool(_CN_RESIDUE_RE.search(t)),
                                           "cn-citation-integrity", _SRC_CN_CITATION))
 
     return {"items": items}

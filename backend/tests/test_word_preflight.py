@@ -591,3 +591,70 @@ def test_ruleset_reports_freshen_independently(matrix):
     assert body_jcip["expired"] is True  # jcip 旧报告已过期
     body_cn = owner.get(url + "?ruleset=cn-general").json()
     assert body_cn["expired"] is False  # cn-general 是新快照结果
+
+
+def test_jcip_article_number_allowed_and_word_autonum_bib_parsed():
+    """真实录用稿回归：
+    1) 文章编号：1003-0077（2017）00-0000-00 为编辑部待填默认占位，不触发 jcip-placeholder 告警；
+    2) Word 自动编号列表（<w:numPr>）参考文献 + 空行/References 副标题 + [1-3] 范围引用可正确解析通过；
+    3) 文献表未解析出编号条目时，正文与表格中的 [n] 引用仍应如实计数，不误报「正文引用 0 处」。
+    """
+    from docx import Document
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    import app.domain.word_preflight as wpm
+
+    # 1 + 2: 含默认文章编号、表格/正文 [1-3] 引用、空行 + References 副标题 + Word 自动编号文献列表
+    doc = Document()
+    for p in [
+        "文章编号：1003-0077（2017）00-0000-00",
+        "基于门控机制的少样本命名实体识别研究",
+        "摘要：该文提出一种少样本命名实体识别框架。",
+        "关键词：命名实体识别；少样本学习；大语言模型",
+        "Abstract: This paper proposes a few-shot NER framework.",
+        "Key words: named entity recognition; few-shot learning; LLM",
+        "0  引言",
+        "已有方法[1-3]在少样本场景表现受限。",
+        "1  方法",
+        "本文进一步改进基线[2]。",
+        "参 考 文 献",
+        "",
+        "References",
+    ]:
+        doc.add_paragraph(p)
+
+    for ref_txt in [
+        "Vaswani A, et al. Attention Is All You Need[C]//NeurIPS, 2017.",
+        "He K, et al. Deep Residual Learning[C]//CVPR, 2016.",
+        "Devlin J, et al. BERT[C]//NAACL, 2019.",
+    ]:
+        rp = doc.add_paragraph(ref_txt)
+        ppr = rp._p.get_or_add_pPr()
+        numpr = OxmlElement("w:numPr")
+        ilvl = OxmlElement("w:ilvl")
+        ilvl.set(qn("w:val"), "0")
+        numid = OxmlElement("w:numId")
+        numid.set(qn("w:val"), "1")
+        numpr.append(ilvl)
+        numpr.append(numid)
+        ppr.append(numpr)
+
+    buf = io.BytesIO()
+    doc.save(buf)
+    rep = wpm.run_checks(buf.getvalue())
+    st = {it["rule_id"]: it["status"] for it in rep["items"]}
+    ev = {it["rule_id"]: it["evidence"] for it in rep["items"]}
+    assert st["jcip-placeholder"] == "pass", ev["jcip-placeholder"]
+    assert st["jcip-citation-integrity"] == "pass", ev["jcip-citation-integrity"]
+    assert "正文引用 4 处，文献表 3 条" in ev["jcip-citation-integrity"]
+
+    # 3: 文献表为无编号纯文本时，正文引用仍如实计数（非 0 处）
+    doc2 = Document()
+    for p in ["0  引言", "引用了工作[1]与[2]。", "参考文献", "无编号文献甲", "无编号文献乙"]:
+        doc2.add_paragraph(p)
+    buf2 = io.BytesIO()
+    doc2.save(buf2)
+    rep2 = wpm.run_checks(buf2.getvalue())
+    it2 = next(it for it in rep2["items"] if it["rule_id"] == "jcip-citation-integrity")
+    assert it2["status"] == "warn"
+    assert "正文引用 2 处，文献表 0 条" in it2["evidence"]
