@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, api } from '@/lib/api'
+import { accountApi } from '@/lib/api/account'
 import type { User } from '@/lib/types'
 import { useStudio } from '@/store'
 import { ANON_HINT_KEY } from '@/store/auth'
@@ -69,5 +70,18 @@ describe('auth · W7 qa-10 登出后不再并发 401', () => {
     await expect(useStudio.getState().logout()).rejects.toThrow('打盹')
     expect(useStudio.getState().authStatus).toBe('anon')
     expect(localStorage.getItem(ANON_HINT_KEY)).toBe('1')
+  })
+
+  it('登出后（ANON_HINT_KEY=1）调用 demoLogin 必须清标记并成功进入 authed 态', async () => {
+    localStorage.setItem(ANON_HINT_KEY, '1')
+    useStudio.setState({ authStatus: 'anon', user: null })
+    const meSpy = vi.spyOn(api, 'me').mockResolvedValue(me)
+    vi.spyOn(accountApi, 'demoLogin').mockResolvedValue(undefined)
+
+    expect(await useStudio.getState().demoLogin()).toBe(true)
+    expect(localStorage.getItem(ANON_HINT_KEY)).toBeNull()
+    expect(meSpy).toHaveBeenCalledTimes(1)
+    expect(useStudio.getState().authStatus).toBe('authed')
+    expect(useStudio.getState().user).toEqual(me)
   })
 })

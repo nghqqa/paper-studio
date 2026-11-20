@@ -5,7 +5,6 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Segmented } from '@/components/ui/segmented'
-import { accountApi } from '@/lib/api/account'
 import { readHashPid } from '@/lib/hash'
 import { cn, touchHit } from '@/lib/utils'
 import { pageTitle } from '@/lib/brand'
@@ -254,9 +253,8 @@ export function LoginPage() {
                 onClick={async () => {
                   setDemoBusy(true)
                   try {
-                    await accountApi.demoLogin()
-                    await useStudio.getState().loadMe()
-                    await enterWorkspace(returnPid)
+                    const ok = await useStudio.getState().demoLogin()
+                    if (ok) await enterWorkspace(returnPid ?? 'showcase-demo')
                   } finally {
                     setDemoBusy(false)
                   }

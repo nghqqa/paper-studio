@@ -3,7 +3,6 @@ import { ArrowRight, BookOpenCheck, CheckCircle2, FileText, GraduationCap, Landm
 import { Button } from '@/components/ui/button'
 import { BrandMark } from '@/components/auth/AuthFrame'
 import { BRAND_CAPABILITIES, BRAND_NAME_FULL, BRAND_TAGLINE, brandCopyright } from '@/lib/brand'
-import { accountApi } from '@/lib/api/account'
 import { enterWorkspace } from '@/components/auth/session'
 import { useStudio } from '@/store'
 import paperLatexImg from '@/assets/lp/paper-latex.webp'
@@ -76,9 +75,8 @@ export function LandingPage() {
   const onDemoEnter = async () => {
     setDemoBusy(true)
     try {
-      await accountApi.demoLogin()
-      await useStudio.getState().loadMe()
-      await enterWorkspace(null)
+      const ok = await useStudio.getState().demoLogin()
+      if (ok) await enterWorkspace('showcase-demo')
     } finally {
       setDemoBusy(false)
     }

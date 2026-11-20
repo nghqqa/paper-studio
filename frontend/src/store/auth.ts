@@ -1,4 +1,5 @@
 import { ApiError, api } from '@/lib/api'
+import { accountApi } from '@/lib/api/account'
 import { queryClient } from '@/lib/query'
 import type { Member, Role, ShareLink, User } from '@/lib/types'
 import type { Slice } from './types'
@@ -48,6 +49,7 @@ export interface AuthSlice {
   /** GET /users/me → authStatus；StoreBootstrap 启动时调用一次。登出后的已知 anon 态不发请求；并发调用复用同一请求 */
   loadMe(): Promise<void>
   login(email: string, password: string): Promise<boolean>
+  demoLogin(): Promise<boolean>
   register(email: string, password: string, displayName?: string): Promise<boolean>
   logout(): Promise<void>
   /** 会话中任何请求吃到 401 ⇒ 服务端会话已失效：翻回登录墙（仅 authed 态触发，登录页自身的 401 不管） */
@@ -102,6 +104,18 @@ export const authSlice: Slice<AuthSlice> = (set, get) => ({
   login: async (email, password) => {
     try {
       await api.login(email, password)
+      writeAnonHint(false)
+      await get().loadMe()
+      return get().authStatus === 'authed'
+    } catch (e) {
+      set({ authError: msg(e) })
+      return false
+    }
+  },
+
+  demoLogin: async () => {
+    try {
+      await accountApi.demoLogin()
       writeAnonHint(false)
       await get().loadMe()
       return get().authStatus === 'authed'
