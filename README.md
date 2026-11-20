@@ -24,8 +24,21 @@
 **Paper Studio (研稿)** is an open-source, self-hosted paper writing and review platform built for research labs and academic teams. Instead of splitting manuscripts across Overleaf, local Word files, chat threads, and scattered BibTeX libraries, Paper Studio brings **native LaTeX projects**, **native Word (`.docx`) journal templates**, **AI diff proposals**, **reference management**, **scientific figures**, **submission preflight checks**, and **multi-round rebuttal management** into one unified project.
 
 <p align="center">
-  <img src="frontend/public/lp/paper-latex.jpg" alt="Paper Studio LaTeX Workbench" width="48%" />
-  <img src="frontend/public/lp/paper-word.jpg" alt="Paper Studio Word Workbench" width="48%" />
+  <img src="docs/assets/paper-studio-demo.gif" alt="Paper Studio Workflow Demo: Passwordless Demo → LaTeX & Live PDF → Citation Fact-Check → AI Diff Proposal → Bilingual AI Usage Disclosure" width="96%" />
+</p>
+
+<p align="center">
+  <em>Interactive live demo (no sign-up required): <a href="https://paper.nghqqa.cn"><strong>https://paper.nghqqa.cn</strong></a> → click <strong>免注册一键体验</strong></em>
+</p>
+
+<p align="center">
+  <img src="frontend/src/assets/lp/paper-latex.webp" alt="Paper Studio LaTeX Workbench" width="48%" />
+  <img src="frontend/src/assets/lp/paper-word.webp" alt="Paper Studio Word Workbench" width="48%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/citation-factcheck.webp" alt="Citation Fact-Checking against Crossref / OpenAlex / arXiv" width="48%" />
+  <img src="docs/assets/ai-disclosure.webp" alt="Bilingual AI Usage Disclosure Export" width="48%" />
 </p>
 
 ## Key Features

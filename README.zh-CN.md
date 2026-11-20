@@ -24,8 +24,21 @@
 **研稿（Paper Studio）** 是一款面向高校课题组与科研团队的开源、可私有部署论文写作与审阅平台。同一篇论文的 **Word 原稿或 LaTeX 源码、PDF 预览、数学公式、文献库、科研图表、AI 修改提案、审稿意见与多轮回复信** 全部收敛在同一个项目中，数据留存在部署方自有服务器。
 
 <p align="center">
-  <img src="frontend/public/lp/paper-latex.jpg" alt="研稿 LaTeX 工作台" width="48%" />
-  <img src="frontend/public/lp/paper-word.jpg" alt="研稿 Word 工作台" width="48%" />
+  <img src="docs/assets/paper-studio-demo.gif" alt="研稿全流程演示：免注册体验 → LaTeX 实时编译 → 参考文献真实性核验 → AI 差异提案 → 双语 AI 使用披露声明" width="96%" />
+</p>
+
+<p align="center">
+  <em>免注册在线体验：<a href="https://paper.nghqqa.cn"><strong>https://paper.nghqqa.cn</strong></a> → 点击 <strong>「免注册一键体验」</strong></em>
+</p>
+
+<p align="center">
+  <img src="frontend/src/assets/lp/paper-latex.webp" alt="研稿 LaTeX 工作台" width="48%" />
+  <img src="frontend/src/assets/lp/paper-word.webp" alt="研稿 Word 工作台" width="48%" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/citation-factcheck.webp" alt="基于 Crossref/OpenAlex/arXiv 的参考文献真实性核验" width="48%" />
+  <img src="docs/assets/ai-disclosure.webp" alt="基于真实提案台账一键导出中英双语 AI 使用披露声明" width="48%" />
 </p>
 
 ## 核心能力
