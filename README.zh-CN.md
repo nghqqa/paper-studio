@@ -93,6 +93,8 @@ docker compose -f docker-compose.yml -f docker-compose.proxy.yml --profile word 
 
 更多 Caddy / Nginx 独立域名反代配置见 [`deploy/reverse-proxy/`](deploy/reverse-proxy/)。
 
+> **Word 模式挂载学术字体**：为严格遵守字体版权合规，开源镜像不包含宋体、黑体、楷体、仿宋、Times New Roman、Cambria Math 等商业字体。部署方只需将已获授权的 `.ttf`/`.ttc`/`.otf` 字体文件放入 `./fonts` 目录（或在 `.env` 中配置 `ONLYOFFICE_FONTS_DIR`），重启 `onlyoffice` 容器即可由 `GENERATE_FONTS=true` 自动加载。建议精挑 10–20 个高频论文/公式字体，避免塞入过多冷门字体拖慢首屏。
+
 ### 方式三：本地从源码构建（支持国内镜像加速）
 
 ```bash

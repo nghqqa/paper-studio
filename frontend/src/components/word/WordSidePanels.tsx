@@ -158,6 +158,7 @@ export function WordSidePanels({ pid, docKey: docKeyProp, canEdit, saving, state
       if (superscript) label = mergeCitationBrackets(label)
       const res = await runRefsTaskAuto<{ mode?: string }>(pid, () => docKeyRef.current, setDocKey, 'insert-citation', { rids, label, superscript })
       setMode(res.mode === 'plain' ? 'plain' : 'sdt')
+      setBibMessage(`已插入引用 ${label}（写完一段后点「更新文末参考文献」同步文末列表）`)
     } catch (e) {
       setBridgeError(e instanceof Error ? e.message : String(e))
     }
@@ -352,8 +353,19 @@ export function WordSidePanels({ pid, docKey: docKeyProp, canEdit, saving, state
         </div>
       )}
       {bibWarnings.length > 0 && (
-        <div role="alert" className="shrink-0 border-b border-border px-2 py-1.5 text-xs text-warning" data-testid="word-bib-warnings">
+        <div role="alert" className="shrink-0 space-y-1.5 border-b border-border px-2 py-1.5 text-xs text-warning" data-testid="word-bib-warnings">
           {bibWarnings.map((w, i) => <div key={i}>{w}</div>)}
+          {onRenumberCitations && canEdit && (
+            <button
+              type="button"
+              className="inline-flex items-center rounded border border-warning/40 bg-warning/10 px-2 py-0.5 text-2xs font-medium text-warning hover:bg-warning/20 disabled:opacity-50"
+              disabled={renumberBusy}
+              onClick={() => void renumberCitations(citationStyle)}
+              data-testid="word-warning-renumber-btn"
+            >
+              {renumberBusy ? '正在重排…' : '一键按正文出现顺序重排编号'}
+            </button>
+          )}
         </div>
       )}
       {bibMessage && (

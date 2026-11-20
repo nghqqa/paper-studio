@@ -94,6 +94,8 @@ docker compose -f docker-compose.yml -f docker-compose.proxy.yml --profile word 
 
 Additional Caddy & Nginx templates are provided in [`deploy/reverse-proxy/`](deploy/reverse-proxy/).
 
+> **Academic Fonts for Word Mode**: Commercial journal fonts (such as SimSun, SimHei, KaiTi, FangSong, Times New Roman, or Cambria Math) are intentionally excluded from the open-source image for licensing compliance. To match your journal's exact typography in ONLYOFFICE, place your licensed `.ttf`/`.ttc`/`.otf` font files into `./fonts` (or set `ONLYOFFICE_FONTS_DIR` in `.env`) and restart the `onlyoffice` container (`GENERATE_FONTS=true` rebuilds the font index automatically). Keep the folder lean (10–20 frequently used academic fonts) for fast editor startup.
+
 ### 3. Build Locally (Optional)
 
 ```bash

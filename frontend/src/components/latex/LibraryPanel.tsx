@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AlertTriangle, BookOpen, CheckCircle2, ChevronDown, ChevronRight, CircleAlert, Download, Eraser, FilePlus2,
-  Loader2, ListOrdered, Plus, Quote, RotateCw, Search, ShieldAlert, ShieldCheck, Sparkles, Trash2,
+  Loader2, ListOrdered, Plus, Quote, RotateCw, Search, ShieldAlert, ShieldCheck, Sparkles, Trash2, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -87,6 +87,14 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
   const [citeCommand, setCiteCommand] = useState('')
   const [verifyReport, setVerifyReport] = useState<CitationVerifyReport | null>(null)
   const [verifyBusy, setVerifyBusy] = useState(false)
+  const isWordMode = Boolean(onUpdateBibliography)
+  const [hideWordGuide, setHideWordGuide] = useState(() => {
+    try { return localStorage.getItem('paper-studio:hide-word-cite-guide') === '1' } catch { return false }
+  })
+  const dismissWordGuide = () => {
+    setHideWordGuide(true)
+    try { localStorage.setItem('paper-studio:hide-word-cite-guide', '1') } catch { /* ignore */ }
+  }
 
   const verifyMap = useMemo(() => {
     const m = new Map<string, CitationVerifyItem>()
@@ -213,59 +221,82 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
         </a>
       </div>
       {onUpdateBibliography && (
-        <div className="shrink-0 space-y-1 border-b border-line px-2 py-1.5">
+        <div className="shrink-0 space-y-1.5 border-b border-line px-2 py-2">
+          {!hideWordGuide && (
+            <div className="flex items-start gap-1.5 rounded border border-line bg-panel px-2 py-1.5 text-2xs leading-relaxed text-fg-muted" data-testid="word-cite-guide">
+              <span className="min-w-0 flex-1">
+                <strong className="text-fg">3 步上手：</strong>① 正文点好光标 → ② 点下方文献右侧「引用」插 <code className="font-mono">[n]</code>（多篇可先勾选再合并插）→ ③ 点下方主按钮生成文末列表
+              </span>
+              <button
+                type="button"
+                className="shrink-0 rounded p-0.5 text-fg-muted hover:text-fg"
+                aria-label="隐藏上手提示"
+                onClick={dismissWordGuide}
+              >
+                <X aria-hidden className="size-3" />
+              </button>
+            </div>
+          )}
           <Button
             size="sm"
             className="h-8 w-full text-sm"
             onClick={onUpdateBibliography}
             disabled={bibliographyBusy || !canEdit}
-            title="扫描正文 [n] 引用标记，按全局编号顺序重建文档末尾的参考文献表"
+            title="扫描正文中的 [n] 编号，自动按所选期刊格式生成或更新文末参考文献列表"
             data-testid="library-update-bibliography"
           >
             {bibliographyBusy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <BookOpen aria-hidden className="size-3" />}
-            更新参考文献表
+            更新文末参考文献
           </Button>
-          {citationStyle && onCitationStyleChange && (
-            <label className="flex items-center gap-1.5 text-xs text-fg-muted" data-testid="library-citation-style-row">
-              引用格式
-              <select
-                className="rounded border border-line bg-app px-1 py-0.5 text-xs"
-                value={citationStyle}
-                onChange={(e) => onCitationStyleChange(e.target.value as CitationStyle)}
-                data-testid="library-citation-style"
+          <div className="flex items-center gap-1.5">
+            {citationStyle && onCitationStyleChange && (
+              <label className="flex min-w-0 flex-1 items-center gap-1 text-xs text-fg-muted" data-testid="library-citation-style-row">
+                <span className="shrink-0">格式</span>
+                <select
+                  className="min-w-0 flex-1 rounded border border-line bg-app px-1 py-0.5 text-xs text-fg"
+                  value={citationStyle}
+                  onChange={(e) => onCitationStyleChange(e.target.value as CitationStyle)}
+                  data-testid="library-citation-style"
+                >
+                  {(Object.keys(CITATION_STYLE_LABELS) as CitationStyle[]).map((s) => (
+                    <option key={s} value={s}>{CITATION_STYLE_LABELS[s]}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {onRenumberCitations && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 shrink-0 px-2 text-xs"
+                onClick={() => void onRenumberCitations(citationStyle)}
+                disabled={renumberBusy || !canEdit}
+                title="调整过段落顺序导致编号乱序或断号时，点此按正文首次出现顺序重排全文 [n] 并重建文末列表"
+                data-testid="library-renumber-citations"
               >
-                {(Object.keys(CITATION_STYLE_LABELS) as CitationStyle[]).map((s) => (
-                <option key={s} value={s}>{CITATION_STYLE_LABELS[s]}</option>
-              ))}</select>
-            </label>
-          )}
-          {onRenumberCitations && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 w-full text-xs"
-              onClick={() => void onRenumberCitations(citationStyle)}
-              disabled={renumberBusy || !canEdit}
-              title="服务端直接按正文首次出现顺序重排全文引用编号 [n]，同步重建托管参考文献表与文献顺序表（基于已保存版本执行，有变化时编辑器自动重载；标记异常/修订边界/越界编号将拒绝并提示）"
-              data-testid="library-renumber-citations"
-            >
-              {renumberBusy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <ListOrdered aria-hidden className="size-3" />}
-              按出现顺序重排引用
-            </Button>
-          )}
+                {renumberBusy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <ListOrdered aria-hidden className="size-3" />}
+                重排编号
+              </Button>
+            )}
+          </div>
           {onStripBibMarkers && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 w-full text-xs"
-              onClick={onStripBibMarkers}
-              disabled={stripBibMarkersBusy || !canEdit}
-              title="移除文末「[参考文献-平台生成]」与「（完）」两个托管标记段，格式化好的 [1] … 文献条目原样保留（定稿前清理，异常形态插件 fail-closed 拒绝）"
-              data-testid="library-strip-bib-markers"
-            >
-              {stripBibMarkersBusy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <Eraser aria-hidden className="size-3" />}
-              定稿前清理托管标记
-            </Button>
+            <details className="text-2xs text-fg-muted" data-testid="library-finalize-details">
+              <summary className="cursor-pointer select-none py-0.5 hover:text-fg">定稿前整理（去掉文末平台标记）</summary>
+              <div className="mt-1 space-y-1 rounded border border-line bg-panel p-1.5">
+                <p className="leading-relaxed">投稿前点此移除文末「[参考文献-平台生成]」与「（完）」两行提示，已排版好的文献条目原样保留。</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-full text-xs"
+                  onClick={onStripBibMarkers}
+                  disabled={stripBibMarkersBusy || !canEdit}
+                  data-testid="library-strip-bib-markers"
+                >
+                  {stripBibMarkersBusy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <Eraser aria-hidden className="size-3" />}
+                  定稿前清理托管标记
+                </Button>
+              </div>
+            </details>
           )}
         </div>
       )}
@@ -287,25 +318,27 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
           {selectedEntries.length > 0 && (
             <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b border-line bg-panel px-2 py-1.5 text-xs" data-testid="library-insert-bar">
               <span>已选 {selectedEntries.length} 篇</span>
-              <select
-                className="rounded border border-line bg-app px-1.5 py-1 text-xs"
-                value={citeCommand}
-                onChange={(e) => setCiteCommand(e.target.value)}
-                data-testid="library-cite-command"
-                title={lib?.cite_style ? `工程检测：${lib.cite_style.style}（来自 ${lib.cite_style.detected_from}）` : ''}
-              >
-                {(lib?.mode === 'bib' ? [
-                  { v: 'cite', label: '\\cite' },
-                  { v: 'citep', label: '\\citep（括号）' },
-                  { v: 'citet', label: '\\citet（作者作主语）' },
-                  { v: 'autocite', label: '\\autocite（biblatex）' },
-                  { v: 'textcite', label: '\\textcite（biblatex）' },
-                ] : [
-                  { v: 'cite', label: '\\cite' },
-                ]).map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
-              </select>
+              {!isWordMode && (
+                <select
+                  className="rounded border border-line bg-app px-1.5 py-1 text-xs"
+                  value={citeCommand}
+                  onChange={(e) => setCiteCommand(e.target.value)}
+                  data-testid="library-cite-command"
+                  title={lib?.cite_style ? `工程检测：${lib.cite_style.style}（来自 ${lib.cite_style.detected_from}）` : ''}
+                >
+                  {(lib?.mode === 'bib' ? [
+                    { v: 'cite', label: '\\cite' },
+                    { v: 'citep', label: '\\citep（括号）' },
+                    { v: 'citet', label: '\\citet（作者作主语）' },
+                    { v: 'autocite', label: '\\autocite（biblatex）' },
+                    { v: 'textcite', label: '\\textcite（biblatex）' },
+                  ] : [
+                    { v: 'cite', label: '\\cite' },
+                  ]).map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+                </select>
+              )}
               <Button size="sm" className="h-6 px-2" onClick={insert} data-testid="library-insert">
-                <Quote aria-hidden className="size-3" /> 在光标处插入引用
+                <Quote aria-hidden className="size-3" /> {isWordMode && selectedEntries.length > 1 ? '合并插入引用' : '在光标处插入引用'}
               </Button>
               <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setSelected(new Set())}>取消</Button>
             </div>
@@ -344,6 +377,19 @@ export function LibraryPanel({ pid, canEdit, onInsertCitations, reloadSignal = 0
                         <FactCheckBadge item={verifyMap.get(e.reference_id)} />
                       </span>
                     </button>
+                    {canEdit && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-6 shrink-0 gap-0.5 px-1.5 text-2xs"
+                        onClick={() => onInsertCitations([e], citeCommand || 'cite')}
+                        title={isWordMode ? '在正文光标处直接插入此篇引用 [n]' : `在光标处插入 \\${citeCommand || 'cite'}{${e.citation_key}}`}
+                        data-testid={`library-quick-cite-${e.citation_key}`}
+                      >
+                        <Quote aria-hidden className="size-2.5" /> 引用
+                      </Button>
+                    )}
                     <button className="shrink-0 p-0.5 text-fg-muted" onClick={() => setExpanded(expanded === e.reference_id ? null : e.reference_id)} aria-label="详情">
                       {expanded === e.reference_id ? <ChevronDown aria-hidden className="size-3.5" /> : <ChevronRight aria-hidden className="size-3.5" />}
                     </button>

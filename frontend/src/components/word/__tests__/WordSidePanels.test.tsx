@@ -183,4 +183,42 @@ describe('WordSidePanels 文献面板（P1-0-A）', () => {
     )
     expect(h.querySelector('[data-testid="word-bib-message"]')!.textContent).toContain('3 条文献条目原样保留')
   })
+
+  it('插入引用后给出下一步提示；检测到倒置时警告栏内提供一键重排按钮', async () => {
+    vi.mocked(libraryApi.registerCitations).mockResolvedValue(ORDER3)
+    vi.mocked(libraryApi.bibliography).mockImplementation(async (_pid, rids) => ({
+      style: 'gb-t-7714-2015',
+      labels: Object.fromEntries(rids.map((r, i) => [r, `[${i + 1}]`])),
+      bibliography: rids.map((_r, i) => `[${i + 1}] 条目${i + 1}`),
+      note: 'x',
+    }))
+    vi.mocked(runRefsTaskAuto).mockImplementation(async (_pid, _g, _s, kind: string) => {
+      if (kind === 'collect-refs') return { numbers: [2, 1], appear_order: [2, 1], in_table_count: 0 }
+      return { mode: 'sdt' }
+    })
+    const onRenumber = vi.fn().mockResolvedValue({ changed: false, mapping: {}, order: [], warnings: [] })
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+    act(() => root!.render(
+      <WordSidePanels
+        pid="p"
+        docKey="doc-key-1"
+        canEdit
+        saving={false}
+        stateSha={null}
+        stateVersion={null}
+        open="library"
+        onClose={() => {}}
+        onRenumberCitations={onRenumber}
+      />))
+    await flush()
+    await click('stub-insert')
+    expect(host.querySelector('[data-testid="word-bib-message"]')!.textContent).toContain('已插入引用 [1,2]')
+    await click('stub-update')
+    const btn = host.querySelector<HTMLButtonElement>('[data-testid="word-warning-renumber-btn"]')
+    expect(btn).not.toBeNull()
+    await click('word-warning-renumber-btn')
+    expect(onRenumber).toHaveBeenCalledWith('gb-t-7714-2015')
+  })
 })
