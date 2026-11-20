@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Word(.docx) → LaTeX 导入（v0.6.8）：转换桩（rc/产物可控）+ 真转换集成（本机有 pandoc/docker 才跑）。"""
 import os
-import zipfile
 
 import pytest
 
@@ -42,12 +41,16 @@ def client(tmp_path, monkeypatch):
 
 
 def _docx(text: str) -> bytes:
-    buf = __import__("io").BytesIO()
-    with zipfile.ZipFile(buf, "w") as z:
-        z.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/></Types>')
-        z.writestr("word/document.xml",
-                   '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-                   f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body></w:document>")
+    """用 python-docx 生成真件。手工拼的最小 OOXML 包缺 Content_Types Override 与 rels 部件，
+    老 pandoc 容忍、pandoc 3.x 直接拒收（couldn't parse docx file: DocxError），真转换集成必败。"""
+    import io
+
+    from docx import Document
+
+    buf = io.BytesIO()
+    doc = Document()
+    doc.add_paragraph(text)
+    doc.save(buf)
     return buf.getvalue()
 
 

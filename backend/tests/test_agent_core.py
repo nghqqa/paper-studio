@@ -286,6 +286,9 @@ def test_critic_apply_roundtrip_bytes_and_events(world):
     assert props and props[0].state == "pending"
     seen = []
     events.reset()
+    from app.domain import org_audit
+
+    org_audit.install()  # reset 清掉 "*" 审计订阅；不补回则后续用例（test_cases 删除审计）的 emit→org_audit 静默丢事件
     events.subscribe("ai.proposal", seen.append)
     r = asyncio.run(proposals.apply(store, "method", props[0].id))
     now = store.read_content("method")

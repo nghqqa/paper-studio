@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 
-def _boot(tmp_path, monkeypatch, *, demo_mode: bool):
+def _boot(tmp_path, monkeypatch, request, *, demo_mode: bool):
     proj = tmp_path / "projects"
     proj.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("PAPER_STUDIO_PROJECTS_DIR", str(proj))
@@ -17,6 +17,19 @@ def _boot(tmp_path, monkeypatch, *, demo_mode: bool):
     monkeypatch.setenv("PAPER_STUDIO_SECRET", "showcase-demo-test-secret-32-chars!!")
     monkeypatch.setenv("PAPER_STUDIO_PRODUCT", "paper")
     monkeypatch.setenv("PAPER_STUDIO_DEMO_MODE", "on" if demo_mode else "off")
+
+    # 环境切换需要整棵 app.* 按新 env 重导。但直接 del sys.modules 不还原会把进程劈成两代模块：
+    # 之后的测试模块持有旧代引用（如 plans.is_plan_handler 按 `handler is m.run` 身份判别、
+    # _modules() 取的是新代），身份失配 → run_scenario 建错 ctx → 全量下 test_agent_core 死锁。
+    # 故快照-清-重建，测试结束后原样还原（同测多次 _boot 时 finalizer LIFO，最终仍回到首代）。
+    saved = {k: m for k, m in sys.modules.items() if k == "app" or k.startswith("app.")}
+
+    def _restore_app_modules():
+        for k in [k for k in sys.modules if k == "app" or k.startswith("app.")]:
+            del sys.modules[k]
+        sys.modules.update(saved)
+
+    request.addfinalizer(_restore_app_modules)
 
     for name in list(sys.modules):
         if name == "app" or name.startswith("app."):
@@ -26,15 +39,15 @@ def _boot(tmp_path, monkeypatch, *, demo_mode: bool):
     return main_mod.app
 
 
-def test_showcase_demo_and_demo_login_lifecycle(tmp_path, monkeypatch):
+def test_showcase_demo_and_demo_login_lifecycle(tmp_path, monkeypatch, request):
     # 1. DEMO_MODE=off 时：/api/meta.demo_mode=False，/api/auth/demo-login 404 fail-closed
-    app_off = _boot(tmp_path / "off", monkeypatch, demo_mode=False)
+    app_off = _boot(tmp_path / "off", monkeypatch, request, demo_mode=False)
     c_off = TestClient(app_off)
     assert c_off.get("/api/meta").json()["demo_mode"] is False
     assert c_off.post("/api/auth/demo-login").status_code == 404
 
     # 2. DEMO_MODE=on 时：/api/meta.demo_mode=True，一键免注册登录成功（非超管）并自动种演示论文
-    app_on = _boot(tmp_path / "on", monkeypatch, demo_mode=True)
+    app_on = _boot(tmp_path / "on", monkeypatch, request, demo_mode=True)
     c = TestClient(app_on)
     assert c.get("/api/meta").json()["demo_mode"] is True
 

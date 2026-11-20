@@ -46,9 +46,10 @@ def test_error_kinds_and_status_map():
 
 
 def test_event_bus_sync_async_wildcard_and_isolation():
-    from app.domain import events
+    from app.domain import events, org_audit
 
     events.reset()
+    org_audit.install()  # reset 连 org_audit 的 "*" 审计订阅一并清掉；不补回则后续用例的 emit→org_audit 静默丢事件（test_cases 删除审计即此因，test_mcp 同款自救）
     got: list[tuple[str, str]] = []
 
     async def async_h(e):
@@ -75,6 +76,7 @@ def test_event_bus_sync_async_wildcard_and_isolation():
     with pytest.raises(ValueError):
         events.emit("not.an.event")
     events.reset()
+    org_audit.install()  # 收尾 reset 同样清掉审计订阅，须补回
 
 
 def test_create_project_emits_case_created_and_runs_hooks(client):
@@ -84,6 +86,9 @@ def test_create_project_emits_case_created_and_runs_hooks(client):
     c, _ = client
     seen = []
     events.reset()
+    from app.domain import org_audit
+
+    org_audit.install()  # reset 清掉审计订阅；不补回则后续用例的 emit→org_audit 静默丢事件
     events.subscribe("case.created", lambda e: seen.append(e))
 
     async def hook(project, user):
@@ -96,6 +101,7 @@ def test_create_project_emits_case_created_and_runs_hooks(client):
     finally:
         main.PROJECT_CREATED_HOOKS.remove(hook)
         events.reset()
+        org_audit.install()  # 同上：补回审计订阅
     assert ("hook", "w5-evt", None) in seen
     ev = [e for e in seen if not isinstance(e, tuple)]
     assert len(ev) == 1 and ev[0].pid == "w5-evt" and ev[0].data["title"] == "事件测试"

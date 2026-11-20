@@ -407,7 +407,9 @@ def test_registry_and_template_create():
             r = c.post("/api/projects/latex-demo", json={"template": tpl})
             assert r.status_code == 200, (tpl, r.text)
         r = c.post("/api/projects/latex-demo", json={"template": "nope"})
-        assert r.status_code == 422
+        # 未知模板走 paper_templates.get 的统一语义：不存在/已移除 ⇒ 404（fail-closed，
+        # 31a702a 起的模板治理行为；旧断言 422 一直被本测前置的 sidecar/Docker 失败掩盖）
+        assert r.status_code == 404
         # 结构化创建带投稿目标元数据
         r = c.post("/api/projects/struct/create",
                    json={"title": "元数据工程", "venue": "中文信息学报", "field": "计算机", "rank": "CCF-A"})

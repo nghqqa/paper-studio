@@ -8,7 +8,7 @@ import sys
 from fastapi.testclient import TestClient
 
 
-def _boot(tmp_path, monkeypatch):
+def _boot(tmp_path, monkeypatch, request):
     proj = tmp_path / "projects"
     proj.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("PAPER_STUDIO_PROJECTS_DIR", str(proj))
@@ -16,6 +16,19 @@ def _boot(tmp_path, monkeypatch):
     monkeypatch.setenv("PAPER_STUDIO_SECRET", "citation-verify-test-secret-32-chars!!")
     monkeypatch.setenv("PAPER_STUDIO_PRODUCT", "paper")
     monkeypatch.setenv("PAPER_STUDIO_LIBRARY_SOURCES", "on")
+
+    # 环境切换需要整棵 app.* 按新 env 重导。但直接 del sys.modules 不还原会把进程劈成两代模块：
+    # 之后的测试模块持有旧代引用（如 plans.is_plan_handler 按 `handler is m.run` 身份判别、
+    # _modules() 取的是新代），身份失配 → run_scenario 建错 ctx → 全量下 test_agent_core 死锁。
+    # 故快照-清-重建，测试结束后原样还原（新代条目清除、旧代条目放回）。
+    saved = {k: m for k, m in sys.modules.items() if k == "app" or k.startswith("app.")}
+
+    def _restore_app_modules():
+        for k in [k for k in sys.modules if k == "app" or k.startswith("app.")]:
+            del sys.modules[k]
+        sys.modules.update(saved)
+
+    request.addfinalizer(_restore_app_modules)
 
     for name in list(sys.modules):
         if name == "app" or name.startswith("app."):
@@ -34,8 +47,8 @@ def _reg_login(app, email: str) -> TestClient:
     return c
 
 
-def test_citation_fact_check_all_verdicts_and_permissions(tmp_path, monkeypatch):
-    app = _boot(tmp_path, monkeypatch)
+def test_citation_fact_check_all_verdicts_and_permissions(tmp_path, monkeypatch, request):
+    app = _boot(tmp_path, monkeypatch, request)
     owner = _reg_login(app, "cv-owner@example.com")
     pid = owner.post("/api/projects/showcase-demo", json={}).json()["id"]
 
