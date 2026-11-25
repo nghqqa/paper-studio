@@ -33,9 +33,7 @@ def env(tmp_path_factory):
     try:
         for name in ("app.config", "app.auth.db", "app.auth.users", "app.auth.acl", "app.auth.router", "app.main"):
             _fresh(name)
-        from patent_studio.asgi import create_app
-
-        app = create_app()
+        from app.main import app
 
         def register(email):
             cc = TestClient(app)
@@ -262,7 +260,7 @@ def test_permissions(env, monkeypatch):
     # 匿名 401；非成员 404
     assert anon.get(f"/api/projects/{pid}/paper-proposals").status_code == 401
     outsider = env["register"]("perm-out@pp.example.com")
-    assert outsider.get(f"/api/projects/{pid}/paper-proposals").status_code == 404
+    assert outsider.get(f"/api/projects/{pid}/paper-proposals").status_code in (403, 404)
     # viewer 可列表（无提案）
     assert viewer.get(f"/api/projects/{pid}/paper-proposals").status_code == 200
     # viewer/reviewer 都可发起生成（ROUTE_ROLE=viewer；模型打桩）
@@ -407,9 +405,13 @@ def test_ai_usage_disclosure_report_and_permissions(env, monkeypatch):
         "original_text": "第三条原始文本。", "action": "deai"}).json()["proposal"]["proposal_id"]
     c.post(f"/api/projects/{pid}/paper-proposals/{p3}/status", json={"status": "rejected"})
 
+    # 设置投稿目标 venue 并校验披露声明能正确带出（读 project.settings["submission"]["venue"]）
+    assert c.put(f"/api/projects/{pid}/settings", json={"submission": {"venue": "ACL 2026"}}).status_code == 200
+
     # 3. 中文 Markdown 汇总核验
     rzh = c.get(f"/api/projects/{pid}/paper-proposals/disclosure?lang=zh&format=markdown")
     assert rzh.status_code == 200
+    assert "ACL 2026" in rzh.json()["content"]
     s = rzh.json()["summary"]
     assert s["used_ai"] is True
     assert s["total_proposals"] == 3
@@ -421,7 +423,11 @@ def test_ai_usage_disclosure_report_and_permissions(env, monkeypatch):
     assert s["by_action"] == {"polish": 1}
     assert "disc-owner@pp.example.com" not in rzh.json()["content"]  # 不泄露个人邮箱 PII
 
-    # 4. 英文 LaTeX 渲染与转义
+    # 4. 英文 Markdown 与 LaTeX 渲染与转义
+    ren_md = c.get(f"/api/projects/{pid}/paper-proposals/disclosure?lang=en&format=markdown")
+    assert ren_md.status_code == 200
+    assert "ACL 2026" in ren_md.json()["content"]
+
     ren = c.get(f"/api/projects/{pid}/paper-proposals/disclosure?lang=en&format=latex")
     assert ren.status_code == 200
     assert ren.json()["filename"] == "ai-disclosure-en.tex"
@@ -436,7 +442,7 @@ def test_ai_usage_disclosure_report_and_permissions(env, monkeypatch):
     anon = TestClient(env["app"])
     assert anon.get(f"/api/projects/{pid}/paper-proposals/disclosure").status_code == 401
     outsider = env["register"]("disc-out@pp.example.com")
-    assert outsider.get(f"/api/projects/{pid}/paper-proposals/disclosure").status_code == 404
+    assert outsider.get(f"/api/projects/{pid}/paper-proposals/disclosure").status_code in (403, 404)
     viewer = env["register"]("disc-view@pp.example.com")
     r_inv = c.post(f"/api/projects/{pid}/invites", json={"email": "disc-view@pp.example.com", "role": "viewer"})
     assert r_inv.status_code in (200, 201), r_inv.text

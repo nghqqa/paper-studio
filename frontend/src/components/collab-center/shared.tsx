@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { colorFor, labelText, userColor } from '@/collab/colors'
+import { colorFor, labelText, userColor } from '@/lib/colors'
 import { Avatar as UiAvatar, type AvatarProps as UiAvatarProps } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'

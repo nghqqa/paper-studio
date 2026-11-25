@@ -8,9 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Skeleton } from '@/components/ui/skeleton'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
-import { userColor } from '@/collab/colors'
-import { PAPER_USER_TITLES, USER_TITLES, shownUserTitle, type AdminUser, type AdminUserIn, type UserTitle } from '@/types/account'
-import { useStudio } from '@/store'
+import { userColor } from '@/lib/colors'
+import { PAPER_USER_TITLES, shownUserTitle, type AdminUser, type AdminUserIn, type UserTitle } from '@/types/account'
 
 export interface MemberTableProps {
   rows: AdminUser[]
@@ -42,15 +41,14 @@ function MemberAvatar({ u, size }: { u: AdminUser; size: 'sm' | 'md' }) {
 }
 
 function TitleSelect({ u, disabled, mobile, onChange }: { u: AdminUser; disabled: boolean; mobile: boolean; onChange(t: UserTitle): void }) {
-  const paper = useStudio((s) => s.product === 'paper')
   return (
-    <Select value={shownUserTitle(u.title, paper) || NONE} disabled={disabled} onValueChange={(v) => onChange((v === NONE ? '' : v) as UserTitle)}>
+    <Select value={shownUserTitle(u.title) || NONE} disabled={disabled} onValueChange={(v) => onChange((v === NONE ? '' : v) as UserTitle)}>
       <SelectTrigger size={mobile ? 'lg' : 'sm'} className={mobile ? 'w-full' : 'w-28'} aria-label={`${u.email} 的头衔`} data-testid="member-title">
         <SelectValue placeholder="无头衔" />
       </SelectTrigger>
       <SelectContent>
         <SelectItem value={NONE}>无头衔</SelectItem>
-        {(paper ? PAPER_USER_TITLES : USER_TITLES).map((t) => (
+        {PAPER_USER_TITLES.map((t) => (
           <SelectItem key={t} value={t}>
             {t}
           </SelectItem>

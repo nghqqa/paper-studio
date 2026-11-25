@@ -1,6 +1,6 @@
 """Platform administrators publish Word/LaTeX assets; ordinary authors only read."""
 import asyncio
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import BaseModel, Field, ValidationError
@@ -40,21 +40,21 @@ class TemplateIn(BaseModel):
 
 class TemplatePatchIn(BaseModel):
     """PATCH 部分更新：全部可选，None/缺省 = 不修改；兼容旧 {"enabled": bool} 体。"""
-    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
-    desc: Optional[str] = Field(default=None, max_length=500)
-    language: Optional[str] = Field(default=None, max_length=40)
-    kind: Optional[str] = Field(default=None, max_length=40)
-    venue: Optional[str] = Field(default=None, max_length=200)
-    year: Optional[str] = Field(default=None, max_length=20)
-    main: Optional[str] = Field(default=None, max_length=240)
-    engine: Optional[Literal["pdflatex", "xelatex"]] = None
-    enabled: Optional[bool] = None
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    desc: str | None = Field(default=None, max_length=500)
+    language: str | None = Field(default=None, max_length=40)
+    kind: str | None = Field(default=None, max_length=40)
+    venue: str | None = Field(default=None, max_length=200)
+    year: str | None = Field(default=None, max_length=20)
+    main: str | None = Field(default=None, max_length=240)
+    engine: Literal["pdflatex", "xelatex"] | None = None
+    enabled: bool | None = None
 
 
 class ReplaceMetaIn(BaseModel):
     """PUT 替换版本的可选元数据：缺省沿用现值；main 传 "" = 对新包自动检测。"""
-    main: Optional[str] = Field(default=None, max_length=240)
-    engine: Optional[Literal["pdflatex", "xelatex"]] = None
+    main: str | None = Field(default=None, max_length=240)
+    engine: Literal["pdflatex", "xelatex"] | None = None
 
 
 @router.get("")
@@ -91,7 +91,7 @@ async def upload(user: auth.CurrentUser, metadata: Annotated[str, Form()], file:
 @router.put("/{fmt}/{tid}/file")
 async def replace_file(fmt: str, tid: str, user: auth.CurrentUser,
                        file: Annotated[UploadFile, File()],
-                       metadata: Annotated[Optional[str], Form()] = None):
+                       metadata: Annotated[str | None, Form()] = None):
     """替换上传模板版本（仅 origin=upload）：tid 不变、version 自增、verify 重置，
     失败完整回滚；已建工程副本不受影响。成功且自动验收开启时后台重新验收 + 重产缩略图。"""
     try:

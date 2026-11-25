@@ -31,7 +31,6 @@ export function validateBudget(raw: string): string | undefined {
  */
 export function AiPanel() {
   const settings = useStudio((s) => s.orgSettings)
-  const paper = useStudio((s) => s.product === 'paper')
   const unavailable = useStudio((s) => s.orgSettingsUnavailable)
   const saving = useStudio((s) => s.orgSettingsSaving)
   const loadOrgSettings = useStudio((s) => s.loadOrgSettings)
@@ -168,19 +167,19 @@ export function AiPanel() {
   return (
     <div className="grid max-w-form gap-6" data-testid="admin-ai-panel">
       <section aria-labelledby="admin-ai-switch-h" className="grid gap-3">
-        <h3 id="admin-ai-switch-h" className="text-sm font-semibold">{paper ? '团队级 AI 开关' : '机构级 AI 开关'}</h3>
+        <h3 id="admin-ai-switch-h" className="text-sm font-semibold">团队级 AI 开关</h3>
         <div className="flex items-center justify-between gap-3 rounded-md border bg-panel px-3 py-2">
           <div className="min-w-0">
-            <Label htmlFor="org-ai-enabled" className="text-sm">{paper ? '允许向 AI 服务外发论文项目内容' : '允许向 AI 服务外发案卷内容'}</Label>
-            <p className="text-xs text-fg-muted">{paper ? '关闭后所有论文项目的 AI 智能体与 MCP 语义工具都停止外发；各项目的「AI 外发」开关变为不可用。' : '关闭后所有案卷的 AI 智能体与 MCP 语义工具都停止外发；各案的案级开关变为不可用。'}</p>
+            <Label htmlFor="org-ai-enabled" className="text-sm">允许向 AI 服务外发论文项目内容</Label>
+            <p className="text-xs text-fg-muted">关闭后所有论文项目的 AI 功能都停止外发；各项目的 AI 操作开关变为不可用。</p>
           </div>
           <Switch id="org-ai-enabled" checked={enabled} disabled={saving} onCheckedChange={onToggle} data-testid="org-ai-enabled" />
         </div>
         {!enabled && (
           <Alert variant="warn" data-testid="org-ai-disabled-alert">
             <TriangleAlert aria-hidden />
-            <AlertTitle>{paper ? 'AI 已对全团队关闭' : 'AI 已对全机构关闭'}</AlertTitle>
-            <AlertDescription>{paper ? '此设置对团队内所有成员与所有论文项目生效；各项目「AI 外发」开关将显示为禁用，直到这里重新开启。' : '此设置对机构内所有成员与所有案卷生效；案级「AI 外发」开关将显示为禁用，直到这里重新开启。'}</AlertDescription>
+            <AlertTitle>AI 已对全团队关闭</AlertTitle>
+            <AlertDescription>此设置对团队内所有成员与所有论文项目生效；各项目 AI 功能将显示为禁用，直到这里重新开启。</AlertDescription>
           </Alert>
         )}
       </section>

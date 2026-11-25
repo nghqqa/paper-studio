@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
-import { atDashboard, atPageRoute, clearProjectQuery, clientHash, deliverHash, editorHash, goDashboard, goDeadlines, goDeliver, goEditor, goInbox, goNovelty, goWorkbench, noveltyHash, parseHash, projectHash, readHashClientToken, readHashPid, readHashProjectQuery, readHashShareToken, writeHashPid } from '../hash'
+import { atDashboard, atPageRoute, clearProjectQuery, clientHash, goDashboard, goWorkbench, parseHash, projectHash, readHashClientToken, readHashPid, readHashProjectQuery, readHashShareToken, writeHashPid } from '../hash'
 
 describe('W4-A 路由（13 §5）：#/ 面板 · #/p/<pid> 规范工作台 · 旧 #/<pid> 兼容', () => {
   it('空 / #/ → dashboard', () => {
@@ -61,11 +61,17 @@ describe('hash 路由（R6：#/login 与 #/share/<token> 不是案卷 id）', ()
 })
 
 describe('atPageRoute', () => {
-  it('login / share 为页面路由；pid 与空 hash 不是', () => {
+  it('login / share / changelog 为页面路由；pid 与空 hash 不是', () => {
     window.location.hash = '#/login'
     expect(atPageRoute()).toBe(true)
     window.location.hash = '#/share/t'
     expect(atPageRoute()).toBe(true)
+    window.location.hash = '#/changelog'
+    expect(parseHash()).toEqual({ kind: 'changelog' })
+    expect(atPageRoute()).toBe(true)
+    expect(readHashPid()).toBeNull()
+    window.location.hash = '#/changelog?from=home'
+    expect(parseHash()).toEqual({ kind: 'changelog' })
     window.location.hash = '#/method'
     expect(atPageRoute()).toBe(false)
     window.location.hash = ''
@@ -73,40 +79,7 @@ describe('atPageRoute', () => {
   })
 })
 
-describe('W4-E 路由（17 §1.3）：#/p/<pid>/deliver 递交页 · #/account · #/admin', () => {
-  it('#/p/<pid>/deliver → deliver；deliverHash 编码 pid；writeHashPid 在同案递交页不动', () => {
-    window.location.hash = `#${deliverHash('案 a/b')}`
-    expect(parseHash()).toEqual({ kind: 'deliver', pid: '案 a/b' })
-    expect(readHashPid()).toBe('案 a/b')
-    writeHashPid('案 a/b')
-    expect(parseHash().kind).toBe('deliver')
-    writeHashPid('other')
-    expect(parseHash()).toEqual({ kind: 'project', pid: 'other', legacy: false, query: {} })
-  })
-  it('goDeliver / goWorkbench 同案往返；goDeliver 换案会写新 pid', () => {
-    window.location.hash = '#/p/method'
-    goDeliver('method')
-    expect(parseHash()).toEqual({ kind: 'deliver', pid: 'method' })
-    goDeliver('method')
-    expect(window.location.hash).toBe('#/p/method/deliver')
-    goDeliver('system')
-    expect(parseHash()).toEqual({ kind: 'deliver', pid: 'system' })
-    goWorkbench('system')
-    expect(parseHash()).toEqual({ kind: 'project', pid: 'system', legacy: false, query: {} })
-  })
-  it('W19 批4：#/p/<pid>/novelty → novelty；noveltyHash 编码；writeHashPid 在同案查新页不动；goNovelty 往返', () => {
-    window.location.hash = `#${noveltyHash('案 a/b')}`
-    expect(parseHash()).toEqual({ kind: 'novelty', pid: '案 a/b' })
-    expect(readHashPid()).toBe('案 a/b')
-    writeHashPid('案 a/b')
-    expect(parseHash()).toEqual({ kind: 'novelty', pid: '案 a/b' })
-    goNovelty('案 a/b')
-    expect(window.location.hash).toBe('#/p/%E6%A1%88%20a%2Fb/novelty')
-    goWorkbench('案 a/b')
-    expect(parseHash().kind).toBe('project')
-    goNovelty('other')
-    expect(parseHash()).toEqual({ kind: 'novelty', pid: 'other' })
-  })
+describe('页面路由：#/account · #/admin · #/c/<token>', () => {
   it('#/account · #/admin 不带 pid；readHashPid 为 null', () => {
     window.location.hash = '#/account'
     expect(parseHash()).toEqual({ kind: 'account' })
@@ -115,21 +88,7 @@ describe('W4-E 路由（17 §1.3）：#/p/<pid>/deliver 递交页 · #/account �
     expect(parseHash()).toEqual({ kind: 'admin', tab: null })
     expect(atPageRoute()).toBe(true)
   })
-})
-
-describe('W5 路由（21 §4）：#/deadlines · #/inbox · #/c/<token> · #/p/<pid>?c=&focus= · #/admin?tab=', () => {
-  it('deadlines / inbox / __ds 为页面路由，无 pid', () => {
-    goDeadlines()
-    expect(parseHash()).toEqual({ kind: 'deadlines' })
-    expect(atPageRoute()).toBe(true)
-    expect(readHashPid()).toBeNull()
-    goInbox()
-    expect(parseHash()).toEqual({ kind: 'inbox' })
-    window.location.hash = '#/__ds'
-    expect(parseHash()).toEqual({ kind: 'ds', query: {} })
-    expect(atPageRoute()).toBe(true)
-  })
-  it('#/c/<token> 客户审阅页；与 #/share 区分', () => {
+  it('#/c/<token> 外部审阅页；与 #/share 区分', () => {
     window.location.hash = `#${clientHash('tok/x')}`
     expect(parseHash()).toEqual({ kind: 'client', token: 'tok/x' })
     expect(readHashClientToken()).toBe('tok/x')
@@ -137,27 +96,25 @@ describe('W5 路由（21 §4）：#/deadlines · #/inbox · #/c/<token> · #/p/<
     expect(readHashPid()).toBeNull()
     expect(atPageRoute()).toBe(true)
   })
-  it('#/p/<pid>?c=<cid>&focus=<block> 携带 query；goWorkbench(pid, query) 写入；clearProjectQuery 原地清掉', () => {
-    goWorkbench('method', { c: 'c1', focus: 'b-9' })
-    expect(parseHash()).toEqual({ kind: 'project', pid: 'method', legacy: false, query: { c: 'c1', focus: 'b-9' } })
-    expect(readHashProjectQuery()).toEqual({ c: 'c1', focus: 'b-9' })
+  it('#/p/<pid>?c=<cid> 携带 query；goWorkbench(pid, query) 写入；clearProjectQuery 原地清掉', () => {
+    goWorkbench('method', { c: 'c1' })
+    expect(parseHash()).toEqual({ kind: 'project', pid: 'method', legacy: false, query: { c: 'c1' } })
+    expect(readHashProjectQuery()).toEqual({ c: 'c1' })
     expect(readHashPid()).toBe('method')
     writeHashPid('method')
-    expect(window.location.hash).toBe('#/p/method?c=c1&focus=b-9')
+    expect(window.location.hash).toBe('#/p/method?c=c1')
     clearProjectQuery()
     expect(window.location.hash).toBe('#/p/method')
     expect(readHashProjectQuery()).toEqual({})
   })
-  it('?panel=&dl= 解析/回写；clearProjectQuery 清 dl 保留 panel', () => {
-    window.location.hash = '#/p/method?panel=deadlines&dl=oa_reply%3Ar2'
-    expect(readHashProjectQuery()).toEqual({ panel: 'deadlines', dl: 'oa_reply:r2' })
-    expect(projectHash('method', { panel: 'deadlines', dl: 'oa_reply:r2' })).toBe('/p/method?panel=deadlines&dl=oa_reply%3Ar2')
+  it('未保留的旧 query 参数不污染解析结果；#/admin?tab=audit 取 tab，非法 tab → null', () => {
+    window.location.hash = '#/p/method?panel=deadlines&c=c2'
+    expect(readHashProjectQuery()).toEqual({ c: 'c2' })
+    expect(projectHash('method', { c: 'c2' })).toBe('/p/method?c=c2')
     clearProjectQuery()
-    expect(window.location.hash).toBe('#/p/method?panel=deadlines')
-  })
-  it('旧 #/<pid>?focus= 也解析 query；#/admin?tab=audit 取 tab，非法 tab → null', () => {
-    window.location.hash = '#/method?focus=b-1'
-    expect(parseHash()).toEqual({ kind: 'project', pid: 'method', legacy: true, query: { focus: 'b-1' } })
+    expect(window.location.hash).toBe('#/p/method')
+    window.location.hash = '#/method?c=c3'
+    expect(parseHash()).toEqual({ kind: 'project', pid: 'method', legacy: true, query: { c: 'c3' } })
     window.location.hash = '#/admin?tab=audit'
     expect(parseHash()).toEqual({ kind: 'admin', tab: 'audit' })
     window.location.hash = '#/admin?tab=zzz'
@@ -179,19 +136,11 @@ describe('R91：畸形 hash 不崩', () => {
   })
 })
 
-describe('B12：#/edit/<caseId>/<docId> 文稿编辑器路由', () => {
-  it('解析为 edit；editorHash 编码；goEditor 写 hash', () => {
-    expect(editorHash('c-1', 'd-2')).toBe('/edit/c-1/d-2')
-    expect(parseHash('#/edit/c-1/d-2')).toEqual({ kind: 'edit', caseId: 'c-1', docId: 'd-2' })
-    expect(parseHash('#/edit/%E6%A1%88/d%2F2')).toEqual({ kind: 'edit', caseId: '案', docId: 'd/2' })
-    window.location.hash = '#/workbench?view=case&case=c-1'
-    goEditor('c-1', 'd-2')
-    expect(parseHash()).toEqual({ kind: 'edit', caseId: 'c-1', docId: 'd-2' })
-    // 同一路由重复跳转不再写
-    goEditor('c-1', 'd-2')
-    expect(parseHash()).toEqual({ kind: 'edit', caseId: 'c-1', docId: 'd-2' })
-  })
-  it('edit 为页面路由且无 pid；残缺路径回退 project 解析', () => {
+describe('纯 Paper 路由收敛：已下线遗留路由解析为 unsupported', () => {
+  it('deadlines / inbox / workbench / figlib / __ds / edit / deliver / board / novelty → unsupported', () => {
+    for (const h of ['#/deadlines', '#/inbox', '#/workbench', '#/figlib', '#/__ds', '#/edit/c-1/d-2', '#/p/method/deliver', '#/p/method/board', '#/p/method/novelty']) {
+      expect(parseHash(h)).toEqual({ kind: 'unsupported' })
+    }
     window.location.hash = '#/edit/c-1/d-2'
     expect(atPageRoute()).toBe(true)
     expect(readHashPid()).toBeNull()

@@ -7,8 +7,6 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 
-import httpx
-import test_collab
 import test_legacy_auth as test_auth
 from fastapi.testclient import TestClient
 
@@ -16,7 +14,6 @@ from app.auth import access
 
 on = test_auth.on
 client = test_auth.client
-env = test_collab.env
 _register, _login = test_auth._register, test_auth._login
 _assert_501 = test_auth._assert_501
 
@@ -173,35 +170,6 @@ def test_access_viewed_not_viewed_and_share_accept(on):
         "avatar_color": "",
         "role": None,
     }
-
-
-def test_online_from_collab_room(env):
-    """online = 该用户在本案任一 Yjs 房间有活动连接（rooms.online_user_ids）。"""
-    c, _pdir, _ = env("on", auth=True)
-    with test_collab.serve(c.app) as base:
-        test_collab._register(base, "su@example.com")
-        test_collab._register(base, "editor@example.com")
-        su, ed = test_collab._login(base, "su@example.com"), test_collab._login(base, "editor@example.com")
-        r = httpx.put(
-            f"{base}/api/projects/method/members",
-            json={"email": "editor@example.com", "role": "editor"},
-            cookies={"studio_session": su},
-        )
-        assert r.status_code == 200, r.text
-        assert httpx.get(f"{base}/api/projects/method", cookies={"studio_session": ed}).status_code == 200
-
-        def online():
-            rep = httpx.get(f"{base}/api/projects/method/access", cookies={"studio_session": su}).json()
-            return {row["user"]["email"]: row["online"] for row in rep["viewed"]}
-
-        assert online() == {"editor@example.com": False}
-
-        async def flow():
-            async with test_collab.client(base, "claims", cookie=ed):
-                assert online() == {"editor@example.com": True}
-            await test_collab.until(lambda: online() == {"editor@example.com": False})
-
-        asyncio.run(flow())
 
 
 def test_collab_settings(on):

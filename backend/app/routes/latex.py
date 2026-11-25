@@ -11,7 +11,6 @@
 import asyncio
 import hashlib
 import os
-import shutil
 import threading
 from pathlib import Path
 from urllib.parse import quote
@@ -21,9 +20,20 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app import auth, config
-from app.domain import docx_export, events, latex_build, latex_files, latex_git, latex_history, latex_issues, latex_word, paper_templates
+from app.domain import (
+    docx_export,
+    events,
+    latex_build,
+    latex_files,
+    latex_git,
+    latex_history,
+    latex_import_service,
+    latex_issues,
+    latex_word,
+    paper_templates,
+    user_ai,
+)
 from app.domain.org import require_org_ai
-from app.domain import user_ai
 from app.domain.projects import ProjectError
 
 router = APIRouter(prefix="/api/projects/{pid}", tags=["latex"])
@@ -364,12 +374,24 @@ async def export_docx(pid: str, request: Request, user: auth.CurrentUser = None)
 # --- 通用 Word 导出（v0.6.7，导师阅读版；与 jcip 实验导出独立，见 domain/latex_word.py） ---
 
 
+class WordExportBody(BaseModel):
+    profile: str = "academic"
+    eq_layout: str = "tab"
+
+
 @router.post("/latex/export-word")
-async def export_word(pid: str, request: Request, user: auth.CurrentUser = None):
+async def export_word(
+    pid: str,
+    request: Request,
+    body: WordExportBody | None = None,
+    user: auth.CurrentUser = None,
+):
     store = request.app.state.store
     store.get(pid)
+    prof = body.profile if body else "academic"
+    eq_layout = body.eq_layout if body else "tab"
     try:
-        return await asyncio.to_thread(latex_word.export_word, store, pid)
+        return await asyncio.to_thread(latex_word.export_word, store, pid, prof, eq_layout)
     except ProjectError as e:
         kind = "job_busy" if e.status == 409 else "content"
         raise HTTPException(e.status, {"kind": kind, "message": str(e)})
@@ -539,19 +561,12 @@ async def latex_import_docx_upload(request: Request, user: auth.CurrentUser = No
     """Word(.docx) → LaTeX 导入第一段：pandoc 转换 + 暂存（返回 main.tex/media 清单与建议引擎）。"""
     if config.AUTH_ON and user is None:
         raise auth.login_required()
-    ctype = request.headers.get("Content-Type", "")
-    if "multipart/form-data" not in ctype:
-        raise HTTPException(415, {"kind": "content", "message": "请使用 multipart/form-data 上传 .docx 文件"})
-    form = await request.form()
-    up = form.get("file")
-    if up is None or not hasattr(up, "filename") or not hasattr(up, "read"):
-        raise HTTPException(422, {"kind": "content", "message": "缺少 file 字段（.docx）"})
-    payload = await up.read()
+    filename, payload = await latex_import_service.read_multipart_upload(request, label=".docx")
     from app.domain import latex_import, latex_import_docx
 
     with _import_lock:
         try:
-            meta = await asyncio.to_thread(latex_import_docx.stage_docx, up.filename, payload)
+            meta = await asyncio.to_thread(latex_import_docx.stage_docx, filename, payload)
         except latex_import.ImportRejected as e:
             raise HTTPException(e.status, {"kind": "content", "message": str(e)})
         except ProjectError as e:
@@ -569,7 +584,6 @@ async def latex_import_docx_create(request: Request, user: auth.CurrentUser = No
     engine = str(body.get("engine") or "")
     title = str(body.get("title") or "").strip()
     from app.domain import latex_import
-    from app.domain import latex_import_docx as _dx
 
     with _import_lock:
         try:
@@ -581,48 +595,32 @@ async def latex_import_docx_create(request: Request, user: auth.CurrentUser = No
             if engine not in config.LATEX_ENGINES:
                 raise HTTPException(422, {"kind": "content", "message": f"未知 LaTeX 引擎：{engine}"})
             store = request.app.state.store
-            pid = store.unique_pid("word-imported")
-            final_dir = os.path.join(store.root, pid)
-            await asyncio.to_thread(latex_import.materialize, stage, final_dir)
-            try:
-                from app import atomic
-
-                await asyncio.to_thread(
-                    atomic.write_json, os.path.join(final_dir, "studio.json"),
-                    {"document_type": "paper", "source_format": "latex",
-                     "latex": {"main": "main.tex", "engine": engine},
-                     "title": title or "导入的 Word 论文"},
-                )
-                await asyncio.to_thread(store.get, pid)
-            except Exception:
-                shutil.rmtree(final_dir, ignore_errors=True)
-                raise
-            latex_import.drop_stage(stage)
+            project = await latex_import_service.materialize_staged_project(
+                store,
+                stage,
+                prefix="word-imported",
+                main="main.tex",
+                engine=engine,
+                title=title or "导入的 Word 论文",
+            )
         except latex_import.ProjectError as e:
             raise HTTPException(e.status, {"kind": "content", "message": str(e)})
-    await auth.grant_owner(pid, user)
-    events.emit("case.created", pid=pid, actor=events.actor_of(user),
+    await auth.grant_owner(project.id, user)
+    events.emit("case.created", pid=project.id, actor=events.actor_of(user),
                 data={"title": title or "导入的 Word 论文", "source": "docx-import"})
-    return _out(store.get(pid))
+    return _out(project)
 
 
 @demo_router.post("/api/projects/latex/import/upload")
 async def latex_import_upload(request: Request, user: auth.CurrentUser = None):
     if config.AUTH_ON and user is None:
         raise auth.login_required()
-    ctype = request.headers.get("Content-Type", "")
-    if "multipart/form-data" not in ctype:
-        raise HTTPException(415, {"kind": "content", "message": "请使用 multipart/form-data 上传 .zip 文件"})
-    form = await request.form()
-    up = form.get("file")
-    if up is None or not hasattr(up, "filename") or not hasattr(up, "read"):
-        raise HTTPException(422, {"kind": "content", "message": "缺少 file 字段（.zip）"})
-    payload = await up.read()
+    filename, payload = await latex_import_service.read_multipart_upload(request, label=".zip")
     from app.domain import latex_import
 
     with _import_lock:
         try:
-            meta = await asyncio.to_thread(latex_import.stage_zip, up.filename, payload)
+            meta = await asyncio.to_thread(latex_import.stage_zip, filename, payload)
         except latex_import.ImportRejected as e:
             raise HTTPException(e.status, {"kind": "content", "message": str(e)})
     return {"token": meta["token"], "filename": meta["filename"], "files": meta["files"],
@@ -640,40 +638,35 @@ async def latex_import_create(request: Request, user: auth.CurrentUser = None):
     engine = str(body.get("engine") or "pdflatex")
     title = str(body.get("title") or "").strip()
     if engine not in config.LATEX_ENGINES:
-        raise HTTPException(422, {"kind": "content", "message": f"未知 LaTeX 引擎：{engine}（允许：{'、'.join(config.LATEX_ENGINES)}）"})
+        raise HTTPException(
+            422,
+            {"kind": "content", "message": f"未知 LaTeX 引擎：{engine}（允许：{'、'.join(config.LATEX_ENGINES)}）"},
+        )
     from app.domain import latex_import
 
     with _import_lock:
         try:
             stage, meta = latex_import.load_stage(token)
             if main not in meta["main_candidates"]:
-                raise HTTPException(422, {"kind": "content", "message": f"主文件 {main} 不在候选列表中（候选：{', '.join(meta['main_candidates'][:8])}）"})
-            store = request.app.state.store
-            pid = store.unique_pid("imported-paper")
-            final_dir = os.path.join(store.root, pid)
-            # 最后一步：暂存 → 正式工程目录（平台自行写 studio.json，不信任上传配置）
-            await asyncio.to_thread(latex_import.materialize, stage, final_dir)
-            try:
-                from app import atomic
-
-                await asyncio.to_thread(
-                    atomic.write_json, os.path.join(final_dir, "studio.json"),
-                    {"document_type": "paper", "source_format": "latex",
-                     "latex": {"main": main.replace(os.sep, "/"), "engine": engine},
-                     "title": title or "导入的 LaTeX 工程"},
+                cand_str = ", ".join(meta["main_candidates"][:8])
+                raise HTTPException(
+                    422, {"kind": "content", "message": f"主文件 {main} 不在候选列表中（候选：{cand_str}）"}
                 )
-                await asyncio.to_thread(store.get, pid)
-            except Exception:
-                shutil.rmtree(final_dir, ignore_errors=True)
-                raise
-            latex_import.drop_stage(stage)
+            store = request.app.state.store
+            project = await latex_import_service.materialize_staged_project(
+                store,
+                stage,
+                prefix="imported-paper",
+                main=main,
+                engine=engine,
+                title=title or "导入的 LaTeX 工程",
+            )
         except latex_import.ProjectError as e:
             raise HTTPException(e.status, {"kind": "content", "message": str(e)})
-    await auth.grant_owner(pid, user)
-    events.emit("case.created", pid=pid, actor=events.actor_of(user),
+    await auth.grant_owner(project.id, user)
+    events.emit("case.created", pid=project.id, actor=events.actor_of(user),
                 data={"title": title or "导入的 LaTeX 工程", "source": "zip-import"})
-    from app.routes.latex import _out
-    return _out(store.get(pid))
+    return _out(project)
 
 
 # --- SyncTeX 正反向跳转 ---
@@ -765,35 +758,7 @@ class AiReviewIn(BaseModel):
     content: str = Field(min_length=1, max_length=80000)
 
 
-def _parse_issue_array(text: str) -> list[dict]:
-    """模型输出 → [{line, message}]。容错：剥代码围栏；非数组/异常项丢弃。"""
-    import json
-    import re as _re
-    raw = (text or "").strip()
-    raw = _re.sub(r"^```(?:json)?\s*|\s*```$", "", raw, flags=_re.MULTILINE).strip()
-    try:
-        obj = json.loads(raw)
-    except Exception:  # noqa: BLE001
-        start, end = raw.find("["), raw.rfind("]")
-        if start == -1 or end <= start:
-            return []
-        try:
-            obj = json.loads(raw[start:end + 1])
-        except Exception:  # noqa: BLE001
-            return []
-    if not isinstance(obj, list):
-        return []
-    out = []
-    for item in obj[:20]:
-        if not isinstance(item, dict):
-            continue
-        msg = str(item.get("message") or "").strip()
-        if not msg:
-            continue
-        line = item.get("line")
-        out.append({"line": int(line) if isinstance(line, (int, float)) and line > 0 else None,
-                    "message": msg[:500]})
-    return out
+_parse_issue_array = latex_import_service.parse_ai_issue_array
 
 
 @router.post("/latex/ai-review", dependencies=[Depends(require_org_ai)])

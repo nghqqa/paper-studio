@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
  * 数据流：停顿自动保存成功 → POST /struct/preview（服务端按 content sha 缓存、同案单任务）
  * → 面板按 sha 对齐显示；内容再变化时以「预览过期」提示，不把旧 SHA 冒充当前版本。
  */
-const Pdf = lazy(() => import('@/components/attachments/AttachmentPdf'))
+const Pdf = lazy(() => import('@/components/pdf/SimplePdfView'))
 
 export interface PreviewState {
   phase: 'idle' | 'queued' | 'running' | 'done' | 'error'

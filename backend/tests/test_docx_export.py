@@ -78,13 +78,10 @@ def client(tmp_path, monkeypatch):
     import importlib
 
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import projects as projects_mod
 
     importlib.reload(config)
     importlib.reload(projects_mod)
-    importlib.reload(build)
-    importlib.reload(xml_export)
     importlib.reload(main)
     return TestClient(main.app)
 

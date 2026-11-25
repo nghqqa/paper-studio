@@ -5,7 +5,7 @@ GET  /rebuttal                        状态查看（viewer；非 paper 项目 �
 POST /rebuttal/parse                  确定性拆条（editor）：JSON {text, mode?} 或 multipart {file, mode?}
                                       .txt/.md UTF-8 直解；.pdf 走 pypdf 文字层，扫描件 ⇒ 422 no_text（不 OCR）
 PUT  /rebuttal/items/{item_id}        更新 status / location / response / edits_summary（editor）
-POST /rebuttal/items/{item_id}/draft  AI 起草建议存 ai_draft（editor；require_enabled；绝不覆盖用户 response）
+POST /rebuttal/items/{item_id}/draft  AI 起草建议存 ai_draft（editor；require_org_ai + user_ai；绝不覆盖用户 response）
 GET  /rebuttal/export?format=         导出 Response Letter（viewer；无条目/无回复 ⇒ 409）
 
 权限：main.py 的 ACL 依赖按方法判定（GET viewer / 写 editor），本文件不另设；
@@ -16,12 +16,14 @@ import asyncio
 import os
 import urllib.parse
 
-from fastapi import APIRouter, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 
-from app.ai import require_enabled
+from app import auth, config
 from app.domain import rebuttal as rb
+from app.domain import user_ai
+from app.domain.org import require_org_ai
 from app.domain.projects import ATTACHMENT_MAX_BYTES, ProjectError
 from app.errors import error_detail
 from app.routes import read_bounded
@@ -100,7 +102,9 @@ async def _review_text(request: Request) -> tuple[str, str]:
             try:
                 return data.decode("utf-8"), mode
             except UnicodeDecodeError as e:
-                raise HTTPException(422, error_detail("validation", "审稿意见文本文件需为 UTF-8 编码", detail=UNIT)) from e
+                raise HTTPException(
+                    422, error_detail("validation", "审稿意见文本文件需为 UTF-8 编码", detail=UNIT)
+                ) from e
         raise HTTPException(422, error_detail("validation", "仅支持 .txt / .md / .pdf 审稿意见文件", detail=UNIT))
     try:
         body = RebuttalParseIn.model_validate(await request.json())
@@ -147,14 +151,24 @@ def rebuttal_round_detail(pid: str, n: int, request: Request):
     return _run(rb.load_round, p.dir, n)
 
 
-@router.post("/rebuttal/items/{item_id}/draft")
-async def rebuttal_draft(pid: str, item_id: str, body: RebuttalDraftIn, request: Request):
+@router.post("/rebuttal/items/{item_id}/draft", dependencies=[Depends(require_org_ai)])
+async def rebuttal_draft(
+    pid: str, item_id: str, body: RebuttalDraftIn, request: Request, user: auth.CurrentUser = None
+):
     """AI 起草单条回复建议 → {item, warnings}；只写 ai_draft，用户 response 不动，稿件零接触。"""
+    if config.AUTH_ON and user is None:
+        raise auth.login_required()
     store = request.app.state.store
     _paper_project(request, pid)
-    require_enabled(store, pid, UNIT)
+    provider, _source = user_ai.resolve_provider(getattr(user, "id", None))
+    if provider is not None and provider.api_key:
+        ai_cli, _ = user_ai.resolve_ai_client(user)
+    elif config.AI_PROVIDER == "mock":
+        ai_cli = request.app.state.ai
+    else:
+        ai_cli, _ = user_ai.resolve_ai_client(user)
     try:
-        item, warnings = await rb.generate_draft(store, pid, request.app.state.ai, item_id, body.context)
+        item, warnings = await rb.generate_draft(store, pid, ai_cli, item_id, body.context)
     except rb.RebuttalError as e:
         raise HTTPException(e.status, error_detail(e.kind, str(e), detail=UNIT))
     return {"item": item, "warnings": warnings}

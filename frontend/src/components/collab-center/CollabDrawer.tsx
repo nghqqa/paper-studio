@@ -6,9 +6,8 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useIsDesktop } from '@/hooks/useMisc'
 import { FOCUS_RING, TRANSITION_COLOR, cn, touchHit } from '@/lib/utils'
-import { userColor } from '@/collab/colors'
-import { useStudio, selectCanManage, selectOnlineCount, peerNameOf } from '@/store'
-import type { Member } from '@/lib/types'
+import { userColor } from '@/lib/colors'
+import { useStudio, selectCanManage, peerNameOf } from '@/store'
 import { COLLAB_CENTER_TABS, type CollabCenterTab } from '@/types/collab-center'
 import { AccessSection } from './AccessSection'
 import { LinksSection } from './LinksSection'
@@ -27,13 +26,11 @@ import { Avatar, SectionHint } from './shared'
  * 在线：成员行以 access.viewed[].online（后端 Yjs 房间）⊕ 同名 peer 为准；头部 N 与顶栏同源 selectOnlineCount。
  */
 export function CollabDrawer() {
-  const paper = useStudio((s) => s.product === 'paper')
   const open = useStudio((s) => s.collabCenterOpen)
   const tab = useStudio((s) => s.collabCenterTab)
   const setTab = useStudio((s) => s.setCollabCenterTab)
   const close = useStudio((s) => s.closeCollabCenter)
   const pid = useStudio((s) => s.pid)
-  const sourceFormat = useStudio((s) => s.project?.settings?.source_format)
   const title = useStudio((s) => s.project?.title)
   const user = useStudio((s) => s.user)
   const members = useStudio((s) => s.members)
@@ -46,9 +43,6 @@ export function CollabDrawer() {
   const publicLinksLoading = useStudio((s) => s.publicLinksLoading)
   const publicLinksUnavailable = useStudio((s) => s.publicLinksUnavailable)
   const publicLinksError = useStudio((s) => s.publicLinksError)
-  const markCount = useStudio((s) => s.marks.reduce((n, m) => (m.kind === 'ins' || m.kind === 'del' || m.kind === 'sub' ? n + 1 : n), 0))
-  /* 修订提示只属于 Markdown 正文（CriticMarkup）：LaTeX / Word / 结构化正文无未决修订概念，恒 0（防换案残留误报） */
-  const pendingRevisions = !sourceFormat || sourceFormat === 'markdown' ? markCount : 0
   const invites = useStudio((s) => s.invites)
   const invitesLoading = useStudio((s) => s.invitesLoading)
   const invitesUnavailable = useStudio((s) => s.invitesUnavailable)
@@ -61,9 +55,7 @@ export function CollabDrawer() {
   const settingsLoading = useStudio((s) => s.collabSettingsLoading)
   const settingsUnavailable = useStudio((s) => s.collabSettingsUnavailable)
   const settingsError = useStudio((s) => s.collabSettingsError)
-  const peers = useStudio((s) => s.peers)
   const canManage = useStudio(selectCanManage)
-  const online = useStudio(selectOnlineCount)
   const desktop = useIsDesktop()
 
   useEffect(() => {
@@ -73,45 +65,28 @@ export function CollabDrawer() {
     if (!canManage) return
     void s.loadMembers(pid)
     void s.loadShareLinks(pid)
-    /* P1-4：paper 部署同样开放公开审阅链接管理——门只看 canManage，不再按 product 屏蔽 */
     void s.loadPublicLinks(pid)
     void s.loadInvites(pid)
     void s.loadAccess(pid)
   }, [open, pid, canManage])
 
-  /* 成员变更无 WS 推送：抽屉开着期间轮询成员表，他端改角色/移除及时回流 */
   useEffect(() => {
     if (!open || !pid || !canManage) return
     const t = setInterval(() => {
-      /* 隐藏页签不轮询（notify.ts 同闸） */
       if (document.visibilityState === 'hidden') return
       void useStudio.getState().loadMembers(pid)
     }, 30_000)
     return () => clearInterval(t)
   }, [open, pid, canManage])
 
-  /* peers 集合成员一变（有人上/下线）→ 服务端 access.online 尚未刷新，成员行「在线」点会滞后一轮轮询；
-     去抖补一次 access 让行态随 peers 及时收敛。dep 用 uid 签名——光标行变化不该触发重取 */
-  const peersKey = peers.map((p) => p.uid ?? p.name).join('|')
-  useEffect(() => {
-    if (!open || !pid || !canManage) return
-    const t = setTimeout(() => void useStudio.getState().loadAccess(pid), 1500)
-    return () => clearTimeout(t)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, pid, canManage, peersKey])
-
   const viewed = access?.viewed ?? []
-  const peerOf = (m: Member) => peers.find((p) => (p.uid ? p.uid === m.user_id : p.name === peerNameOf(m)))
-  const onlineIds = new Set([
-    ...viewed.filter((r) => r.online).map((r) => r.user.user_id),
-    ...members.filter((m) => peerOf(m)).map((m) => m.user_id),
-  ])
+  const onlineIds = new Set(viewed.filter((r) => r.online).map((r) => r.user.user_id))
   const lastSeen = new Map(viewed.map((r) => [r.user.user_id, r.last_seen]))
-  const onlineCount = online ?? onlineIds.size
-  const onlineNames: { name: string; color: string }[] = [
-    ...members.filter((m) => onlineIds.has(m.user_id)).map((m) => ({ name: peerNameOf(m), color: userColor(m) })),
-    ...peers.filter((p) => !members.some((m) => p.uid === m.user_id)).map((p) => ({ name: p.name, color: p.color })),
-  ].slice(0, 3)
+  const onlineCount = onlineIds.size
+  const onlineNames = members
+    .filter((m) => onlineIds.has(m.user_id))
+    .map((m) => ({ name: peerNameOf(m), color: userColor(m) }))
+    .slice(0, 3)
   const st = useStudio.getState
 
   return (
@@ -134,19 +109,21 @@ export function CollabDrawer() {
             {title ? `${title} · ` : ''}
             {canManage ? `成员 ${members.length} · ` : ''}在线 {onlineCount} 人
           </SheetDescription>
-          <div className="flex shrink-0 items-center gap-1.5 text-xs text-fg-muted" data-testid="collab-drawer-online" aria-label={`在线 ${onlineCount} 人`}>
-            {onlineNames.length > 0 && (
-              <span className="flex items-center -space-x-1.5" aria-hidden data-testid="collab-online-avatars">
-                {onlineNames.map((n) => <Avatar key={n.name} name={n.name} color={n.color} className="ring-2 ring-panel" />)}
-              </span>
-            )}
-            <span className="tabular-nums">
-              {canManage && (
-                <span className="sr-only">成员 {members.length} · </span>
+          {onlineCount > 0 && (
+            <div className="flex shrink-0 items-center gap-1.5 text-xs text-fg-muted" data-testid="collab-drawer-online" aria-label={`在线 ${onlineCount} 人`}>
+              {onlineNames.length > 0 && (
+                <span className="flex items-center -space-x-1.5" aria-hidden data-testid="collab-online-avatars">
+                  {onlineNames.map((n) => <Avatar key={n.name} name={n.name} color={n.color} className="ring-2 ring-panel" />)}
+                </span>
               )}
-              在线 {onlineCount} 人
-            </span>
-          </div>
+              <span className="tabular-nums">
+                {canManage && (
+                  <span className="sr-only">成员 {members.length} · </span>
+                )}
+                在线 {onlineCount} 人
+              </span>
+            </div>
+          )}
           <button
             type="button"
             aria-label="关闭面板" title="关闭面板"
@@ -187,8 +164,6 @@ export function CollabDrawer() {
                   members={members}
                   invites={invites}
                   onlineIds={onlineIds}
-                  peers={peers}
-                  onGoto={(line) => st().gotoLine(line)}
                   canManage={canManage}
                   meId={user?.id ?? null}
                   lastSeen={lastSeen}
@@ -223,13 +198,11 @@ export function CollabDrawer() {
               )}
               {pid && canManage && (
                 <PublicLinksSection
-                  paper={paper}
                   links={publicLinks}
                   loading={publicLinksLoading}
                   unavailable={publicLinksUnavailable}
                   error={publicLinksError}
                   canManage={canManage}
-                  pendingRevisions={pendingRevisions}
                   onRetry={() => void st().loadPublicLinks(pid)}
                   onCreate={(body) => st().createPublicLink(pid, body)}
                   onRevoke={(token) => void st().revokePublicLink(pid, token)}

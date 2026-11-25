@@ -3,7 +3,9 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '@/lib/api'
+import { latexApi } from '@/lib/api/latex'
 import { wordApi, type WordState } from '@/lib/api/word'
+import * as csvLib from '@/lib/csv'
 import * as downloads from '@/lib/download'
 import type { ProjectSummary } from '@/lib/types'
 import { DESKTOP_QUERY, useStudio } from '@/store'
@@ -27,9 +29,8 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear()
   useStudio.setState(initial, true)
-  useStudio.setState({ product: 'paper', authStatus: 'authed', dashView: 'board', dashStatuses: ['filed'], user: { id: 'author', email: 'author@example.com', display_name: '作者', is_superuser: false } })
+  useStudio.setState({ product: 'paper', authStatus: 'authed', user: { id: 'author', email: 'author@example.com', display_name: '作者', is_superuser: false } })
   vi.spyOn(api, 'projects').mockResolvedValue(structuredClone(rows))
-  vi.spyOn(api, 'tags').mockResolvedValue({ tags: [] })
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); vi.restoreAllMocks() })
@@ -50,7 +51,6 @@ it('使用独立论文阶段，筛选与看板不会恢复旧状态', async () =
   expect(host.querySelector('.paper-board')).not.toBeNull()
   expect(q('.paper-board').textContent).toContain('内部审阅')
   expect(q('.paper-board').textContent).not.toMatch(/授权|驳回|发明|案卷/)
-  expect(useStudio.getState().dashStatuses).toEqual(['filed'])
 })
 
 it('按格式筛选、按投稿目标分组，搜索可定位论文标签', async () => {
@@ -168,4 +168,30 @@ it('账号页等外部入口切换全局密度时，首页紧凑偏好跟随刷�
   await act(async () => useStudio.getState().setDensity('comfortable'))
   expect(JSON.parse(localStorage.getItem('paper-project-view-v2')!).compact).toBe(false)
   expect(host.querySelector<HTMLButtonElement>('.paper-density')!.getAttribute('aria-pressed')).toBe('false')
+})
+
+it('导出 CSV 包含学科领域与等级分区列，且非 docx/latex 项目点击下载给出提示不误调 builds', async () => {
+  vi.spyOn(api, 'projects').mockResolvedValue([
+    { id: 'word-paper', title: '中文论文示例', mtime: 1760000000, source_format: 'docx', my_role: 'owner', submission: { stage: 'internal_review', field: '自然语言处理', rank: 'CCF-A', venue: '中文信息学报', deadline: '2027-01-01' } },
+    { id: 'old-paper', title: '未设阶段的旧稿', mtime: 1750000000, source_format: 'markdown', my_role: 'owner' },
+  ])
+  localStorage.setItem('paper-project-view-v2', JSON.stringify({
+    compact: false,
+    columns: { stage: true, owner: true, venue: true, field: true, rank: true, deadline: true, tags: false, modified: true },
+  }))
+  const dlCsv = vi.spyOn(csvLib, 'downloadCsv').mockImplementation(() => {})
+  const buildsSpy = vi.spyOn(latexApi, 'builds')
+  await mount()
+
+  await clickText('导出清单')
+  expect(dlCsv).toHaveBeenCalledOnce()
+  const csvText = dlCsv.mock.calls[0][1]
+  expect(csvText).toContain('学科领域')
+  expect(csvText).toContain('等级分区')
+  expect(csvText).toContain('自然语言处理')
+  expect(csvText).toContain('CCF-A')
+
+  await act(async () => q<HTMLButtonElement>('[aria-label="下载 未设阶段的旧稿"]').click())
+  expect(buildsSpy).not.toHaveBeenCalled()
+  expect(host.textContent).toContain('该格式请打开项目工作台进行导出或下载')
 })

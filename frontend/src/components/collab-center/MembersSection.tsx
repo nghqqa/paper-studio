@@ -6,11 +6,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useIsDesktop } from '@/hooks/useMisc'
 import { useBeforeUnload } from '@/hooks/useBeforeUnload'
-import { FOCUS_RING, cn, touchHit } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { ROLE_LABEL, type Member, type Role } from '@/lib/types'
-import { lineChipLabel } from '@/lib/diagLocation'
-import { userColor } from '@/collab/colors'
-import { peerNameOf, useStudio, type CollabPeer } from '@/store'
+import { userColor } from '@/lib/colors'
+import { peerNameOf, useStudio } from '@/store'
 import type { Invite } from '@/types/collab-center'
 import { InvitesRow } from './InvitesRow'
 import { RoleSelect } from './RoleSelect'
@@ -48,9 +47,6 @@ export interface MembersSectionProps {
   /** 成员表 / 邀请表读失败（非 501）：错误行 + 重试（onRetry 应同时重取 members 与 invites） */
   error?: string | null
   onRetry?: () => void
-  /** Yjs awareness 在线端：成员行头像可点跳行；不在成员表里的（非 owner 视角 / 匿名链接）单独列出 */
-  peers?: readonly CollabPeer[]
-  onGoto?: (line: number) => void
 }
 
 export const ROLE_TONE: Record<Role, 'brand' | 'info' | 'violet' | 'teal' | 'neutral'> = {
@@ -77,8 +73,6 @@ export function MembersSection({
   loading = false,
   error = null,
   onRetry,
-  peers = [],
-  onGoto,
 }: MembersSectionProps) {
   const uid = useId()
   /* 批71：邀请表单草稿存 store（inviteDraft）——协同抽屉 Sheet 关闭即卸载本组件，
@@ -92,13 +86,8 @@ export function MembersSection({
   /* 批76：store 草稿保重挂不保刷新（批73 口径）——邀请邮箱输入中关页签先确认 */
   useBeforeUnload(() => email.trim() !== '')
   const ownerCount = members.filter((m) => m.role === 'owner').length
-  // peer ↔ member 对齐优先 uid（同名成员不能按名字塌缩 / 错位），uid 缺省（访客 / 旧端）退回 name
-  const peerByUid = new Map(peers.filter((p) => p.uid).map((p) => [p.uid!, p]))
-  const peerByName = new Map(peers.filter((p) => !p.uid).map((p) => [p.name, p]))
-  const peerOf = (m: Member) => peerByUid.get(m.user_id) ?? peerByName.get(peerNameOf(m))
-  const strangers = peers.filter((p) => !members.some((m) => peerOf(m) === p))
-  const onlineCount = members.filter((m) => onlineIds.has(m.user_id)).length + strangers.length
-  const listEmpty = members.length === 0 && invites.length === 0 && strangers.length === 0
+  const onlineCount = members.filter((m) => onlineIds.has(m.user_id)).length
+  const listEmpty = members.length === 0 && invites.length === 0
 
   const submit = (e: FormEvent) => {
     e.preventDefault()
@@ -193,17 +182,12 @@ export function MembersSection({
                   lastSeen={lastSeen?.get(m.user_id)}
                   canManage={canManage}
                   lastOwner={m.role === 'owner' && ownerCount <= 1}
-                  peerLine={peerOf(m)?.line ?? null}
-                  onGoto={onGoto}
                   onSetRole={(r) => onSetMemberRole(m.user_id, r)}
                   onRemove={() => onRemoveMember(m.user_id)}
                 />
               ))}
               {invites.map((i) => (
                 <InvitesRow key={i.email} invite={i} canManage={canManage} onSetRole={(r) => onSetInviteRole(i.email, r)} onRevoke={() => onRevokeInvite(i.email)} />
-              ))}
-              {strangers.map((p) => (
-                <PeerRow key={p.id} peer={p} onGoto={onGoto} />
               ))}
             </ul>
           )}
@@ -222,20 +206,15 @@ interface MemberRowProps {
   lastSeen?: string
   canManage: boolean
   lastOwner: boolean
-  /** 对方光标所在全文行（awareness）；有值时头像可点跳行 */
-  peerLine: number | null
-  onGoto?: (line: number) => void
   onSetRole: (role: Role) => void
   onRemove: () => void
 }
 
-function MemberRow({ member: m, online, isSelf, lastSeen, canManage, lastOwner, peerLine, onGoto, onSetRole, onRemove }: MemberRowProps) {
+function MemberRow({ member: m, online, isSelf, lastSeen, canManage, lastOwner, onSetRole, onRemove }: MemberRowProps) {
   const [confirming, setConfirming] = useState(false)
   const [confirmingOwner, setConfirmingOwner] = useState(false)
   const name = peerNameOf(m)
   const seen = fmtSeen(lastSeen)
-  const ast = useStudio((s) => s.ast)
-  const where = peerLine != null ? lineChipLabel(peerLine, ast) : null
   const disabledRoles = lastOwner ? MEMBER_ROLES.filter((r) => r !== 'owner') : []
   return (
     <li
@@ -245,7 +224,7 @@ function MemberRow({ member: m, online, isSelf, lastSeen, canManage, lastOwner, 
       data-role={m.role}
       data-online={online || undefined}
     >
-      <GotoAvatar name={name} color={userColor(m)} line={peerLine} onGoto={onGoto} online={online} />
+      <Avatar name={name} color={userColor(m)} online={online} dimmed={online === false} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5 truncate text-sm text-fg-strong" title={name}>
           <span className="truncate">{name}</span>
@@ -256,10 +235,10 @@ function MemberRow({ member: m, online, isSelf, lastSeen, canManage, lastOwner, 
           {seen ? (
             <span className="shrink-0" data-testid="collab-member-seen">
               最近 {seen}
-              {online && <span className="text-ok-fg">{where ? ` · 正在编辑 ${where}` : ' · 在线'}</span>}
+              {online && <span className="text-ok-fg"> · 在线</span>}
             </span>
           ) : online ? (
-            <span className="shrink-0 text-ok-fg" data-testid="collab-member-editing">正在编辑{where ? ` · ${where}` : ''}</span>
+            <span className="shrink-0 text-ok-fg" data-testid="collab-member-editing">在线</span>
           ) : (
             m.display_name && <span className="truncate" title={m.email}>{m.email}</span>
           )}
@@ -319,43 +298,6 @@ function MemberRow({ member: m, online, isSelf, lastSeen, canManage, lastOwner, 
           {ROLE_LABEL[m.role]}
         </Badge>
       )}
-    </li>
-  )
-}
-
-/** 头像：对方有光标行时是按钮（点击跳行，aria-label 带行号），否则纯装饰 */
-function GotoAvatar({ name, color, line, online, onGoto }: { name: string; color: string; line: number | null; online?: boolean; onGoto?: (line: number) => void }) {
-  const ast = useStudio((s) => s.ast)
-  if (line == null || !onGoto) return <Avatar name={name} color={color} online={online} dimmed={online === false} />
-  const where = lineChipLabel(line, ast)
-  return (
-    <button
-      type="button"
-      className={cn('inline-flex size-xs-control items-center justify-center rounded-full', FOCUS_RING, touchHit)}
-      onClick={() => onGoto(line)}
-      aria-label={`跳到 ${name} 所在位置：${where}`}
-      title={where}
-      data-testid="collab-goto-peer"
-    >
-      <Avatar name={name} color={color} online={online} />
-    </button>
-  )
-}
-
-/** 不在成员表里的在线端（非 owner 视角看不到成员表；或匿名 / 已移出但仍连着房间） */
-function PeerRow({ peer: p, onGoto }: { peer: CollabPeer; onGoto?: (line: number) => void }) {
-  const ast = useStudio((s) => s.ast)
-  return (
-    <li className="flex min-h-row-mobile items-center gap-2 py-1" data-testid="collab-peer-row">
-      <GotoAvatar name={p.name} color={p.color} line={p.line} onGoto={onGoto} online />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 truncate text-sm text-fg-strong">
-          <span className="truncate" title={p.name}>{p.name}</span>
-          <span className="sr-only">在线</span>
-        </div>
-        <div className="text-xs text-ok-fg">正在编辑{p.line != null ? ` · ${lineChipLabel(p.line, ast)}` : ''}</div>
-      </div>
-      {p.readonly && <Badge tone="neutral">只读</Badge>}
     </li>
   )
 }

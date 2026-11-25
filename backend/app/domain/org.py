@@ -15,8 +15,8 @@ import os
 from pydantic import BaseModel, Field
 
 from app import atomic, config
+from app.domain import mail
 from app.errors import kind_error
-from app.notify import mail
 from app.schemas import DefaultCollab, OrgSettings, OrgSettingsPatch
 
 ORG_FILE = os.path.join(".studio", "org.json")
@@ -110,7 +110,7 @@ def apply_default_collab(pid: str) -> None:
 
     from app.auth.access import DEFAULT_SETTINGS
     from app.auth.models import ProjectCollabSettings
-    from app.notify import sink
+    from app.domain import db_sink as sink
 
     values = {**DEFAULT_SETTINGS, "project_id": pid, "allow_comment": load_org().default_collab.allow_viewer_comment}
     stmt = insert(ProjectCollabSettings).values(**values)

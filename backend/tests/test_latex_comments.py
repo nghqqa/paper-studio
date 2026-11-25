@@ -34,7 +34,6 @@ def latex_project(tmp_path, monkeypatch):
     import importlib
 
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import latex_build as lb
     from app.domain import projects as projects_mod
     from app.routes import comments as comments_routes
@@ -43,8 +42,6 @@ def latex_project(tmp_path, monkeypatch):
     importlib.reload(config)
     importlib.reload(projects_mod)
     importlib.reload(lb)
-    importlib.reload(build)
-    importlib.reload(xml_export)
     importlib.reload(latex_routes)
     # 批注路由在模块级绑定 domain.comments 的模型类与 latex_build/latex_routes 的兄弟引用——
     # 先跑文件换 env reload 过这些模块后，comments 不跟着 reload 就拿旧绑定（sha 校验/过期判定读到旧路径）
@@ -146,15 +143,13 @@ def test_non_latex_project_rejects_sha_anchor(tmp_path, monkeypatch):
     import importlib
 
     from app import config, main
-    from app.domain import build, latex_build, xml_export
+    from app.domain import latex_build
     from app.domain import projects as projects_mod
     from app.routes import latex as latex_routes
 
     importlib.reload(config)
     importlib.reload(projects_mod)
     importlib.reload(latex_build)
-    importlib.reload(build)
-    importlib.reload(xml_export)
     importlib.reload(latex_routes)
     # 同 latex_project：批注路由的模块级绑定必须跟 reload，否则拿旧路径/旧模型类
     from app.routes import comments as comments_routes
@@ -202,7 +197,7 @@ def authed_server():
         "PATENT_PROJECTS_DIR": projects_dir,
     }
     proc = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "patent_studio.asgi:app", "--host", "127.0.0.1", "--port", "8123"],
+        [sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8123"],
         cwd=ROOT,
         env=env,
         stdout=subprocess.DEVNULL,

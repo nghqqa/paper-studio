@@ -7,7 +7,6 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import type { User } from '@/lib/types'
 import { useStudio } from '@/store'
 import { ShareAccept } from '../ShareAccept'
-import { ShareButton } from '../ShareButton'
 
 declare global {
   // eslint-disable-next-line no-var
@@ -33,7 +32,7 @@ beforeEach(() => {
   useStudio.setState({
     pid: 'method', project: null, projects: [], dialog: null, toasts: [],
     authStatus: 'authed', user: me, authError: null, members: [], shareLinks: [],
-    collabCenterOpen: false, collabCenterTab: 'members', collabStatus: 'off', collabUnavailable: false, peers: [],
+    collabCenterOpen: false, collabCenterTab: 'members',
   })
 })
 
@@ -61,57 +60,6 @@ async function violations(el: Element = document.body) {
 }
 
 const q = <T extends Element = HTMLElement>(sel: string, el: ParentNode = document) => el.querySelector<T>(sel)
-const click = (el: Element) => act(async () => (el as HTMLElement).click())
-
-describe('ShareButton（14 §6.3 D10）', () => {
-  it('仅 authed 显示；点击 openCollabCenter(members)；协同 off ⇒ 无在线数 / 头像', async () => {
-    useStudio.setState({ authStatus: 'off' })
-    let el = await mount(<ShareButton />)
-    expect(q('[data-testid="share-button"]', el)).toBeNull()
-    await act(async () => root?.unmount())
-    host.remove()
-    useStudio.setState({ authStatus: 'authed' })
-    el = await mount(<ShareButton />)
-    const btn = q('[data-testid="share-button"]', el)!
-    expect(btn.textContent).toBe('分享')
-    expect(q('[data-testid="presence-avatars"]', el)).toBeNull()
-    await click(btn)
-    const st = useStudio.getState()
-    expect(st.collabCenterOpen).toBe(true)
-    expect(st.collabCenterTab).toBe('members')
-    expect(st.dialog).toBeNull()
-  })
-
-  it('协同已连接：N = 去重({我} ∪ peers)；≤3 个头像；点头像跳行，无光标不可点；axe 无违规', async () => {
-    const gotoLine = vi.fn()
-    useStudio.setState({
-      collabStatus: 'connected', collabUnavailable: false, gotoLine,
-      peers: [
-        { id: 1, uid: 'u1', name: 'Owner', color: '#000', line: 3, readonly: false },
-        { id: 2, uid: 'u2', name: '代理人', color: '#111', line: null, readonly: true },
-        { id: 3, uid: 'u3', name: '审阅', color: '#222', line: 9, readonly: false },
-        { id: 4, uid: 'u4', name: '第四', color: '#333', line: 1, readonly: false },
-      ],
-    })
-    const el = await mount(<ShareButton />)
-    expect(q('[data-testid="share-online"]', el)!.textContent).toContain('4 在线')
-    const avatars = el.querySelectorAll<HTMLButtonElement>('[data-testid="presence-avatar"]')
-    expect(avatars).toHaveLength(3)
-    expect(avatars[1].disabled).toBe(true)
-    expect(avatars[1].getAttribute('aria-label')).toContain('只读')
-    await click(avatars[2])
-    expect(gotoLine).toHaveBeenCalledWith(9)
-    expect(await violations(el)).toEqual([])
-  })
-
-  it('reconnecting ⇒ data-status 与 tooltip 状态字样', async () => {
-    useStudio.setState({ collabStatus: 'reconnecting', collabUnavailable: false, peers: [] })
-    const el = await mount(<ShareButton />)
-    const btn = q('[data-testid="share-button"]', el)!
-    expect(btn.dataset.status).toBe('reconnecting')
-    expect(q('[data-testid="share-online"]', el)!.textContent).toContain('1 在线')
-  })
-})
 
 describe('ShareAccept #/share/<token>（07 §4.1）', () => {
   it('无 token → alert + 返回工作台', async () => {

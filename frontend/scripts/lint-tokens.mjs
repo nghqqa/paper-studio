@@ -16,7 +16,7 @@ const ROOT = resolve(fileURLToPath(new URL('.', import.meta.url)), '..', 'src')
 const ALLOW_FILES = new Set([
   'types/case.ts', // TAG_COLORS：标签色是案卷数据（后端 cases.py 同表）
   'types/account.ts', // AVATAR_COLORS：头像色是账户数据
-  'collab/colors.ts', // 协同光标色：yjs awareness 持久化到 peer 状态
+  'lib/colors.ts', // 头像色：账户与协作者面板用户数据色
 ])
 const ALLOW_DIRS = ['__tests__/']
 const RULES = [

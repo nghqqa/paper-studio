@@ -27,8 +27,8 @@ import uuid
 import zipfile
 
 from app import config
+from app.domain import pandoc_runner
 from app.domain.latex_import import STAGING_DIR, ImportRejected, _prune_stale
-from app.domain.projects import ProjectError
 
 DOCX_MAX_BYTES = 25 * 1024 * 1024
 _CJK_RE = re.compile(r"[\u4e00-\u9fff\u3400-\u4dbf]")
@@ -56,36 +56,33 @@ def _pandoc_args(cjk: bool) -> list[str]:
 def _run_pandoc(stage: str, src_name: str, cjk: bool) -> tuple[int, str]:
     """在暂存目录内执行转换；返回 (rc, stderr)。local=容器内置 pandoc；docker=宿主 pandoc/latex。"""
     if config.DOCX_EXPORT_RUNTIME == "docker":
-        if not shutil.which("docker"):
-            raise ProjectError("转换运行时为 docker，但当前环境不可用", 503)
+        pandoc_runner.ensure_runtime_ready(
+            "docker",
+            docker_msg="转换运行时为 docker，但当前环境不可用",
+            which_fn=shutil.which,
+        )
         cmd = (
             "pandoc --from=docx --to=latex --standalone --wrap=auto --extract-media=/proj/media "
             + ("-V documentclass=ctexart " if cjk else "")
             + f"--output=/proj/main.tex '/proj/{src_name}'"
         )
-        try:
-            proc = subprocess.run(
-                ["docker", "run", "--rm", "--entrypoint", "sh",
-                 "-v", f"{stage.replace(os.sep, '/')}:/proj", "-w", "/proj",
-                 config.DOCX_EXPORT_IMAGE, "-c", cmd],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=_TIMEOUT_S,
-            )
-        except subprocess.TimeoutExpired:
-            return -1, "转换超时"
-        return proc.returncode, proc.stderr
-    # local：pandoc 在容器内（镜像内置）；cwd=stage
-    try:
-        proc = subprocess.run(
-            [config.DOCX_EXPORT_PANDOC, *_pandoc_args(cjk), "--output", "main.tex", src_name],
-            cwd=stage, capture_output=True, text=True, encoding="utf-8", errors="replace",
-            timeout=_TIMEOUT_S,
-            env={k: v for k, v in os.environ.items()
-                 if k in ("PATH", "SystemRoot", "COMSPEC", "PATHEXT", "TEMP", "TMP", "LANG", "LC_ALL")},
+        rc, _out, err = pandoc_runner.run_pandoc_docker(
+            mount_dir=stage,
+            workdir="/proj",
+            cmd=cmd,
+            image=config.DOCX_EXPORT_IMAGE,
+            timeout_s=_TIMEOUT_S,
+            subprocess_run=subprocess.run,
         )
-    except subprocess.TimeoutExpired:
-        return -1, "转换超时"
-    return proc.returncode, proc.stderr
+        return rc, err
+    rc, _out, err = pandoc_runner.run_pandoc_local(
+        [*_pandoc_args(cjk), "--output", "main.tex", src_name],
+        cwd=stage,
+        timeout_s=_TIMEOUT_S,
+        env=pandoc_runner.clean_local_env(),
+        subprocess_run=subprocess.run,
+    )
+    return rc, err
 
 
 def stage_docx(filename: str, payload: bytes) -> dict:
@@ -94,8 +91,12 @@ def stage_docx(filename: str, payload: bytes) -> dict:
         raise ImportRejected("仅支持 .docx（Word 2007+）；.doc 老格式请先另存为 .docx", 415)
     if len(payload) > DOCX_MAX_BYTES:
         raise ImportRejected(f"文件 {len(payload) / 1048576:.1f}MB 超过上限 25MB", 413)
-    if config.DOCX_EXPORT_RUNTIME == "local" and not shutil.which(config.DOCX_EXPORT_PANDOC):
-        raise ProjectError("转换运行时为 local，但镜像内未找到 pandoc", 503)
+    if config.DOCX_EXPORT_RUNTIME == "local":
+        pandoc_runner.ensure_runtime_ready(
+            "local",
+            local_msg="转换运行时为 local，但镜像内未找到 pandoc",
+            which_fn=shutil.which,
+        )
 
     _prune_stale()
     cjk = _cjk_sniff(payload)

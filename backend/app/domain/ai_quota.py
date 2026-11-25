@@ -20,9 +20,9 @@ import os
 import time
 
 from app import atomic, config
-from app.errors import kind_error
 from app.domain.org import load_org
 from app.domain.user_ai import user_key
+from app.errors import kind_error
 
 QUOTA_DIR = os.path.join(".studio", "ai-quota")
 

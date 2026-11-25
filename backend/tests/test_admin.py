@@ -14,8 +14,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from test_legacy_auth import _login, _register
 
-from app.domain import org
-from app.notify import mail
+from app.domain import mail, org
 
 client = test_auth.client  # pytest fixture
 on = test_auth.on  # pytest fixture

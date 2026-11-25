@@ -44,7 +44,7 @@
 ## Key Features
 
 ### Dual-Mode Authoring: Native LaTeX + Native Word
-- **Native LaTeX Projects**: Multi-file `.tex`/`.bib`/`.cls`/`.sty` workspace with CodeMirror editor, auto-save & compile (`pdfLaTeX` / `XeLaTeX`), cancellable builds, real-time PDF preview, SyncTeX bidirectional navigation, `\cite`/`\ref` autocomplete, 124-symbol KaTeX palette, cross-file search (`Ctrl+Shift+F`), per-project Git history, and GitHub/Gitea push-pull sync.
+- **Native LaTeX Projects**: Multi-file `.tex`/`.bib`/`.cls`/`.sty` workspace with CodeMirror editor, auto-save & compile (`pdfLaTeX` / `XeLaTeX` / `LuaLaTeX` + `biber`), cancellable builds, real-time PDF preview, cross-file `\input`/`\include` outline, SyncTeX bidirectional navigation, `\cite`/`\ref` autocomplete, 124-symbol KaTeX palette, cross-file search (`Ctrl+Shift+F`), per-project Git history, GitHub/Gitea push-pull sync, and LaTeX-to-Word export (`academic` / `thesis` / `jcip`).
 - **Native Word (`.docx`) Projects**: Powered by self-hosted ONLYOFFICE Docs CE (`--profile word`). Keeps native pagination, tables, headers, columns, comments, and tracked changes. Ships with built-in plugins for:
   - **LaTeX Equation Plugin**: Insert & re-edit native OMML equations from LaTeX, plus `#(n)` centered-equation / right-aligned numbering via tab stops (no layout tables).
   - **Reference & Citation Plugin**: GB/T 7714-2015, IEEE, Springer LNCS, ACM, and Elsevier Vancouver styles; superscript citations and one-click bibliography rebuild / first-appearance renumbering.
@@ -119,7 +119,7 @@ docker compose up -d
 We prefer being transparent about current technical boundaries:
 
 - **ONLYOFFICE Community Edition**: Runs as an independent container under AGPLv3 and enforces upstream's 20-concurrent-connection limit. For larger institutions, point `PAPER_STUDIO_ONLYOFFICE_URL` to a licensed Document Server.
-- **Word Citations & Equation Numbering**: Because ONLYOFFICE CE does not expose native Word citation/SEQ fields, citations and equation numbers are platform-managed text/tab-stops with one-click renumbering and integrity verification.
+- **Word Citations & Equation Numbering**: Because ONLYOFFICE CE does not expose native Word citation/SEQ fields, citations use platform-managed blocks with one-click first-appearance renumbering and integrity verification, while equation numbers use tab-aligned plain text (with next-line wrap and legacy table migration, without automatic renumbering across equations).
 - **Desktop Word / WPS Fidelity**: Paper Studio preserves font names in `.docx` without redistributing commercial fonts. Mount licensed fonts into `./fonts` on the server and verify final pagination in desktop Word/WPS before submission.
 - **LaTeX Concurrency**: LaTeX source editing uses optimistic locking (`base_sha` conflict detection) rather than real-time CRDT co-editing.
 - **UI Language**: The web interface is currently in Simplified Chinese (full English i18n is on the post-1.0 roadmap; bilingual AI Usage Disclosure export is already built in).

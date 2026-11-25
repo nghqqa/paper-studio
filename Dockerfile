@@ -12,12 +12,6 @@ RUN corepack enable && \
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile ${NPM_MIRROR:+--registry=$NPM_MIRROR}
 COPY frontend/ ./
-# Frontend typecheck/tests reference shared schema & fixtures via relative paths
-COPY backend/src/patent_studio/kernel/ast_schema.json /app/backend/src/patent_studio/kernel/ast_schema.json
-COPY backend/tests/golden /app/backend/tests/golden
-COPY backend/tests/fixtures /app/backend/tests/fixtures
-COPY examples/method/studio.json /app/examples/method/studio.json
-COPY examples/system/studio.json /app/examples/system/studio.json
 RUN pnpm build
 
 # ---------- Stage 2: Runtime (Python + TeXLive + Pandoc) ----------
@@ -34,12 +28,23 @@ RUN if [ -n "$APT_MIRROR" ]; then \
       sed -i "s|deb.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list.d/debian.sources; \
     fi \
     && apt-get update && apt-get install -y --no-install-recommends \
-        texlive-xetex texlive-latex-recommended texlive-latex-extra \
-        texlive-fonts-recommended texlive-lang-chinese lmodern \
-        latexmk pandoc git poppler-utils curl \
+        texlive-xetex texlive-luatex texlive-latex-recommended texlive-latex-extra \
+        texlive-fonts-recommended texlive-lang-chinese texlive-bibtex-extra \
+        texlive-science texlive-pictures biber lmodern \
+        latexmk pandoc git poppler-utils curl fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
+# Map common CJK font names (SimSun/SimHei/FangSong/KaiTi) to bundled open-source Fandol fonts
+COPY docker/fonts-cjk-alias.conf /etc/fonts/conf.d/65-cjk-alias.conf
+RUN mkdir -p /usr/local/share/fonts && \
+    if [ -d /usr/share/texlive/texmf-dist/fonts/opentype/public/fandol ]; then \
+      ln -sf /usr/share/texlive/texmf-dist/fonts/opentype/public/fandol /usr/local/share/fonts/fandol; \
+    fi && \
+    fc-cache -f || true
+
 RUN echo "paper-runtime: xelatex=$(xelatex --version | head -1 | awk '{print $NF}') " \
+         "lualatex=$(lualatex --version | head -1 | awk '{print $NF}') " \
+         "biber=$(biber --version 2>/dev/null | head -1 | awk '{print $NF}') " \
          "latexmk=$(latexmk --version 2>/dev/null | grep -o 'Version [0-9.]*') " \
          "pandoc=$(pandoc --version | head -1 | awk '{print $NF}')" > /etc/paper-toolchain.txt
 
@@ -49,11 +54,8 @@ WORKDIR /app/backend
 COPY --chown=1000:1000 backend/pyproject.toml backend/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     UV_INDEX_URL="${PYPI_MIRROR:-https://pypi.org/simple}" UV_HTTP_TIMEOUT=600 \
-    uv sync --frozen --no-dev --no-install-project
-COPY --chown=1000:1000 backend/ ./
-RUN --mount=type=cache,target=/root/.cache/uv \
-    UV_INDEX_URL="${PYPI_MIRROR:-https://pypi.org/simple}" UV_HTTP_TIMEOUT=600 \
     uv sync --frozen --no-dev
+COPY --chown=1000:1000 backend/ ./
 COPY --from=web --chown=1000:1000 /app/frontend/dist /app/frontend/dist
 
 ENV PATH="/app/backend/.venv/bin:$PATH" \
@@ -71,4 +73,4 @@ USER 1000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s \
     CMD curl -fs http://127.0.0.1:8000/api/health || exit 1
 ENTRYPOINT ["/entrypoint-paper.sh"]
-CMD ["uvicorn", "patent_studio.asgi:app", "--host", "0.0.0.0", "--port", "8000", "--ws-ping-interval", "15", "--ws-ping-timeout", "20"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

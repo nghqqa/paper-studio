@@ -24,10 +24,9 @@ def client(tmp_path, monkeypatch):
     import importlib
 
     from app import config, main
-    from app.domain import build, xml_export
-    from app.domain import latex_history as latex_history_mod
     from app.domain import latex_build as latex_build_mod
     from app.domain import latex_files as latex_files_mod
+    from app.domain import latex_history as latex_history_mod
     from app.domain import latex_issues as latex_issues_mod
     from app.domain import projects as projects_mod
     from app.routes import latex as latex_routes
@@ -35,12 +34,10 @@ def client(tmp_path, monkeypatch):
 
     importlib.reload(config)
     importlib.reload(projects_mod)
-    importlib.reload(build)
     importlib.reload(latex_history_mod)
     importlib.reload(latex_build_mod)
     importlib.reload(latex_files_mod)
     importlib.reload(latex_issues_mod)
-    importlib.reload(xml_export)
     importlib.reload(latex_routes)
     importlib.reload(latex_history_routes)
     importlib.reload(main)

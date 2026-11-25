@@ -35,8 +35,5 @@ export async function enterWorkspace(returnPid: string | null): Promise<void> {
 
 /** 登出：先拆掉全部协同房间（ws / 光标 / 头像），再清工作区状态并结束会话；两处登出入口（用户菜单 / 登录页「换账号」）共用 */
 export async function signOut(): Promise<void> {
-  // collab/registry → provider → yjs/y-codemirror 整套协同栈——动态 import，登出瞬间才加载（不背进首屏分包）
-  const { destroyAllRooms } = await import('@/collab/registry')
-  destroyAllRooms()
   await useStudio.getState().logout()
 }

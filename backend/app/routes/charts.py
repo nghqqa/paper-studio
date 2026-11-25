@@ -15,7 +15,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from fastapi import APIRouter, Depends  # noqa: E402
+from fastapi import APIRouter  # noqa: E402
 from pydantic import BaseModel, Field, field_validator, model_validator  # noqa: E402
 
 from app import config  # noqa: E402

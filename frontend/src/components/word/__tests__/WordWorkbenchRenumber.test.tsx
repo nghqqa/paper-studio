@@ -15,7 +15,7 @@ vi.mock('@/lib/api/library', () => ({ libraryApi: { get: vi.fn(), registerCitati
 vi.mock('@/lib/api/refsPlugin', () => ({ runRefsTaskAuto: vi.fn(), bridgeAlive: vi.fn(), refreshDocKey: vi.fn() }))
 vi.mock('@/lib/download', () => ({ downloadFile: vi.fn() }))
 vi.mock('../onlyoffice', () => ({ loadOnlyOffice: vi.fn() }))
-vi.mock('@/components/latex/ProposalPanel', () => ({ ProposalPanel: () => null }))
+vi.mock('@/components/paper/ProposalPanel', () => ({ ProposalPanel: () => null }))
 vi.mock('@/components/word/WordPreflightPanel', () => ({ WordPreflightPanel: () => null }))
 
 let root: Root | null = null

@@ -30,6 +30,13 @@ export interface LabelHit {
   line: number // 1-based
 }
 
+export interface OutlineHit {
+  file: string
+  line: number // 1-based
+  level: number
+  title: string
+}
+
 export const MAX_FILE_BYTES = 1 * 1024 * 1024
 export const MAX_TOTAL_BYTES = 8 * 1024 * 1024
 export const MAX_HITS = 200
@@ -144,6 +151,65 @@ export class ProjectContentIndex {
         if (out.length >= MAX_HITS * 10) return out
       }
     }
+    return out
+  }
+
+  /**
+   * 跨文件整篇大纲：从主文件出发，按真实阅读顺序递归展开 \input / \include，
+   * 收集全书 \part / \chapter / \section / \subsection / \subsubsection / \paragraph。
+   * liveOverrides 用于合并编辑器当前未落盘的实时文本。
+   */
+  collectOutline(mainPath: string, liveOverrides?: Record<string, string>): OutlineHit[] {
+    const levels: Record<string, number> = {
+      part: 0, chapter: 0, section: 1, subsection: 2, subsubsection: 3, paragraph: 4,
+    }
+    const secRe = /\\(part|chapter|section|subsection|subsubsection|paragraph)\*?(?:\[[^\]]*\])?\{([^}]+)\}/
+    const incRe = /\\(?:input|include)\{([^}]+)\}/g
+    const getText = (p: string): string | undefined => {
+      if (liveOverrides && p in liveOverrides) return liveOverrides[p]
+      return this.contents.get(p)
+    }
+    const resolveInclude = (fromPath: string, rawTarget: string): string | null => {
+      const clean = rawTarget.trim().replace(/^\.\//, '')
+      if (!clean) return null
+      const dir = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/') + 1) : ''
+      const cands = [
+        clean,
+        clean.endsWith('.tex') ? clean : `${clean}.tex`,
+        `${dir}${clean}`,
+        `${dir}${clean.endsWith('.tex') ? clean : `${clean}.tex`}`,
+      ]
+      for (const c of cands) {
+        if (getText(c) !== undefined) return c
+      }
+      return null
+    }
+
+    const out: OutlineHit[] = []
+    const visited = new Set<string>()
+    const walk = (path: string) => {
+      if (visited.has(path) || out.length >= MAX_HITS * 4) return
+      const content = getText(path)
+      if (content === undefined) return
+      visited.add(path)
+      const lines = content.split('\n')
+      for (let i = 0; i < lines.length; i++) {
+        const lineText = lines[i]
+        if (/^\s*%/.test(lineText)) continue
+        const noComment = lineText.replace(/(^|[^\\])%.*/, '$1')
+        const sm = noComment.match(secRe)
+        if (sm) {
+          out.push({ file: path, line: i + 1, level: levels[sm[1]] ?? 1, title: sm[2].trim() })
+        }
+        incRe.lastIndex = 0
+        let im: RegExpExecArray | null
+        while ((im = incRe.exec(noComment)) !== null) {
+          const target = resolveInclude(path, im[1])
+          if (target) walk(target)
+        }
+      }
+    }
+    walk(mainPath)
     return out
   }
 }

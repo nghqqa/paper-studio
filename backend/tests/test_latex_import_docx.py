@@ -17,24 +17,21 @@ def client(tmp_path, monkeypatch):
     import importlib
 
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import latex_build as latex_build_mod
     from app.domain import latex_files as latex_files_mod
-    from app.domain import latex_issues as latex_issues_mod
     from app.domain import latex_import as latex_import_mod
     from app.domain import latex_import_docx as latex_import_docx_mod
+    from app.domain import latex_issues as latex_issues_mod
     from app.domain import projects as projects_mod
     from app.routes import latex as latex_routes
 
     importlib.reload(config)
     importlib.reload(projects_mod)
-    importlib.reload(build)
     importlib.reload(latex_build_mod)
     importlib.reload(latex_files_mod)
     importlib.reload(latex_issues_mod)
     importlib.reload(latex_import_mod)
     importlib.reload(latex_import_docx_mod)
-    importlib.reload(xml_export)
     importlib.reload(latex_routes)
     importlib.reload(main)
     return TestClient(main.app), projects, latex_import_docx_mod
@@ -117,7 +114,7 @@ def test_docx_create_engine_whitelist(client, monkeypatch):
                files={"file": ("a.docx", _docx("hello"), "text/plain")})
     assert r.status_code == 200
     r = c.post("/api/projects/latex/import-docx/create",
-               json={"token": r.json()["token"], "engine": "lualatex"})
+               json={"token": r.json()["token"], "engine": "tectonic"})
     assert r.status_code == 422
 
 

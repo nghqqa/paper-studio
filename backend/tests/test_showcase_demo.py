@@ -81,10 +81,10 @@ def test_showcase_demo_and_demo_login_lifecycle(tmp_path, monkeypatch, request):
     assert r2.status_code == 200, r2.text
     assert r2.json()["id"] != pid
 
-    # 4. 经外层 ASGI 入口（与生产 patent_studio.asgi:app 一致）调用 demo-login 也必须正常
-    from patent_studio.asgi import create_app
+    # 4. 经正式 app.main:app 入口调用 demo-login 也必须正常
+    from app.main import app as main_app
 
-    c_asgi = TestClient(create_app())
+    c_asgi = TestClient(main_app)
     r_asgi = c_asgi.post("/api/auth/demo-login")
     assert r_asgi.status_code in (200, 204), r_asgi.text
     assert c_asgi.get("/api/users/me").json()["email"] == "demo@demo.paperstudio.org"

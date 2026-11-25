@@ -6,7 +6,7 @@ import { CircleAlert, FileText } from 'lucide-react'
 import { Alert } from '@/components/ui/alert'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
-import { A4_RATIO, A4_WIDTH_PX } from '@/components/preview/zoom'
+import { A4_RATIO, A4_WIDTH_PX } from '@/components/pdf/pdfZoom'
 import { withFetchTimeout } from '@/lib/api'
 import { FOCUS_RING_INSET, cn } from '@/lib/utils'
 

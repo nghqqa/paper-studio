@@ -56,7 +56,7 @@ const item = (over: Partial<RebuttalItem> = {}): RebuttalItem => ({
   ...over,
 })
 
-const SETTINGS: Settings = { abstract_figure: null, spec_figures: [], sub_except: [], abstract_limit: 300, style: {}, ai_enabled: true }
+const SETTINGS: Settings = { ai_enabled: true }
 
 const stateOf = (items: RebuttalState['items']): RebuttalState => ({
   updated_at: null,
@@ -108,7 +108,7 @@ const openItem = async () => {
 beforeEach(() => {
   vi.clearAllMocks()
   vi.mocked(downloadFile).mockResolvedValue('response-letter.md')
-  useStudio.setState({ pid: 'p1', settings: SETTINGS, authStatus: 'off' })
+  useStudio.setState({ pid: 'p1', settings: SETTINGS, authStatus: 'off', aiDisabledByOrg: false })
 })
 
 afterEach(async () => {
@@ -132,14 +132,18 @@ describe('RebuttalPanel', () => {
     expect(q('[data-testid="rebuttal-response-input"]')).toBeTruthy()
   })
 
-  it('AI 未开启时按钮禁用并明确提示，不假装可用', async () => {
-    useStudio.setState({ settings: { ...SETTINGS, ai_enabled: false } })
+  it('团队禁用 AI 时按钮禁用并明确提示，默认态可起草', async () => {
     mockState(stateOf([item()]))
     await mount(<RebuttalPanel pid="p1" canEdit activeFile={null} cursorLine={null} onJump={() => {}} />)
     await openItem()
+    expect(btn('rebuttal-ai-draft')!.disabled).toBe(false)
+
+    await act(async () => {
+      useStudio.setState({ aiDisabledByOrg: true })
+    })
     const ai = btn('rebuttal-ai-draft')!
     expect(ai.disabled).toBe(true)
-    expect(q('[data-testid="rebuttal-ai-area"]')?.textContent).toContain('AI 未开启')
+    expect(q('[data-testid="rebuttal-ai-area"]')?.textContent).toContain('团队已禁用 AI')
     expect(btn('rebuttal-adopt-ai')).toBeNull()
   })
 

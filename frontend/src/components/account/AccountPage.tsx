@@ -1,4 +1,4 @@
-import { Bell, Bot, Building2, ChevronRight, KeyRound, ShieldCheck, UserRound } from 'lucide-react'
+import { Bot, Building2, ChevronRight, ShieldCheck, UserRound } from 'lucide-react'
 import { PageChrome } from '@/components/shell/PageChrome'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -6,38 +6,31 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useIsDesktop } from '@/hooks/useMisc'
 import { useStudio } from '@/store'
 import { AppearanceSection } from './AppearanceSection'
-import { NotifyPrefs } from './NotifyPrefs'
 import { PasswordForm } from './PasswordForm'
-import { PatPanel } from './PatPanel'
 import { ProfileForm } from './ProfileForm'
 import { SubNav, useHashTab, type SubNavItem } from './SubNav'
 import { UserAiPanel } from './UserAiPanel'
 
-export type AccountTab = 'profile' | 'security' | 'ai' | 'notify' | 'pat'
-export const ACCOUNT_TABS: readonly AccountTab[] = ['profile', 'security', 'ai', 'notify', 'pat']
+export type AccountTab = 'profile' | 'security' | 'ai'
+export const ACCOUNT_TABS: readonly AccountTab[] = ['profile', 'security', 'ai']
 
 const NAV: readonly SubNavItem<AccountTab>[] = [
   { value: 'profile', label: '资料', icon: <UserRound aria-hidden />, href: '#/account?tab=profile', 'data-testid': 'account-tab-profile' },
   { value: 'security', label: '安全', icon: <ShieldCheck aria-hidden />, href: '#/account?tab=security', 'data-testid': 'account-tab-security' },
   { value: 'ai', label: 'AI 接入', icon: <Bot aria-hidden />, href: '#/account?tab=ai', 'data-testid': 'account-tab-ai' },
-  { value: 'notify', label: '通知偏好', icon: <Bell aria-hidden />, href: '#/account?tab=notify', 'data-testid': 'account-tab-notify' },
-  { value: 'pat', label: '集成 PAT', icon: <KeyRound aria-hidden />, href: '#/account?tab=pat', 'data-testid': 'account-tab-pat' },
 ]
 
 const TITLE: Record<AccountTab, { h: string; p: string }> = {
   profile: { h: '资料', p: '显示名、头衔与头像色会出现在成员列表与批注署名；外观设置只影响本浏览器。' },
-  security: { h: '安全', p: '修改登录密码；其他设备会被要求重新登录。' },
-  ai: { h: 'AI 接入', p: '配置你自己的 OpenAI 兼容模型接入（论文线）；优先于机构配置，未配置时回退机构接入。' },
-  notify: { h: '通知偏好', p: '站内与邮件通知的接收方式。' },
-  pat: { h: '集成 · 个人访问令牌', p: '供 Codex / Claude Code 等智能体通过 MCP 访问你有权限的论文项目。' },
+  security: { h: '安全', p: '修改登录密码；改密后所有设备（含本会话）需重新登录。' },
+  ai: { h: 'AI 接入', p: '配置你自己的 OpenAI 兼容模型接入；优先于团队配置，未配置时回退团队接入。' },
 }
 
 /**
- * `#/account?tab=profile|security|notify|pat`（21 §4.6）：左二级导航 200 + 表单列 640；375 Segmented 横滑 + 单列。
- * auth=off ⇒ 「账号系统未启用」；anon 由 App 导向登录页。超管在头部有「机构管理」入口。
+ * `#/account?tab=profile|security|ai`：左二级导航 200 + 表单列 640；375 Segmented 横滑 + 单列。
+ * auth=off ⇒ 「账号系统未启用」；anon 由 App 导向登录页。超管在头部有「平台管理」入口。
  */
 export function AccountPage() {
-  const paper = useStudio((s) => s.product === 'paper')
   const status = useStudio((s) => s.authStatus)
   const user = useStudio((s) => s.user)
   const saving = useStudio((s) => s.meSaving)
@@ -54,7 +47,7 @@ export function AccountPage() {
   const actions = user?.is_superuser ? (
     <Button asChild variant="secondary" size="md">
       <a href="#/admin" data-testid="account-admin-link">
-        <Building2 aria-hidden /> {paper ? '平台管理' : '机构管理'}
+        <Building2 aria-hidden /> 平台管理
       </a>
     </Button>
   ) : null
@@ -62,7 +55,7 @@ export function AccountPage() {
   return (
     <PageChrome name="account" title="账户" description={user ? user.email : undefined} actions={desktop ? actions : undefined}>
       {status === 'off' ? (
-        <EmptyState icon={ShieldCheck} title="账号系统未启用" reason="本部署未开启账号系统（PATENT_STUDIO_AUTH=off），没有个人资料可编辑。" className="mx-auto max-w-form" data-testid="account-auth-off" />
+        <EmptyState icon={ShieldCheck} title="账号系统未启用" reason="本部署未开启账号系统（PAPER_STUDIO_AUTH=off），没有个人资料可编辑。" className="mx-auto max-w-form" data-testid="account-auth-off" />
       ) : !user && authError ? (
         <EmptyState
           icon={ShieldCheck}
@@ -81,7 +74,7 @@ export function AccountPage() {
       ) : (
         <div className={desktop ? 'flex items-start gap-10' : 'grid gap-section-m'} data-testid="account-card" data-tab={tab}>
           <SubNav
-            items={NAV.filter((item) => (paper ? item.value !== 'notify' : item.value !== 'ai'))}
+            items={NAV}
             value={tab}
             onValueChange={setTab}
             aria-label="账户设置"
@@ -102,8 +95,6 @@ export function AccountPage() {
             )}
             {tab === 'security' && <PasswordForm saving={saving} unavailable={unavailable} onSave={saveMe} />}
             {tab === 'ai' && <UserAiPanel />}
-            {tab === 'notify' && <NotifyPrefs />}
-            {tab === 'pat' && <PatPanel />}
             {!desktop && user.is_superuser && (
               <a
                 href="#/admin"
@@ -111,7 +102,7 @@ export function AccountPage() {
                 data-testid="account-admin-link"
               >
                 <Building2 className="size-4 text-fg-icon" aria-hidden />
-                机构管理
+                平台管理
                 <ChevronRight className="ml-auto size-4 text-fg-subtle" aria-hidden />
               </a>
             )}

@@ -17,14 +17,23 @@ import json
 import os
 import re
 import time
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app import auth, atomic, config
-from app.domain import citation_verify, gbt7714, library, library_sources, zotero_credentials, zotero_sources as zotero
+from app import atomic, auth, config
+from app.domain import (
+    citation_verify,
+    gbt7714,
+    library,
+    library_ops,
+    library_sources,
+    zotero_credentials,
+)
+from app.domain import (
+    zotero_sources as zotero,
+)
 from app.domain.library import (
     KEY_RE,
     RID_RE,
@@ -37,7 +46,6 @@ from app.domain.library import (
     entry_to_csl_json,
     format_bibtex,
     load_index,
-    suggested_key,
 )
 from app.errors import error_detail, kind_error
 
@@ -175,40 +183,8 @@ async def import_bibtex(pid: str, body: ImportIn, request: Request):
     index = await _current_index(project)
     # 粘贴导入自动分流：@条目 → BibTeX 解析器；纯文本 → GB/T 7714 逐行解析
     parsed = await asyncio.to_thread(library.parse_citation_text, body.text)
-    existing_keys = {e.citation_key for e in index.entries}
-    existing_dois = {library.doi_of(e) for e in index.entries if library.doi_of(e)}
-    existing_arx = {library.arxiv_of(e) for e in index.entries if library.arxiv_of(e)}
-    fp_map: dict[tuple, LibraryEntry] = {}
-    for e in index.entries:
-        fp_map.setdefault(library.entry_fingerprint(e), e)
-
-    out_entries = []
-    batch_keys: dict[str, int] = {}
-    for ent in parsed.entries:
-        batch_keys[ent.citation_key] = batch_keys.get(ent.citation_key, 0) + 1
-        entry_dict = ent.model_dump(mode="json")
-        dupes: list[dict] = []
-        doi = library.doi_of(ent)
-        arx = library.arxiv_of(ent)
-        if doi and doi in existing_dois:
-            match = next(e for e in index.entries if library.doi_of(e) == doi)
-            dupes.append({"kind": "doi", "reference_id": match.reference_id, "citation_key": match.citation_key})
-        if arx and arx in existing_arx:
-            match = next(e for e in index.entries if library.arxiv_of(e) == arx)
-            dupes.append({"kind": "arxiv", "reference_id": match.reference_id, "citation_key": match.citation_key})
-        fp = library.entry_fingerprint(ent)
-        if fp[0] and fp in fp_map:
-            dupes.append({"kind": "fuzzy", "reference_id": fp_map[fp].reference_id,
-                          "citation_key": fp_map[fp].citation_key})
-        entry_dict["duplicates"] = dupes
-        entry_dict["key_conflict"] = ent.citation_key in existing_keys or batch_keys[ent.citation_key] > 1
-        entry_dict["suggested_key"] = suggested_key(ent)
-        out_entries.append(entry_dict)
-    return {
-        "entries": out_entries,
-        "errors": [e.model_dump() for e in parsed.errors],
-        "total_blocks": len(out_entries) + len(parsed.errors),
-    }
+    out_entries, errors, total_blocks = library_ops.annotate_import_preview(parsed, index)
+    return {"entries": out_entries, "errors": errors, "total_blocks": total_blocks}
 
 
 class CommitSource(BaseModel):
@@ -350,9 +326,10 @@ async def zotero_collections(pid: str, body: ZoteroGroupIn, request: Request, us
     return {"group": meta, "collections": collections}
 
 
-def _zotero_http_error(e: 'zotero.ZoteroError', user) -> HTTPException:
+def _zotero_http_error(e: zotero.ZoteroError, user) -> HTTPException:
     """ZoteroError → HTTP：错误文本先经凭据 redact 兜底擦除（key 只应在 header，防回显泄漏）。"""
-    return HTTPException(e.status, error_detail(e.kind, zotero_credentials.redact(e.message, getattr(user, "id", None))))
+    redacted = zotero_credentials.redact(e.message, getattr(user, "id", None))
+    return HTTPException(e.status, error_detail(e.kind, redacted))
 
 
 def _zotero_key(user, library_type: str) -> str | None:
@@ -402,39 +379,11 @@ async def zotero_preview(pid: str, body: ZoteroPreviewIn, request: Request, user
                 "notice": "该库/集合没有可导入的顶层条目"}
     index = await _current_index(project)
     parsed = await asyncio.to_thread(library.parse_bibtex_text, text)
-    # 查重口径与 /library/import 完全一致（key 冲突 / DOI / arXiv / 疑似重复）
-    existing_keys = {e.citation_key for e in index.entries}
-    existing_dois = {library.doi_of(e) for e in index.entries if library.doi_of(e)}
-    existing_arx = {library.arxiv_of(e) for e in index.entries if library.arxiv_of(e)}
-    fp_map: dict[tuple, LibraryEntry] = {}
-    for e in index.entries:
-        fp_map.setdefault(library.entry_fingerprint(e), e)
-    out_entries = []
-    batch_keys: dict[str, int] = {}
-    for ent in parsed.entries:
-        batch_keys[ent.citation_key] = batch_keys.get(ent.citation_key, 0) + 1
-        entry_dict = ent.model_dump(mode="json")
-        dupes: list[dict] = []
-        doi = library.doi_of(ent)
-        arx = library.arxiv_of(ent)
-        if doi and doi in existing_dois:
-            match = next(e for e in index.entries if library.doi_of(e) == doi)
-            dupes.append({"kind": "doi", "reference_id": match.reference_id, "citation_key": match.citation_key})
-        if arx and arx in existing_arx:
-            match = next(e for e in index.entries if library.arxiv_of(e) == arx)
-            dupes.append({"kind": "arxiv", "reference_id": match.reference_id, "citation_key": match.citation_key})
-        fp = library.entry_fingerprint(ent)
-        if fp[0] and fp in fp_map:
-            dupes.append({"kind": "fuzzy", "reference_id": fp_map[fp].reference_id,
-                          "citation_key": fp_map[fp].citation_key})
-        entry_dict["duplicates"] = dupes
-        entry_dict["key_conflict"] = ent.citation_key in existing_keys or batch_keys[ent.citation_key] > 1
-        entry_dict["suggested_key"] = suggested_key(ent)
-        out_entries.append(entry_dict)
+    out_entries, errors, total_blocks = library_ops.annotate_import_preview(parsed, index)
     return {
         "entries": out_entries,
-        "errors": [e.model_dump() for e in parsed.errors],
-        "total_blocks": len(out_entries) + len(parsed.errors),
+        "errors": errors,
+        "total_blocks": total_blocks,
         "group": meta,
         "source": {**source_meta, "truncated": bool(fetched["truncated"])},
     }
@@ -460,54 +409,6 @@ class ZoteroRefreshCommitIn(ZoteroRefreshIn):
     removals: list[str] = Field(default_factory=list, max_length=MAX_ENTRIES_PER_COMMIT)
     remove_from_citation_order: bool = False
 
-
-def _refresh_source(body) -> dict:
-    return {"provider": "zotero", "library_type": body.library_type,
-            "group_id": body.group_id, "collection_key": body.collection_key,
-            "group_name": body.group_name, "zotero_user_id": body.zotero_user_id}
-
-
-def _remote_match(local_entries: list[LibraryEntry], ent: LibraryEntry) -> LibraryEntry | None:
-    """刷新匹配键优先级：DOI → arXiv → 指纹 → citation_key。"""
-    doi = library.doi_of(ent)
-    if doi:
-        hit = next((e for e in local_entries if library.doi_of(e) == doi), None)
-        if hit is not None:
-            return hit
-    arx = library.arxiv_of(ent)
-    if arx:
-        hit = next((e for e in local_entries if library.arxiv_of(e) == arx), None)
-        if hit is not None:
-            return hit
-    fp = library.entry_fingerprint(ent)
-    if fp[0]:
-        hit = next((e for e in local_entries if library.entry_fingerprint(e) == fp), None)
-        if hit is not None:
-            return hit
-    return next((e for e in local_entries if e.citation_key == ent.citation_key), None)
-
-
-def _entry_sig(e: LibraryEntry) -> tuple:
-    return (e.title or "", e.year or "", e.venue or "", e.volume or "", e.number or "",
-            e.pages or "", e.publisher or "", e.url or "", tuple(e.authors))
-
-
-def _sig_dict(e: LibraryEntry) -> dict:
-    out = {k: getattr(e, k) or "" for k in ("title", "year", "venue", "volume", "number",
-                                            "pages", "publisher", "url")}
-    out["authors"] = " and ".join(e.authors)
-    out["citation_key"] = e.citation_key
-    return out
-
-
-def _validated_refresh_entry(raw: dict, source: dict) -> LibraryEntry:
-    ent = LibraryEntry.model_validate(dict(raw))
-    if not KEY_RE.match(ent.citation_key):
-        raise kind_error("validation", f"citation key 不合法：{ent.citation_key}", detail=ent.citation_key)
-    if not ent.raw_bibtex:
-        ent.raw_bibtex = format_bibtex(ent)
-    ent.source = source
-    return ent
 
 @router.post("/library/zotero/refresh-preview")
 async def zotero_refresh_preview(pid: str, body: ZoteroRefreshIn, request: Request,
@@ -535,49 +436,25 @@ async def zotero_refresh_preview(pid: str, body: ZoteroRefreshIn, request: Reque
             fetched = await zotero.fetch_bibtex(int(body.group_id), body.collection_key, api_key=key)
     except zotero.ZoteroError as e:
         raise _zotero_http_error(e, user)
-    source = _refresh_source(body)
+    source = library_ops.refresh_source_dict(body)
     parsed = await asyncio.to_thread(library.parse_bibtex_text, fetched["bibtex"])
     index = await _current_index(project)
-    added: list = []
-    updated: list = []
-    unchanged = 0
-    matched: set = set()
-    for ent in parsed.entries:
-        local = _remote_match(index.entries, ent)
-        if local is None:
-            added.append(ent.model_dump(mode="json"))
-            continue
-        matched.add(local.reference_id)
-        if _entry_sig(local) != _entry_sig(ent):
-            updated.append({"reference_id": local.reference_id, "citation_key": local.citation_key,
-                            "old": _sig_dict(local), "new": _sig_dict(ent),
-                            "entry": ent.model_dump(mode="json")})
-        else:
-            unchanged += 1
-    removed: list = []
-    removed_supported = mode == "index"
-    for e in index.entries:
-        src = e.source or {}
-        if src.get("provider") != "zotero" or src.get("library_type", "group") != body.library_type:
-            continue
-        if body.library_type == "group" and src.get("group_id") != body.group_id:
-            continue
-        if body.library_type == "user" and str(src.get("zotero_user_id") or "") != str(body.zotero_user_id or ""):
-            continue
-        if body.collection_key and (src.get("collection_key") or None) != body.collection_key:
-            continue
-        if e.reference_id not in matched:
-            removed.append({"reference_id": e.reference_id, "citation_key": e.citation_key,
-                            "in_citation_order": e.reference_id in index.citation_order})
-    notice = None
-    if removed and not removed_supported:
-        notice = "bib 模式以 .bib 为事实源，不支持远端移除检测的自动删除（如需删除请手动编辑 .bib）"
-        removed = []
-    return {"source": source, "mode": mode, "truncated": bool(fetched["truncated"]),
-            "counts": {"added": len(added), "updated": len(updated),
-                       "removed": len(removed), "unchanged": unchanged},
-            "added": added, "updated": updated, "removed": removed,
-            "removed_supported": removed_supported, "notice": notice}
+    summary = library_ops.build_zotero_refresh_preview_items(
+        parsed,
+        index,
+        library_type=body.library_type,
+        group_id=body.group_id,
+        zotero_user_id=body.zotero_user_id,
+        collection_key=body.collection_key,
+        mode=mode,
+    )
+    return {
+        "source": source,
+        "mode": mode,
+        "truncated": bool(fetched["truncated"]),
+        **summary,
+    }
+
 
 async def _zotero_refresh_commit_bib(project, body: ZoteroRefreshCommitIn, source: dict) -> dict:
     """bib 模式刷新提交：不支持 removals；库内单次 base 校验后全量合成一次落盘。"""
@@ -590,7 +467,7 @@ async def _zotero_refresh_commit_bib(project, body: ZoteroRefreshCommitIn, sourc
     index = await _current_index(project)
     add_ents = []
     for raw in body.additions:
-        ent = _validated_refresh_entry(raw, source)
+        ent = library_ops.validate_refresh_entry(raw, source)
         ent.reference_id = library.new_reference_id()
         ent.origin = "import"
         ent.bib_files = [body.target_bib]
@@ -601,7 +478,7 @@ async def _zotero_refresh_commit_bib(project, body: ZoteroRefreshCommitIn, sourc
         local = next((e for e in index.entries if e.reference_id == rid), None)
         if local is None or not local.raw_bibtex:
             raise kind_error("stale", "待更新条目在当前 .bib 索引中不存在，请重建文献索引后重试", detail=rid)
-        remote = _validated_refresh_entry(dict(upd.get("entry") or {}), local.source or source)
+        remote = library_ops.validate_refresh_entry(dict(upd.get("entry") or {}), local.source or source)
         remote.citation_key = local.citation_key      # key = 正文引用锚，不随远端漂移
         remote.raw_bibtex = format_bibtex(remote)
         replacements.append((local.raw_bibtex, remote.raw_bibtex))
@@ -623,7 +500,7 @@ async def zotero_refresh_commit(pid: str, body: ZoteroRefreshCommitIn, request: 
     project, _store = _project(request, pid)
     _require_paperish(project)
     mode = _library_mode(project)
-    source = _refresh_source(body)
+    source = library_ops.refresh_source_dict(body)
     if mode == "bib":
         return await _zotero_refresh_commit_bib(project, body, source)
     index = await asyncio.to_thread(load_index, project.dir)
@@ -637,7 +514,7 @@ async def zotero_refresh_commit(pid: str, body: ZoteroRefreshCommitIn, request: 
                          + "；请勾选「同时从引用顺序表移除」后重试")
     add_ents = []
     for raw in body.additions:
-        ent = _validated_refresh_entry(raw, source)
+        ent = library_ops.validate_refresh_entry(raw, source)
         ent.reference_id = library.new_reference_id()
         ent.origin = "import"
         add_ents.append(ent)
@@ -647,7 +524,7 @@ async def zotero_refresh_commit(pid: str, body: ZoteroRefreshCommitIn, request: 
         local = by_rid.get(rid)
         if local is None:
             raise kind_error("not_found", f"待更新条目不存在：{rid}", detail=rid)
-        remote = _validated_refresh_entry(dict(upd.get("entry") or {}), local.source or source)
+        remote = library_ops.validate_refresh_entry(dict(upd.get("entry") or {}), local.source or source)
         remote.reference_id = local.reference_id      # rid 稳定（citation_order/引用不受影响）
         remote.citation_key = local.citation_key      # key = 正文引用锚，不随远端漂移
         remote.created_at = local.created_at
@@ -672,7 +549,6 @@ async def zotero_refresh_commit(pid: str, body: ZoteroRefreshCommitIn, request: 
             "total": len(index.entries)}
 
 
-
 @router.get("/library/zotero/imports")
 async def zotero_imports_list(pid: str, request: Request):
     """导入记录回显（B2 修补）：重开工程后恢复最近一次可刷新来源（不带 Key 本体）。"""
@@ -691,21 +567,6 @@ async def zotero_imports_list(pid: str, request: Request):
     latest = next((r for r in reversed(rows) if isinstance(r, dict) and r.get("provider") == "zotero"
                    and (r.get("group_id") or r.get("zotero_user_id"))), None)
     return {"imports": rows[-10:], "latest_refreshable": latest}
-def _entry_diff(existing: LibraryEntry, cand_fields: dict[str, Any]) -> list[dict]:
-    cur_map = {
-        "title": existing.title or "", "year": existing.year or "", "venue": existing.venue or "",
-        "volume": existing.volume or "", "number": existing.number or "", "pages": existing.pages or "",
-        "publisher": existing.publisher or "", "doi": library.doi_of(existing) or "",
-        "arxiv_id": library.arxiv_of(existing) or "", "url": existing.url or "",
-        "author": " and ".join(existing.authors),
-    }
-    diffs = []
-    for f, src_val in cand_fields.items():
-        if f not in cur_map or cur_map[f] in (None, ""):
-            continue
-        same = str(cur_map[f]).strip().lower() == str(src_val).strip().lower()
-        diffs.append({"field": f, "current": cur_map[f], "source": str(src_val), "same": same})
-    return diffs
 
 
 @router.post("/library/lookup")
@@ -730,10 +591,10 @@ async def lookup(pid: str, body: LookupIn, request: Request):
         else:
             raise kind_error("validation", "请提供 doi / arxiv / query 之一")
     except library_sources.SourceError as e:
-        raise _zotero_http_error(e, user)
+        raise _zotero_http_error(e, None)
     return {
         "candidates": [
-            {"candidate": c, "diff": _entry_diff(existing, c["fields"]) if existing else None}
+            {"candidate": c, "diff": library_ops.entry_diff(existing, c["fields"]) if existing else None}
             for c in cands
         ],
         "existing_reference_id": body.reference_id,
@@ -989,7 +850,8 @@ async def bibliography(pid: str, body: BibliographyIn, request: Request):
 
     style_file = os.path.join(config.BACKEND_DIR, "app", "csl", f"{body.style}.csl")
     if body.style not in CITATION_STYLES or not os.path.isfile(style_file):
-        raise kind_error("validation", f"暂不支持引用样式：{body.style}（当前支持：{'、'.join(CITATION_STYLES)}）", detail=body.style)
+        allowed = "、".join(CITATION_STYLES)
+        raise kind_error("validation", f"暂不支持引用样式：{body.style}（当前支持：{allowed}）", detail=body.style)
     try:
         return await asyncio.to_thread(_render_csl, [by_rid[rid] for rid in body.order], body.style, style_file)
     except HTTPException:
@@ -998,24 +860,7 @@ async def bibliography(pid: str, body: BibliographyIn, request: Request):
         raise HTTPException(502, error_detail("content", f"参考文献渲染失败：{e}"))
 
 
-def _render_csl(entries_in_order: list[LibraryEntry], style: str, style_file: str) -> dict:
-    from citeproc import Citation, CitationItem, CitationStylesBibliography, CitationStylesStyle, formatter
-    from citeproc.source.json import CiteProcJSON
-
-    data = [entry_to_csl_json(e) for e in entries_in_order]
-    src = CiteProcJSON(data)
-    style_obj = CitationStylesStyle(style_file)
-    bib = CitationStylesBibliography(style_obj, src, formatter.plain)
-    # 按正文首次出现顺序注册 ⇒ 顺序编码（每条恰好注册一次；B3 消除原重复注册冗余）。
-    # labels 用确定性注册序号 [i]：citeproc-py 的 cite() 在 plain formatter 下恒抛
-    # VariableError（实测，含 ieee），原「cite 尝试 + 回退」是死路径，且 [i] 与
-    # Word 顺序编码管线（_CITE_BRACKET_RE）严格一致。
-    for e in entries_in_order:
-        bib.register(Citation([CitationItem(e.reference_id)]))
-    labels = {e.reference_id: f"[{i}]" for i, e in enumerate(entries_in_order, 1)}
-    items = [str(it) for it in bib.bibliography()]
-    return {"style": style, "labels": labels, "bibliography": items,
-            "note": "平台引用对象（内容控件标签绑定 reference_id），非 Word 原生引文域"}
+_render_csl = library_ops.render_csl_bibliography
 
 
 class CitationRegisterIn(BaseModel):

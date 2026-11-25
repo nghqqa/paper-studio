@@ -5,7 +5,6 @@ import {
   type AccessReport,
   type CollabCenterTab,
   type CollabSettings,
-  type EditorMode,
   type Invite,
 } from '@/types/collab-center'
 import type { Slice } from './types'
@@ -34,8 +33,6 @@ export interface CollabCenterSlice {
   collabSettingsLoading: boolean
   collabSettingsUnavailable: boolean
   collabSettingsError: string | null
-  /** editor 手动选的模式（编辑 ↔ 审阅）；viewer / reviewer 由 selectEditorMode 固定，不读此值 */
-  editorMode: EditorMode
   /** 批71：邀请表单草稿（邮箱为打字输入）——协同抽屉 Sheet 关闭即卸载 MembersSection，本地态草稿随实例死（卸载丢草稿族收口） */
   inviteDraft: { email: string; role: Exclude<Role, 'owner'> } | null
 
@@ -51,46 +48,12 @@ export interface CollabCenterSlice {
   setMemberRole(pid: string, userId: string, role: Role): Promise<void>
   loadCollabSettings(pid: string): Promise<void>
   saveCollabSettings(pid: string, patch: Partial<CollabSettings>): Promise<void>
-  setEditorMode(mode: EditorMode): void
   setInviteDraft(d: { email: string; role: Exclude<Role, 'owner'> } | null): void
   resetCollabCenter(): void
 }
 
 const is501 = (e: unknown) => e instanceof ApiError && e.status === 501
 const msg = (e: unknown) => (e instanceof Error ? e.message : String(e))
-
-/**
- * W9 审阅 bug：editorMode 按案子持久化（key `ps:mode:<pid>`），切案 / 刷新后一致。
- * 只存 edit / review：readonly 由角色 / 协同只读派生，不持久化；reviewer 由 selectEditorMode 固定 review，不读此值。
- */
-export const modeStorageKey = (pid: string) => `ps:mode:${pid}`
-
-const storage = (): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null => {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage
-  } catch {
-    return null
-  }
-}
-
-export function readEditorMode(pid: string | null): EditorMode {
-  if (!pid) return 'edit'
-  try {
-    const v = storage()?.getItem(modeStorageKey(pid))
-    return v === 'review' ? 'review' : 'edit'
-  } catch {
-    return 'edit'
-  }
-}
-
-export function writeEditorMode(pid: string | null, mode: EditorMode): void {
-  if (!pid || mode === 'readonly') return
-  try {
-    storage()?.setItem(modeStorageKey(pid), mode)
-  } catch {
-    /* 隐身模式 / 配额满：不持久化也不影响当前会话 */
-  }
-}
 
 export const collabCenterSlice: Slice<CollabCenterSlice> = (set, get) => ({
   collabCenterOpen: false,
@@ -107,12 +70,9 @@ export const collabCenterSlice: Slice<CollabCenterSlice> = (set, get) => ({
   collabSettingsLoading: false,
   collabSettingsUnavailable: false,
   collabSettingsError: null,
-  editorMode: 'edit',
   inviteDraft: null,
 
   openCollabCenter: (tab) => {
-    // 与伴随栏互斥（抽屉 Sheet 覆盖整右侧）：走 closeCompanion 保留其审阅栏恢复语义
-    get().closeCompanion()
     set({ collabCenterOpen: true, ...(tab ? { collabCenterTab: tab } : {}) })
   },
   closeCollabCenter: () => set({ collabCenterOpen: false }),
@@ -213,12 +173,7 @@ export const collabCenterSlice: Slice<CollabCenterSlice> = (set, get) => ({
     }
   },
 
-  setEditorMode: (editorMode) => {
-    writeEditorMode(get().pid, editorMode)
-    set({ editorMode })
-  },
   setInviteDraft: (d) => set({ inviteDraft: d }),
-  // openProject 先 set({ pid }) 再 reset：这里按新 pid 恢复该案上次选的模式
   resetCollabCenter: () =>
     set({
       collabCenterOpen: false,
@@ -235,35 +190,9 @@ export const collabCenterSlice: Slice<CollabCenterSlice> = (set, get) => ({
       collabSettingsLoading: false,
       collabSettingsUnavailable: false,
       collabSettingsError: null,
-      editorMode: readEditorMode(get().pid),
       inviteDraft: null,
     }),
 })
-
-/**
- * 编辑器实际模式（14 §6.1）：viewer / 协同只读 ⇒ 只读；reviewer 固定审阅；editor 及以上取手动选择。
- * `project.role` 为 null（AUTH=off / superuser 未入 ACL）按 editor 处理。
- */
-export const selectEditorMode = (s: Pick<Studio, 'project' | 'collabReadonly' | 'editorMode'>): EditorMode => {
-  const role = s.project?.role ?? null
-  if (role === 'reviewer') return 'review'
-  if (role === 'viewer' || s.collabReadonly) return 'readonly'
-  return s.editorMode
-}
-
-/** 能否手动切换 编辑 ↔ 审阅：editor 及以上且非协同只读 */
-export const selectCanSwitchMode = (s: Pick<Studio, 'project' | 'collabReadonly'>): boolean => {
-  const role = s.project?.role ?? null
-  return !s.collabReadonly && role !== 'viewer' && role !== 'reviewer'
-}
-
-/** 顶栏「分享 · N 在线」的 N（14 D4 / §3）：去重({me.uid} ∪ peers.uid)——uid 缺失时退回 name（访客/旧端）；协同 off / 不可用 ⇒ null（不显示） */
-export const selectOnlineCount = (s: Pick<Studio, 'collabStatus' | 'collabUnavailable' | 'peers' | 'user'>): number | null => {
-  if (s.collabStatus === 'off' || s.collabUnavailable) return null
-  const keys = new Set(s.peers.map((p) => p.uid ?? `name:${p.name}`))
-  if (s.user) keys.add(s.user.id)
-  return keys.size + (s.user ? 0 : 1)
-}
 
 /** 成员在 awareness 里的名字（与 collab/provider collabUserFor 同源：display_name || email），用于成员行 ↔ peer 对齐 */
 export const peerNameOf = (m: Pick<Member, 'display_name' | 'email'>): string => m.display_name?.trim() || m.email

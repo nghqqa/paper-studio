@@ -26,16 +26,13 @@ def client(tmp_path, monkeypatch):
     import importlib
 
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import latex_build as latex_build_mod
     from app.domain import projects as projects_mod
     from app.routes import latex as latex_routes
 
     importlib.reload(config)
     importlib.reload(projects_mod)
-    importlib.reload(build)
     importlib.reload(latex_build_mod)
-    importlib.reload(xml_export)
     importlib.reload(latex_routes)
     importlib.reload(main)
     return TestClient(main.app), projects
@@ -264,32 +261,16 @@ def test_build_unknown_engine_422(client):
 def test_latex_excluded_from_markdown_and_patent_paths(client):
     c, _ = client
     demo = c.post("/api/projects/latex-demo").json()["id"]
-    # content.md 读写（会触发专利三书装配）→ 明确报错
-    assert c.get(f"/api/projects/{demo}/content").status_code == 400
-    r = c.put(f"/api/projects/{demo}/content", json={"content": "# x"})
-    assert r.status_code == 400
-    # Markdown 构建 → 明确报错
-    r = c.post(f"/api/projects/{demo}/build", json={"pdf": False})
-    assert r.status_code == 400 and "latex/build" in r.json()["detail"]
-    # AST / lint / preflight → 明确 422
+    # 专利 Markdown / AST / lint / preflight 路径已彻底下线（404）
+    assert c.get(f"/api/projects/{demo}/content").status_code == 404
+    assert c.post(f"/api/projects/{demo}/build", json={"pdf": False}).status_code == 404
     for path, body in (("ast", None), ("lint", {}), ("preflight", {})):
         res = (
             c.post(f"/api/projects/{demo}/{path}", json=body)
             if body is not None
             else c.get(f"/api/projects/{demo}/{path}")
         )
-        assert res.status_code == 422, (path, res.status_code, res.text)
-    # 协同房间全部拒绝
-    import asyncio
-
-    from app.collab import rooms as collab_rooms
-    from app.domain.projects import ProjectStore
-
-    store = ProjectStore(str(projects_dir_of(client)))
-    for book in ("content", "abstract"):
-        with pytest.raises(Exception) as ei:
-            asyncio.run(collab_rooms.get_or_create(demo, book, store))
-        assert "LaTeX" in str(ei.value)
+        assert res.status_code == 404, (path, res.status_code, res.text)
 
 
 def projects_dir_of(client):

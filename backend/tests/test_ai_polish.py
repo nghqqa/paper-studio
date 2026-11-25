@@ -39,8 +39,7 @@ def client(tmp_path_factory):
     try:
         for name in ("app.config", "app.auth.db", "app.auth.acl", "app.auth.router", "app.main"):
             _fresh(name)
-        from patent_studio.asgi import create_app
-        app = create_app()
+        from app.main import app
         c = TestClient(app)
 
         def register(email):

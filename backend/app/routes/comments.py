@@ -16,17 +16,11 @@ from pydantic import BaseModel, Field
 from app import config
 from app.auth import CurrentUser, forbidden, my_role, role_at_least
 from app.domain import comments as store_mod
-from app.domain import events, latex_build, review_meta
+from app.domain import events, latex_build
 from app.domain.comments import Anchor, Author, Comment
-from patent_studio.kernel import critic
-from patent_studio.kernel.ast import AstError, parse_ast
 
 router = APIRouter(prefix="/api/projects/{pid}", tags=["review"])
-log = logging.getLogger("patent_studio.review")
-
-
-class CriticIn(BaseModel):
-    content: str | None = None
+log = logging.getLogger("paper_studio.review")
 
 
 class AnchorIn(BaseModel):
@@ -171,37 +165,15 @@ async def emit_mentions(pid: str, user, c: Comment, body_mentions: list[str], re
         )
 
 
-@router.post("/critic")
-async def critic_marks(pid: str, body: CriticIn, request: Request, user: CurrentUser):
-    store = request.app.state.store
-    content = body.content if body.content is not None else store.read_content(pid)
-    pending = review_meta.author_of(user) if body.content is not None else None
-    return {"marks": review_meta.attach(store.get(pid).dir, critic.parse(content), pending)}
-
-
 def load_reanchored(store, pid: str) -> list[Comment]:
     project = store.get(pid)
     comments = store_mod.load(project.dir)
-    fmt = project.settings.get("source_format")
-    if fmt == "latex":
-        # w21：LaTeX 工程不进 patent AST 重锚；对带 sha 的文件锚点做「位置待核对」判定
+    if project.settings.get("source_format") == "latex":
         for c in comments:
             a = c.anchor
             if a.sha is not None and a.file:
                 cur = latex_build.source_file_sha(project, a.file)
                 a.stale = cur != a.sha
-        return comments
-    if fmt in ("docx", "structured"):
-        # P1-4：Word / 结构化工程同样没有 content.md 可解析（read_content 会 400），批注原样返回
-        return comments
-    if comments:
-        content = store.read_content(pid)
-        try:
-            ast = parse_ast(critic.accept(content), project.settings)
-        except AstError as e:
-            log.info("comments %s: 结构不成立，跳过重锚（%s）", pid, e)
-        else:
-            store_mod.reanchor(comments, ast, content)
     return comments
 
 

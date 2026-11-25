@@ -3,7 +3,7 @@ import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
 import { history, historyKeymap, defaultKeymap, undo } from '@codemirror/commands'
 import { keymap } from '@codemirror/view'
-import { applyToView, locateAnchor, revertInView, selectionPayload, sectionRange } from '../proposalApply'
+import { applyToView, locateAnchor, revertInView, selectionPayload, sectionRange } from '@/components/paper/proposalApply'
 
 // @vitest-environment jsdom
 

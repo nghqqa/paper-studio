@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { LibraryPanel } from '../LibraryPanel'
+import { LibraryPanel } from '@/components/paper/LibraryPanel'
 
 // @vitest-environment jsdom
 
@@ -392,5 +392,58 @@ describe('LibraryPanel Zotero v2 修补（个人库透传 + 恢复最近来源�
     const ref = fetchMock.bodies.filter((b) => b.url.includes('/refresh-preview')).at(-1)!.body
     expect(ref.group_id).toBe(999)
     expect(ref.library_type).toBe('group')
+  })
+})
+
+describe('LibraryPanel 文献真实性核验自动分批', () => {
+  it('超过 25 条文献时自动分批顺序调用 /library/verify 并汇总全部条目', async () => {
+    const entries = Array.from({ length: 30 }, (_, i) => ({
+      ...ZOT_ENTRY,
+      reference_id: `r-${i + 1}`,
+      citation_key: `key${i + 1}`,
+      title: `Paper ${i + 1}`,
+    }))
+    const verifyBodies: Array<{ reference_ids?: string[] }> = []
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (u.endsWith('/library') && method === 'GET') {
+        return new Response(JSON.stringify({ ...LIB, entries }), { status: 200 })
+      }
+      if (u.endsWith('/library/verify') && method === 'GET') {
+        return new Response(JSON.stringify({ checked_at: null, total: 0, batch_size: 0, truncated: false, max_batch: 25, counts: { verified: 0, mismatch: 0, retracted: 0, unverified: 0, error: 0 }, items: [] }), { status: 200 })
+      }
+      if (u.endsWith('/library/verify') && method === 'POST') {
+        const body = JSON.parse(String(init?.body ?? '{}')) as { reference_ids?: string[] }
+        verifyBodies.push(body)
+        const totalDone = verifyBodies.reduce((acc, b) => acc + (b.reference_ids?.length ?? 0), 0)
+        return new Response(JSON.stringify({
+          checked_at: 1700000000,
+          total: totalDone,
+          batch_size: body.reference_ids?.length ?? 0,
+          truncated: false,
+          max_batch: 25,
+          counts: { verified: totalDone, mismatch: 0, retracted: 0, unverified: 0, error: 0 },
+          items: [],
+        }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }))
+
+    render(<LibraryPanel pid="p1" canEdit onInsertCitations={() => {}} />)
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    await act(async () => {
+      const btn = document.querySelector<HTMLButtonElement>('[data-testid="library-verify-btn"]')!
+      expect(btn).not.toBeNull()
+      btn.click()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(verifyBodies).toHaveLength(2)
+    expect(verifyBodies[0].reference_ids).toHaveLength(25)
+    expect(verifyBodies[1].reference_ids).toHaveLength(5)
+    expect(document.body.textContent).toContain('共核验 30 条')
   })
 })

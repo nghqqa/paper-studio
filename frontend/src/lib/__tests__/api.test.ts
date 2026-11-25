@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { useStudio } from '@/store'
 import { api } from '../api'
+import { req } from '../api/net'
 
 /**
  * R24-04：网络层失败（fetch 抛 TypeError）必须有用户可见反馈——toast 一次（3s 去抖），错误照旧抛出。
@@ -103,22 +104,24 @@ describe('api 请求超时（R115 批35：req 默认 120s，长任务/FormData �
     expect(fetchMock.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal)
   })
 
-  it('FormData 上传不带默认超时 signal；timeout:false 端点（build）豁免', async () => {
+  it('FormData 上传不带默认超时 signal；timeout:false 端点豁免', async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
-      new Response('{"diagnostics":[],"figures":[],"settings":{}}', { status: 200, headers: { 'Content-Type': 'application/json' } })))
+      new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } })))
     vi.stubGlobal('fetch', fetchMock)
-    await api.uploadFigures('p1', [new File(['x'], 'f.png')])
+    const fd = new FormData()
+    fd.append('file', new File(['x'], 'f.png'))
+    await req('/api/upload', { method: 'POST', body: fd })
     expect(fetchMock.mock.calls.at(-1)![1].signal).toBeUndefined()
-    await api.build('p1', {})
+    await req('/api/build', { method: 'POST', timeout: false })
     expect(fetchMock.mock.calls.at(-1)![1].signal).toBeUndefined()
   })
 
   it('调用方 signal 与默认超时复合——caller abort 时复合信号随之 abort', async () => {
     const ac = new AbortController()
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{"figures":[],"settings":{}}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
-    await api.getFigures('p1', ac.signal)
+    await req('/api/projects/p1', { signal: ac.signal })
     const sig = fetchMock.mock.calls[0][1].signal as AbortSignal
     expect(sig).toBeInstanceOf(AbortSignal)
     ac.abort()

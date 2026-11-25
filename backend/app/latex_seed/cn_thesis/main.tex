@@ -1,0 +1,229 @@
+\documentclass[a4paper,12pt,twoside,openany]{ctexbook}
+
+% ==================== 论文基本信息（按需修改） ====================
+\newcommand{\ThesisClassNum}{}
+\newcommand{\ThesisSecret}{}
+\newcommand{\ThesisSchoolCode}{10000}
+\newcommand{\ThesisStudentId}{202300000000}
+\newcommand{\ThesisUniversity}{某某大学}
+\newcommand{\ThesisDegreeTitle}{硕士专业学位研究生学位论文}
+\newcommand{\ThesisHeaderEven}{工程硕士专业学位论文}
+\newcommand{\ThesisTitleCN}{面向科研协同的可追溯论文写作框架关键技术研究}
+\newcommand{\ThesisTitleEN}{Research on Key Technologies of Traceable Collaborative Academic Writing Framework}
+\newcommand{\ThesisAuthor}{研究生姓名}
+\newcommand{\ThesisInstitute}{信息与计算机学院}
+\newcommand{\ThesisAdvisor}{导师姓名}
+\newcommand{\ThesisCategory}{电子信息}
+\newcommand{\ThesisField}{计算机技术}
+\newcommand{\ThesisDate}{二〇二六年五月}
+
+% ==================== 宏包与版面规范 ====================
+\usepackage[top=2.54cm,bottom=2.54cm,left=3.0cm,right=3.0cm,headheight=15pt]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs,multirow}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{fancyhdr}
+\usepackage[numbers,sort&compress,super,square]{natbib}
+\usepackage[hidelinks]{hyperref}
+
+\linespread{1.35}
+
+% 章标题居中黑体三号、节标题四号、条标题小四
+\ctexset{
+  chapter = {
+    name = {第,章},
+    number = \arabic{chapter},
+    format = \zihao{3}\heiti\bfseries\centering,
+    beforeskip = 12pt,
+    afterskip = 18pt,
+  },
+  section = {
+    format = \zihao{4}\heiti\bfseries\raggedright,
+    beforeskip = 12pt,
+    afterskip = 6pt,
+  },
+  subsection = {
+    format = \zihao{-4}\heiti\bfseries\raggedright,
+    beforeskip = 8pt,
+    afterskip = 4pt,
+  },
+}
+
+% 图、表、公式全部按章编号：图 1-1、表 3-1、(2-1)
+\renewcommand{\thefigure}{\thechapter-\arabic{figure}}
+\renewcommand{\thetable}{\thechapter-\arabic{table}}
+\renewcommand{\theequation}{\thechapter-\arabic{equation}}
+\captionsetup{font={small},labelsep=space}
+
+% 奇偶页不同页眉（奇数页=论文题目，偶数页=学位类别；下带细横线）
+\fancypagestyle{thesisbody}{
+  \fancyhf{}
+  \fancyhead[CO]{\zihao{5}\songti \ThesisTitleCN}
+  \fancyhead[CE]{\zihao{5}\songti \ThesisHeaderEven}
+  \fancyfoot[C]{\zihao{-5} \thepage}
+  \renewcommand{\headrulewidth}{0.5pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+\fancypagestyle{plain}{
+  \fancyhf{}
+  \fancyhead[CO]{\zihao{5}\songti \ThesisTitleCN}
+  \fancyhead[CE]{\zihao{5}\songti \ThesisHeaderEven}
+  \fancyfoot[C]{\zihao{-5} \thepage}
+  \renewcommand{\headrulewidth}{0.5pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+\fancypagestyle{thesisfront}{
+  \fancyhf{}
+  \fancyfoot[C]{\zihao{-5} \thepage}
+  \renewcommand{\headrulewidth}{0pt}
+  \renewcommand{\footrulewidth}{0pt}
+}
+
+\begin{document}
+
+% ==================== 1. 封面 ====================
+\begin{titlepage}
+  \thispagestyle{empty}
+  {\zihao{-4}\songti
+    \noindent
+    分\ 类\ 号：\underline{\makebox[3.2cm][c]{\ThesisClassNum}} \hfill
+    密\qquad 级：\underline{\makebox[3.2cm][c]{\ThesisSecret}} \\[6pt]
+    学校代码：\underline{\makebox[3.2cm][c]{\ThesisSchoolCode}} \hfill
+    学\qquad 号：\underline{\makebox[3.2cm][c]{\ThesisStudentId}}
+  }
+
+  \vspace{2.2cm}
+  \begin{center}
+    {\zihao{1}\heiti\bfseries \ThesisUniversity}\\[14pt]
+    {\zihao{2}\heiti\bfseries \ThesisDegreeTitle}\\[2.0cm]
+    {\zihao{2}\heiti\bfseries \ThesisTitleCN}\\[18pt]
+    {\zihao{3}\bfseries \ThesisTitleEN}\\[1.6cm]
+    {\zihao{3}\kaishu\bfseries \ThesisAuthor}\\[1.8cm]
+    {\zihao{4}\kaishu
+      \begin{tabular}{@{}p{7.2cm}p{6.6cm}@{}}
+        院\qquad\quad 所：\ThesisInstitute & 导师姓名：\ThesisAdvisor \\[8pt]
+        专业学位类别：\ThesisCategory & 专业领域：\ThesisField \\
+      \end{tabular}
+    }
+    \vfill
+    {\zihao{4}\kaishu \ThesisDate}
+  \end{center}
+\end{titlepage}
+
+% ==================== 2. 独创性声明与版权授权书 ====================
+\clearpage
+\thispagestyle{empty}
+\begin{center}
+  {\zihao{3}\heiti\bfseries 独\ 创\ 性\ 声\ 明}
+\end{center}
+\vspace{0.6em}
+本人郑重声明：所呈交的学位论文是本人在导师指导下独立进行研究工作所取得的成果。除文中特别加以注明引用的内容外，本论文不包含其他个人或集体已经发表或撰写过的研究成果。对本文的研究做出重要贡献的个人和集体，均已在文中以明确方式标明。本声明的法律后果由本人承担。
+
+\vspace{1.6em}
+\noindent 学位论文作者签名：\hspace{4.2cm} 签字日期：\hspace{1.2cm}年\hspace{0.8cm}月\hspace{0.8cm}日
+
+\vspace{4.2em}
+\begin{center}
+  {\zihao{3}\heiti\bfseries 学位论文版权使用授权书}
+\end{center}
+\vspace{0.6em}
+本学位论文作者完全了解\ThesisUniversity 有关保存、使用学位论文的规定。本人授权\ThesisUniversity 将学位论文的全部或部分内容编入或上传有关数据库进行公开检索，同意学校采用影印、缩印或扫描等复制手段保存、汇编学位论文，同意学校按要求向国家有关部门或机构送交论文的复印件和电子版，允许学位论文被查阅和借阅。学校同意保密的学位论文在解密后适用本授权书。
+
+\vspace{1.6em}
+\noindent 学位论文作者签名：\hspace{4.2cm} 导师签名：\\[0.8em]
+\noindent 签字日期：\hspace{1.0cm}年\hspace{0.7cm}月\hspace{0.7cm}日 \hspace{2.2cm}
+签字日期：\hspace{1.0cm}年\hspace{0.7cm}月\hspace{0.7cm}日
+
+% ==================== 3. 中英文摘要与目录（大写罗马页码） ====================
+\frontmatter
+\pagenumbering{Roman}
+\pagestyle{thesisfront}
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{摘\quad 要}
+\begin{center}
+  {\zihao{3}\heiti\bfseries 摘\quad 要}
+\end{center}
+\vspace{0.5em}
+随着科研团队协同规模不断扩大，研究生在撰写学术论文与学位论文过程中面临修改记录碎片化、多模态图文与公式编号维护困难、以及 LaTeX 与 Word 双格式流转效率低等问题。针对上述挑战，本文研究并构建了一套面向科研团队的可追溯协同论文写作框架，实现了多文件分章写作、引用一致性校验与原生版式 Word 导出。本文的主要工作包括：
+
+（1）提出面向长文档写作的跨文件大纲与版本追踪机制，支持多章结构快速导航与可追溯修订历史。
+
+（2）设计融合结构化编号与版式后处理的格式转换管线，实现按章编号图表、公式居中与右对齐编号以及 GB/T 7714 参考文献规范输出。
+
+（3）设计并实现原型写作平台，在真实科研论文写作场景中验证了系统的效率与可用性。
+
+\vspace{1em}
+\noindent\textbf{关键词：}协同写作；LaTeX 排版；学位论文；格式转换；参考文献管理
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{Abstract}
+\begin{center}
+  {\zihao{3}\bfseries Abstract}
+\end{center}
+\vspace{0.5em}
+With the growing scale of collaborative research teams, graduate students face persistent challenges in thesis writing, including fragmented revision histories, tedious cross-chapter numbering of figures, tables, and equations, and friction between LaTeX authoring and Word-based advisor review. To address these issues, this thesis designs and implements a traceable collaborative academic writing framework supporting multi-file chapter organization, citation verification, and native-experience Word export.
+
+\vspace{1em}
+\noindent\textbf{Key words:} Collaborative Writing; LaTeX Typesetting; Thesis Template; Format Conversion; Reference Management
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{目\quad 录}
+\renewcommand{\contentsname}{目\quad 录}
+\tableofcontents
+
+% ==================== 4. 正文各章（阿拉伯数字页码 + 奇偶双面页眉） ====================
+\mainmatter
+\pagestyle{thesisbody}
+
+\include{chapters/chap1}
+\include{chapters/chap2}
+\include{chapters/chap3}
+\include{chapters/chap4}
+\include{chapters/chap5}
+
+% ==================== 5. 参考文献、致谢与在读期间科研成果 ====================
+\backmatter
+\pagestyle{thesisbody}
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{参考文献}
+\renewcommand{\bibname}{参考文献}
+\bibliographystyle{unsrt}
+\bibliography{refs}
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{致\quad 谢}
+\chapter*{致\quad 谢}
+\markboth{\ThesisHeaderEven}{\ThesisTitleCN}
+时光荏苒，三年研究生学习生活即将画上句号。衷心感谢我的导师在课题研究与学位论文撰写过程中给予的悉心指导与无私关怀；感谢实验室各位师兄师姐与同门在科研探讨和工程实践中的热情帮助；感谢母校提供的良好学术平台；最后，感谢家人一直以来的默默支持与鼓励。
+
+\clearpage
+\phantomsection
+\addcontentsline{toc}{chapter}{在读期间公开发表论文（著）及科研情况}
+\chapter*{在读期间公开发表论文（著）及科研情况}
+\markboth{\ThesisHeaderEven}{\ThesisTitleCN}
+
+\noindent\textbf{已发表（或正式录用）的学术论文：}
+\begin{enumerate}
+  \item 第一作者，第二作者. 示例学术论文标题[J]. 计算机学报，2025（已录用）.
+\end{enumerate}
+
+\noindent\textbf{申请或已获得的专利：}
+\begin{enumerate}
+  \item 一种面向科研协同的可追溯文档修订方法[P]. 中国发明专利：ZL2025XXXXXXXX.X（已授权）.
+\end{enumerate}
+
+\noindent\textbf{参加的研究项目及获奖情况：}
+\begin{enumerate}
+  \item 省部级研究生创新基金项目（项目编号：XXXX），主持/参与；
+  \item 省级学业奖学金、校级优秀研究生等荣誉。
+\end{enumerate}
+
+\end{document}

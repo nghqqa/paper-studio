@@ -5,7 +5,6 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { Button, SplitButton } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { CompanionPanel, clampCompanionWidth } from '@/components/ui/companion-panel'
 import { Count } from '@/components/ui/count'
 import { Countdown } from '@/components/ui/countdown'
 import { DropdownMenuItem } from '@/components/ui/dropdown'
@@ -17,7 +16,6 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Segmented } from '@/components/ui/segmented'
 import { StatusDot } from '@/components/ui/status-dot'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Tag } from '@/components/ui/tag'
 import { Textarea } from '@/components/ui/textarea'
 import { CASE_STATUSES } from '@/types/case'
 import { FileText } from 'lucide-react'
@@ -176,14 +174,12 @@ describe('Tabs 下划线式', () => {
   })
 })
 
-describe('Badge / Tag / Count 拆三', () => {
-  it('Badge tone → data-tone；Tag 色点不染底 + 可移除；Count 0 隐藏 / 99+；axe 0', async () => {
-    const onRemove = vi.fn()
+describe('Badge / Count', () => {
+  it('Badge tone → data-tone；Count 0 隐藏 / 99+；axe 0', async () => {
     const el = await mount(
       <div>
         <Badge tone="warn">警告</Badge>
         <Badge tone="danger" data-testid="legacy">旧</Badge>
-        <Tag color="var(--info-dot)" onRemove={onRemove} data-testid="tag">机械</Tag>
         <Count value={0} data-testid="zero" />
         <Count value={120} data-testid="big" />
         <Count value={3} tone="brand" data-testid="brand" />
@@ -191,11 +187,6 @@ describe('Badge / Tag / Count 拆三', () => {
     )
     expect(q('[data-slot="badge"]', el)?.dataset.tone).toBe('warn')
     expect(q('[data-testid="legacy"]', el)?.dataset.tone).toBe('danger')
-    const tag = q('[data-testid="tag"]', el)!
-    expect(tag.className).not.toContain('rounded-full')
-    expect(q('[data-slot="tag-dot"]', tag)).not.toBeNull()
-    await act(async () => q('[data-slot="tag-remove"]', tag)!.click())
-    expect(onRemove).toHaveBeenCalledTimes(1)
     expect(q('[data-testid="zero"]', el)).toBeNull()
     expect(q('[data-testid="big"]', el)?.textContent).toBe('99+')
     expect(q('[data-testid="brand"]', el)?.dataset.tone).toBe('brand')
@@ -285,35 +276,6 @@ describe('EmptyState / PageHeader', () => {
     const sm = q('[data-testid="e-ill-sm"]', el)!
     expect(q('[data-slot="empty-state-illustration"]', sm)).toBeNull()
     expect(q('[data-slot="empty-state-icon"]', sm)).not.toBeNull()
-  })
-})
-
-describe('CompanionPanel 壳', () => {
-  it('clamp 320–480；column：aside + 拖拽把手 + 关闭；id=null 不渲染；键盘 ←/→ 调宽；axe 0', async () => {
-    expect(clampCompanionWidth(100)).toBe(320)
-    expect(clampCompanionWidth(999)).toBe(480)
-    expect(clampCompanionWidth(360.4)).toBe(360)
-    const onClose = vi.fn()
-    const onWidth = vi.fn()
-    const el = await mount(
-      <div>
-        <CompanionPanel id="ai" title="AI 助手" onClose={onClose} width={360} onWidthChange={onWidth} data-testid="cp">
-          内容
-        </CompanionPanel>
-        <CompanionPanel id={null} title="隐藏" onClose={() => {}} data-testid="hidden" />
-      </div>,
-    )
-    const cp = q('[data-testid="cp"]', el)!
-    expect(cp.tagName).toBe('ASIDE')
-    expect(q('[data-testid="hidden"]', el)).toBeNull()
-    expect(q('[data-slot="companion-title"]', cp)?.textContent).toBe('AI 助手')
-    const handle = q('[data-slot="companion-resize"]', cp)!
-    expect(handle.getAttribute('role')).toBe('separator')
-    await act(async () => handle.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })))
-    expect(onWidth).toHaveBeenLastCalledWith(376)
-    await act(async () => q('[data-slot="companion-close"]', cp)!.click())
-    expect(onClose).toHaveBeenCalledTimes(1)
-    expect(await violations(el)).toEqual([])
   })
 })
 

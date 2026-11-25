@@ -7,7 +7,6 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown'
 import { Input } from '@/components/ui/input'
-import { MobilePage, MobilePageSection } from '@/components/ui/mobile-page'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ScrollRow } from '@/components/ui/scroll-row'
 import { Segmented } from '@/components/ui/segmented'
@@ -15,9 +14,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent } from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Tag } from '@/components/ui/tag'
-import { Toggle } from '@/components/ui/toggle'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { touchHit } from '@/lib/utils'
 
 /**
@@ -83,23 +79,6 @@ describe('W8 触控四档：视觉按档 + touch-hit 命中区', () => {
     }
   })
 
-  it('Toggle / ToggleGroupItem：sm 32 / md 36 / lg 44 视觉 + touch-hit', async () => {
-    const h = await mount(
-      <>
-        <Toggle size="sm" data-testid="t-sm">a</Toggle>
-        <Toggle size="lg" data-testid="t-lg">b</Toggle>
-        <ToggleGroup type="single" size="md" aria-label="g">
-          <ToggleGroupItem value="x" data-testid="tg">x</ToggleGroupItem>
-        </ToggleGroup>
-      </>,
-    )
-    expect(cls(h.querySelector('[data-testid=t-sm]'))).toMatch(/h-sm-control.*touch-hit|touch-hit.*h-sm-control/)
-    expect(cls(h.querySelector('[data-testid=t-lg]'))).toContain('h-lg-control')
-    const tg = cls(h.querySelector('[data-testid=tg]'))
-    expect(tg).toContain('h-md-control')
-    expect(tg).toContain('touch-hit')
-  })
-
   it('Tabs trigger（underline 44 面板头 / pill md 36）带 touch-hit', async () => {
     const h = await mount(
       <>
@@ -140,21 +119,6 @@ describe('W8 触控四档：视觉按档 + touch-hit 命中区', () => {
     expect(cls(h.querySelector('[data-testid=inp]'))).toContain('in-data-[density=touch]:h-lg-control')
   })
 
-  it('Tag：可删 / 可点 → 触控视觉 h-6 + touch-hit（× 也带）；纯展示不加', async () => {
-    const h = await mount(
-      <>
-        <Tag onRemove={() => {}} data-testid="rm">a</Tag>
-        <Tag onClick={() => {}} data-testid="ck">b</Tag>
-        <Tag data-testid="plain">c</Tag>
-      </>,
-    )
-    expect(cls(h.querySelector('[data-testid=rm]'))).toContain('touch-hit')
-    expect(cls(h.querySelector('[data-testid=rm]'))).toContain('in-data-[density=touch]:h-6')
-    expect(cls(h.querySelector('[data-testid=rm] [data-slot=tag-remove]'))).toContain('touch-hit')
-    expect(cls(h.querySelector('[data-testid=ck]'))).toContain('touch-hit')
-    expect(cls(h.querySelector('[data-testid=plain]'))).not.toContain('touch-hit')
-  })
-
   it('Dropdown item：触控 min-h-row-menu（44）+ touch-hit', async () => {
     const h = await mount(
       <DropdownMenu open>
@@ -179,23 +143,7 @@ describe('W8 触控四档：视觉按档 + touch-hit 命中区', () => {
   })
 })
 
-describe('W8 版式原语：MobilePage / ScrollRow（06 §3）', () => {
-  it('MobilePage：px-page-m · gap-section-m · 底部 Tab bar + safe-area 让位；tabbar=false 只留页边', async () => {
-    const h = await mount(
-      <>
-        <MobilePage data-testid="mp"><MobilePageSection title="区块" data-testid="sec">x</MobilePageSection></MobilePage>
-        <MobilePage tabbar={false} data-testid="mp2">y</MobilePage>
-      </>,
-    )
-    const mp = cls(h.querySelector('[data-testid=mp]'))
-    expect(mp).toContain('px-page-m')
-    expect(mp).toContain('gap-section-m')
-    expect(mp).toContain('pb-[calc(var(--h-mobile-tabs)+var(--pad-page-m)+env(safe-area-inset-bottom))]')
-    expect(cls(h.querySelector('[data-testid=mp2]'))).toContain('pb-[calc(var(--pad-page-m)+env(safe-area-inset-bottom))]')
-    expect(cls(h.querySelector('[data-testid=sec]'))).toContain('gap-group-m')
-    expect(h.querySelector('[data-testid=sec] h2')?.textContent).toBe('区块')
-  })
-
+describe('W8 版式原语：ScrollRow（06 §3）', () => {
   it('ScrollRow：overflow-x-auto · scrollbar-none · 首末 px-page-m · gap-group-m · 出血 -mx-page-m · tabIndex=0 · ← → 滚动', async () => {
     const h = await mount(
       <ScrollRow aria-label="筛选" data-testid="row"><button type="button">a</button><button type="button">b</button></ScrollRow>,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { FileText, FileUp, Loader2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -36,7 +36,10 @@ export function NewPaperProjectDialog({ open, onOpenChange, onZipImport }: {
   const wordEditorEnabled = useStudio((s) => s.wordEditorEnabled)
   const wordEditorReady = useStudio((s) => s.wordEditorReady)
   const toast = useStudio((s) => s.toast)
-  const [mode, setMode] = useState<'latex' | 'word'>('word')
+  const userPickedMode = useRef(false)
+  const [mode, setMode] = useState<'latex' | 'word'>(() =>
+    wordEditorEnabled === false || wordEditorReady === false ? 'latex' : 'word',
+  )
   const [wordTemplate, setWordTemplate] = useState('blank')
   const [wordFile, setWordFile] = useState<File | null>(null)
   const [reg, setReg] = useState<PaperTemplatesReply | null>(null)
@@ -52,6 +55,9 @@ export function NewPaperProjectDialog({ open, onOpenChange, onZipImport }: {
 
   useEffect(() => {
     if (!open) return
+    userPickedMode.current = false
+    if (wordEditorEnabled === false || wordEditorReady === false) setMode('latex')
+    else setMode('word')
     setErr(null)
     setRegErr('')
     setBusy(false)
@@ -68,6 +74,11 @@ export function NewPaperProjectDialog({ open, onOpenChange, onZipImport }: {
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
+
+  useEffect(() => {
+    if (!open || userPickedMode.current) return
+    if (wordEditorEnabled === false || wordEditorReady === false) setMode('latex')
+  }, [open, wordEditorEnabled, wordEditorReady])
 
   const activeMode = mode
   const wordAvailable = wordEditorEnabled === true && wordEditorReady === true
@@ -114,7 +125,10 @@ export function NewPaperProjectDialog({ open, onOpenChange, onZipImport }: {
             { value: 'latex', label: 'LaTeX 论文' },
           ]}
           value={activeMode}
-          onValueChange={(v) => setMode(v as 'latex' | 'word')}
+          onValueChange={(v) => {
+            userPickedMode.current = true
+            setMode(v as 'latex' | 'word')
+          }}
           aria-label="写作模式"
           size="md"
           data-testid="np-mode"

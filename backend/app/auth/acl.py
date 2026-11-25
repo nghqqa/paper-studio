@@ -8,7 +8,6 @@ W4-B（docs/plan/14）：`SHARE_ROLES` 加 reviewer；`share_out` 带 `accepted_
 import asyncio
 import secrets
 import uuid
-from collections import Counter
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
@@ -17,7 +16,6 @@ from sqlalchemy.exc import IntegrityError
 from app.auth import ROLE_RANK
 from app.auth.db import SessionLocal, init_db
 from app.auth.models import ProjectAcl, ShareAccept, ShareLink, User
-from patent_studio.kernel import critic
 
 SHARE_ROLES = ("viewer", "reviewer", "editor", "agent")
 
@@ -74,40 +72,6 @@ def share_out(link: ShareLink, origin: str, accepted_by: list[dict] | None = Non
         "created_at": iso(link.created_at),
         "accepted_by": accepted_by or [],
     }
-
-
-def _original(text: str) -> str:
-    """拒绝全部修订后的「原文」。整行只由 {++…++} / {>>…<<} 组成（reject 后为空）的行是插入行，原文里没有它；
-    裸空行不是（reject 后仍是空行但本来就空）。一段插入行两侧都是空行（整块插入，patch.insert_block 会补分隔空行）时，
-    随块删去一个空行。文末换行不算内容（编辑器会补 / 追加批注行会吃掉它）。"""
-    out = []
-    lines = text.split("\n")
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-        orig = critic.reject(line)
-        if line and orig == "":
-            j = i
-            while j < len(lines) and lines[j] and critic.reject(lines[j]) == "":
-                j += 1
-            if out and out[-1] == "" and j < len(lines) and lines[j] == "":
-                j += 1
-            i = j
-            continue
-        out.append(orig)
-        i += 1
-    return "\n".join(out).rstrip("\n")
-
-
-def _tokens(text: str) -> Counter:
-    return Counter(m.group(0) for m in critic.TOKEN.finditer(text))
-
-
-def reviewer_allowed(base: str, new: str) -> bool:
-    """reviewer 的源文档写入是否只含 CriticMarkup 建议 / 批注（14 §5）：
-    original(new) == original(base)（不能直接改字、不能接受他人建议）且
-    基线标记多重集 ⊆ 新标记多重集（不能拒绝 / 删除他人建议与批注）。"""
-    return _original(new) == _original(base) and not (_tokens(base) - _tokens(new))
 
 
 def is_expired(link: ShareLink, now: datetime | None = None) -> bool:

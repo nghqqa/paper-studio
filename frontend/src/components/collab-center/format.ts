@@ -1,7 +1,7 @@
 import { fmtRelative } from '@/lib/format'
 import { clientHash } from '@/lib/hash'
 import type { Role, ShareLink } from '@/lib/types'
-import type { PublicShareBaseline, PublicShareLink, PublicShareScope } from '@/types/public-share'
+import type { PublicShareLink, PublicShareScope } from '@/types/public-share'
 /** 协作者中心各段共用的角色集合 / 有效期 / 时间格式 / 文案（docs/plan/14 §6.2、D11）。 */
 
 /** 最后一个 owner 不能降级 / 移除的提示（RoleSelect 禁用项 + MembersSection 移除钮共用） */
@@ -37,8 +37,6 @@ export function fmtExpiry(l: Pick<ShareLink, 'expires_at'>, now = Date.now()): s
 /* ---------- 客户审阅链接（W5 §4.5） ---------- */
 
 export const PUBLIC_SCOPE_LABEL: Record<PublicShareScope, string> = { read: '仅阅读', comment: '可批注', confirm: '可确认定稿' }
-/** W9 domain-02：正文含未决修订时链接基线的可读名 */
-export const PUBLIC_BASELINE_LABEL: Record<PublicShareBaseline, string> = { original: '我已定的正文（不含待定建议）', final: '含未决修订（建议全部视为接受）' }
 
 export type PublicTtl = '1' | '7' | '30' | 'never'
 export const PUBLIC_TTL_LABEL: Record<PublicTtl, string> = { '1': '1 天', '7': '7 天', '30': '30 天', never: '永久' }

@@ -37,7 +37,7 @@ afterEach(async () => {
   await act(async () => root?.unmount())
   root = null
   host?.remove()
-  useStudio.setState({ dialog: null, projects: [], pid: null, companion: null })
+  useStudio.setState({ dialog: null, projects: [], pid: null })
   mmDesktop = true
   window.location.hash = '#/'
 })
@@ -66,16 +66,13 @@ describe('CommandPalette', () => {
     expect(q('[data-slot="command"]')).toBeTruthy()
     expect(q('[data-testid="palette-case-method"]')!.textContent).toContain('一种时间序列预测方法')
     expect(q('[data-testid="palette-case-device"]')).toBeTruthy()
-    expect(q('[data-testid="palette-panel-ai"]')).toBeTruthy()
-    expect(q('[data-testid="palette-build"]')).toBeTruthy()
     expect(q('[data-testid="palette-create"]')).toBeTruthy()
     expect(q('[data-testid="palette-dashboard"]')).toBeTruthy()
-    // OBS-V1：三视图切换命令入 palette
-    expect(q('[data-testid="palette-view-source"]')!.textContent).toContain('切换到源码')
-    expect(q('[data-testid="palette-view-layout"]')!.textContent).toContain('切换到版面')
-    expect(q('[data-testid="palette-view-pdf"]')!.textContent).toContain('切换到PDF')
-    // axe：listbox/option 语义（批53 历史面板同类规则的前置钉）
-    // data-testid 传在 Dialog 根（无 DOM）；axe 锚 role=dialog 的 portal 内容
+    expect(q('[data-testid="palette-account"]')).toBeTruthy()
+    expect(q('[data-testid="palette-shortcuts"]')).toBeTruthy()
+    expect(q('[data-testid="palette-panel-ai"]')).toBeNull()
+    expect(q('[data-testid="palette-build"]')).toBeNull()
+    expect(q('[data-testid="palette-view-layout"]')).toBeNull()
     const res = await axe.run(document.querySelector('[role="dialog"]')!, {
       resultTypes: ['violations'],
       rules: { 'color-contrast': { enabled: false }, region: { enabled: false } },
@@ -83,23 +80,7 @@ describe('CommandPalette', () => {
     expect(res.violations.map((v) => v.id)).toEqual([])
   })
 
-  it('视图切换项：点击「切换到版面视图」→ editorView=layout 且对话框关闭', async () => {
-    useStudio.setState({ dialog: 'palette', pid: 'method', projects: [row('method', '方法')], editorView: 'source' })
-    await mount(<CommandPalette />)
-    await act(async () => q<HTMLElement>('[data-testid="palette-view-layout"]')!.click())
-    expect(useStudio.getState().editorView).toBe('layout')
-    expect(useStudio.getState().dialog).toBeNull()
-  })
-
-  it('未开案时不渲染「当前案卷」组（无面板/构建项）', async () => {
-    useStudio.setState({ dialog: 'palette', pid: null, projects: [row('method', '方法')] })
-    await mount(<CommandPalette />)
-    expect(q('[data-testid="palette-case-method"]')).toBeTruthy()
-    expect(q('[data-testid="palette-panel-ai"]')).toBeNull()
-    expect(q('[data-testid="palette-build"]')).toBeNull()
-  })
-
-  it('选择案卷 → hash 跳转且对话框关闭', async () => {
+  it('选择论文项目 → hash 跳转且对话框关闭', async () => {
     useStudio.setState({ dialog: 'palette', pid: null, projects: [row('method', '方法'), row('device', '装置')] })
     await mount(<CommandPalette />)
     await act(async () => q<HTMLElement>('[data-testid="palette-case-device"]')!.click())
@@ -107,11 +88,10 @@ describe('CommandPalette', () => {
     expect(useStudio.getState().dialog).toBeNull()
   })
 
-  it('cmdk 输入过滤案卷', async () => {
+  it('cmdk 输入过滤项目', async () => {
     useStudio.setState({ dialog: 'palette', pid: null, projects: [row('method', '方法'), row('device', '装置')] })
     await mount(<CommandPalette />)
     const input = q<HTMLInputElement>('[data-slot="command-input"]')!
-    // 受控 input：绕过 React value tracker 让原生 input 事件触发 onChange（React 测试常规手法）
     const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')!.set!
     await act(async () => {
       setter.call(input, '装置')
@@ -122,30 +102,20 @@ describe('CommandPalette', () => {
     expect(visible.map((el) => el.dataset.testid)).toEqual(['palette-case-device'])
   })
 
-  it('打开面板项 → openCompanion 并关闭对话框', async () => {
-    useStudio.setState({ dialog: 'palette', pid: 'method', projects: [] })
-    await mount(<CommandPalette />)
-    await act(async () => q<HTMLElement>('[data-testid="palette-panel-history"]')!.click())
-    expect(useStudio.getState().companion).toBe('history')
-    expect(useStudio.getState().dialog).toBeNull()
-  })
-
-  it('移动端（非桌面）不渲染 dockview 面板项与键盘语，构建/递交仍在', async () => {
+  it('移动端不渲染快捷键速查与 kbd 提示，页面与新建仍在', async () => {
     mmDesktop = false
     useStudio.setState({ dialog: 'palette', pid: 'method', projects: [] })
     await mount(<CommandPalette />)
-    expect(q('[data-testid="palette-panel-ai"]')).toBeNull()
-    expect(q('[data-testid="palette-panel-history"]')).toBeNull()
-    expect(q('[data-testid="palette-build"]')).toBeTruthy()
-    expect(q('[data-testid="palette-deliver"]')).toBeTruthy()
-    // 快捷键速查与 kbd 提示同为桌面限定（触屏无键盘，MoreSheet 帮助组同口径）
+    expect(q('[data-testid="palette-dashboard"]')).toBeTruthy()
+    expect(q('[data-testid="palette-create"]')).toBeTruthy()
     expect(q('[data-testid="palette-shortcuts"]')).toBeNull()
     expect(document.querySelectorAll('[data-slot="command-shortcut"]')).toHaveLength(0)
   })
 
-  it('超管才见机构管理项', async () => {
-    useStudio.setState({ dialog: 'palette', pid: null, projects: [], user: { id: 'u', name: 'U', email: 'u@x', is_superuser: true } as never })
+  it('超管才见平台管理与审计日志项', async () => {
+    useStudio.setState({ dialog: 'palette', pid: null, projects: [], user: { id: 'u', email: 'u@x', display_name: 'U', is_superuser: true } })
     await mount(<CommandPalette />)
     expect(q('[data-testid="palette-admin"]')).toBeTruthy()
+    expect(q('[data-testid="palette-audit"]')).toBeTruthy()
   })
 })

@@ -23,7 +23,7 @@ import os
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -334,7 +334,7 @@ def _escape_latex(text: str) -> str:
 
 
 def _iso_date(ts: float) -> str:
-    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+    return datetime.fromtimestamp(ts, tz=UTC).strftime("%Y-%m-%d")
 
 
 def build_disclosure(
@@ -391,7 +391,7 @@ def build_disclosure(
     if timestamps:
         time_range = {"start": _iso_date(min(timestamps)), "end": _iso_date(max(timestamps))}
 
-    generated_at = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    generated_at = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     summary = {
         "used_ai": len(applied) > 0,
         "total_proposals": len(props),

@@ -22,9 +22,9 @@ import time
 
 from app.domain.history import (  # noqa: F401  (_SHA_RE 随 resolve 间接复用)
     DEFAULT_AUTHOR,
+    WORK,
     GitUnavailable,
     HistoryError,
-    WORK,
     _git_bin,
     _run,
     _write_exclude,
@@ -165,8 +165,10 @@ def restore(project_dir: str, sha: str, author: str | None = None) -> dict:
     工作区目标树之外的源可见文件一律删除（含从未提交过的新文件）——恢复=工作区精确回到
     目标状态；二进制按字节写回（cat-file blob，不走 text 解码）。全程持 repo_lock，
     与并发保存/编译提交互斥。"""
-    from app.domain.latex_build import LATEX_SOURCE_EXCLUDE_DIRS  # 延迟导入：latex_build 亦引用本模块
-    from app.domain.latex_build import _is_source_rel
+    from app.domain.latex_build import (
+        LATEX_SOURCE_EXCLUDE_DIRS,  # 延迟导入：latex_build 亦引用本模块
+        _is_source_rel,
+    )
 
     full = resolve(project_dir, sha)
     root = os.path.realpath(project_dir)

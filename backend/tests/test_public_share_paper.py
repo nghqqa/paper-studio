@@ -120,6 +120,7 @@ def test_latex_link_meta_pdf_comments_confirm(on, tmp_path):
     m = r.json()
     assert m["source_format"] == "latex" and m["document_type"] == "paper"
     assert m["layout_supported"] is False and m["pending_revisions"] == 0 and m["pdf_ready"] is True
+    assert m["org_name"] == "研稿"
 
     # PDF：取 b2 的产物（2 页，b1 失败构建的 1 页旧 PDF 未被误取）+ 水印 + 允许下载
     r = anon.get(f"/api/public/{tok}/pdf")
@@ -128,9 +129,9 @@ def test_latex_link_meta_pdf_comments_confirm(on, tmp_path):
     assert r.headers["x-watermark"] == "footer"
     assert len(PdfReader(io.BytesIO(r.content)).pages) == 2
 
-    # 版面 AST：非 markdown 明确拒绝（库内 validation kind 惯例 422，前端不该再请求）
+    # 版面 AST：专利 Markdown 版面路由已彻底下线（404）
     r = anon.get(f"/api/public/{tok}/layout-ast")
-    assert r.status_code == 422 and r.json()["detail"]["kind"] == "validation"
+    assert r.status_code == 404
 
     # 页级批注：保存 + 读取（不读 content.md、不进专利 AST 重锚）
     r = anon.post(
@@ -235,8 +236,8 @@ def test_structured_link_meta_and_comments(on, tmp_path):
 
 
 def test_markdown_meta_keeps_paper_defaults(on):
-    """既有专利链接 100% 兼容：新字段回填缺省（markdown / patent / layout 可用）。"""
+    """纯化后公开审阅仅支持 PDF 审阅（layout_supported 恒为 False，默认 paper）。"""
     anon, su = _team(on)
     tok = _link(su)["token"]
     m = anon.get(f"/api/public/{tok}/meta").json()
-    assert m["source_format"] == "markdown" and m["document_type"] == "patent" and m["layout_supported"] is True
+    assert m["document_type"] == "paper" and m["layout_supported"] is False and m["pending_revisions"] == 0

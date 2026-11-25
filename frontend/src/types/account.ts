@@ -1,21 +1,19 @@
-/** W4-E E2 账户 / 机构管理契约（docs/plan/17-w4e-deliver-admin-design.md §3；后端 app/auth/users_me.py、routes_admin.py） */
-import { AVATAR_COLOR_NAMES, PEER_COLORS, PEER_COLOR_BY_NAME, colorFor, type AvatarColorName, type PeerColor } from '@/collab/colors'
+/** 账户 / 机构管理契约（后端 app/auth/users_me.py、routes_admin.py） */
+import { AVATAR_COLOR_NAMES, PEER_COLORS, PEER_COLOR_BY_NAME, colorFor, type AvatarColorName, type PeerColor } from '@/lib/colors'
 
-/** 头衔只是展示文案（12 §3.1）；权限仍由 is_superuser + 案卷 ACL 决定 */
-export type UserTitle = '' | '代理师' | '发明人' | '管理员' | '助理' | '研究生' | '导师' | '研究员'
-export const USER_TITLES: readonly Exclude<UserTitle, ''>[] = ['代理师', '发明人', '管理员', '助理']
+/** 头衔只是展示文案；权限仍由 is_superuser + 项目 ACL 决定 */
+export type UserTitle = '' | '研究生' | '导师' | '研究员' | '管理员' | '助理' | '代理师' | '发明人'
 export const PAPER_USER_TITLES: readonly Exclude<UserTitle, ''>[] = ['研究生', '导师', '研究员', '管理员', '助理']
-export function shownUserTitle(title: string, paper: boolean): UserTitle {
-  const options = paper ? PAPER_USER_TITLES : USER_TITLES
-  return options.includes(title as Exclude<UserTitle, ''>) ? title as UserTitle : ''
+export function shownUserTitle(title: string): UserTitle {
+  return PAPER_USER_TITLES.includes(title as Exclude<UserTitle, ''>) ? (title as UserTitle) : ''
 }
 
-/** 与后端 schemas.AVATAR_COLORS 一致；'' = 未选 → 按 colorFor(name) 派生（色盘 / 哈希与协作头像同源：collab/colors.ts） */
+/** 与后端 schemas.AVATAR_COLORS 一致；'' = 未选 → 按 colorFor(name) 派生 */
 export type AvatarColor = '' | AvatarColorName
 export const AVATAR_COLORS: readonly AvatarColorName[] = AVATAR_COLOR_NAMES
 export const AVATAR_COLOR_HEX: Record<AvatarColorName, PeerColor> = PEER_COLOR_BY_NAME
 
-/** 未选预设色时按名派生的色名；与 collab/colors userColor 的回退同一哈希（去首尾空格） */
+/** 未选预设色时按名派生的色名；与 lib/colors userColor 的回退同一哈希（去首尾空格） */
 export function avatarColorFor(name: string): AvatarColorName {
   return AVATAR_COLOR_NAMES[PEER_COLORS.indexOf(colorFor(name.trim()))]
 }

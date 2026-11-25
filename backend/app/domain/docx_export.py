@@ -22,28 +22,24 @@ import subprocess
 import threading
 import time
 import uuid
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 
 from app import config
-from app.domain import latex_build, task_runner
+from app.domain import docx_post, latex_build, pandoc_runner, task_runner
 from app.domain.projects import ProjectError
 
-ASSETS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docx_export_assets")
+ASSETS = pandoc_runner.DOCX_ASSETS_DIR
 EXPORTS_DIR = os.path.join(".studio", "docx-exports")
 MANIFEST = "manifest.json"
 ARTIFACT_NAMES = ("paper.docx", "report.json", "manifest.json")
 VENUE = "jcip"
 
-_locks: dict[str, threading.Lock] = {}
-_locks_guard = threading.Lock()
+_locks = pandoc_runner.ProjectLockPool()
 
 
 def _lock_for(pid: str) -> threading.Lock:
-    with _locks_guard:
-        if pid not in _locks:
-            _locks[pid] = threading.Lock()
-        return _locks[pid]
+    return _locks.get(pid)
 
 
 def enabled() -> bool:
@@ -85,8 +81,8 @@ def _analyze_docx(docx_path: str) -> dict:
         "images": len([n for n in names if n.startswith("word/media/")]),
         "chars": len(text),
     })
-    residues = {c: text.count(c) for c in ("\\cite{", "\\ref{", "\\label{", "\\begin{", "\\includegraphics") if c in text}
-    out["latex_residues"] = residues
+    markers = ("\\cite{", "\\ref{", "\\label{", "\\begin{", "\\includegraphics")
+    out["latex_residues"] = {c: text.count(c) for c in markers if c in text}
     bookmarks = [b.get(f"{_W}name") for b in root.iter(f"{_W}bookmarkStart")]
     out["dup_bookmarks"] = sorted({b for b in bookmarks if bookmarks.count(b) > 1})
     anchors = [h.get(f"{_W}anchor") for h in root.iter(f"{_W}hyperlink") if h.get(f"{_W}anchor")]
@@ -160,11 +156,12 @@ def _verify_numbering(docx_path: str, numbering: dict) -> list[str]:
     return issues
 
 
-def _layout_safe(docx_path: str) -> None:
-    """图片缩栏宽 + 表格限 100% 栏宽（与 venue-proto 报告模块同语义，含良构校验）。"""
+def _layout_safe(docx_path: str, columns: int = 2) -> None:
+    """图片缩栏宽 + 表格限 100% 栏宽（支持单栏/双栏，含良构校验）。"""
     TWIP_TO_EMU = 635
     with zipfile.ZipFile(docx_path) as z:
-        others = {n: z.read(n) for n in z.namelist() if n != "word/document.xml"}
+        orig_names = z.namelist()
+        others = {n: z.read(n) for n in orig_names if n != "word/document.xml"}
         doc = z.read("word/document.xml").decode("utf-8")
     pg = re.search(r"<w:pgSz[^>]*>", doc)
     text_w = 9360
@@ -176,9 +173,10 @@ def _layout_safe(docx_path: str) -> None:
             mr = re.search(r'<w:pgMar[^>]*w:right="(\d+)"', doc)
             if ml and mr:
                 text_w -= int(ml.group(1)) + int(mr.group(1))
-    col_w = (text_w - 424) // 2 * TWIP_TO_EMU
+    col_twips = (text_w - 424) // 2 if columns > 1 else text_w
+    col_w = max(2000, col_twips) * TWIP_TO_EMU
 
-    def scale_pair(m: "re.Match[str]") -> str:
+    def scale_pair(m: re.Match[str]) -> str:
         cx, cy = int(m.group(2)), int(m.group(3))
         if cx > col_w:
             r = col_w / cx
@@ -187,7 +185,7 @@ def _layout_safe(docx_path: str) -> None:
 
     doc = re.sub(r"<(wp:extent|a:ext)\s+cx=\"(\d+)\"\s+cy=\"(\d+)\"\s*/>", scale_pair, doc)
 
-    def fit_tbl(m: "re.Match[str]") -> str:
+    def fit_tbl(m: re.Match[str]) -> str:
         block = m.group(0)
         if "<w:tblW" in block:
             block = re.sub(r"<w:tblW [^>]*/>", '<w:tblW w:type="pct" w:w="5000"/>', block, count=1)
@@ -199,9 +197,8 @@ def _layout_safe(docx_path: str) -> None:
     ET.fromstring(doc.encode("utf-8"))  # 良构校验
     tmp = docx_path + ".tmp"
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zout:
-        for n, data in others.items():
-            zout.writestr(n, data)
-        zout.writestr("word/document.xml", doc)
+        for n in orig_names:
+            zout.writestr(n, doc if n == "word/document.xml" else others[n])
     os.replace(tmp, docx_path)
 
 
@@ -222,25 +219,19 @@ def export_docx(store, pid: str) -> dict:
         src_root = latex_build.source_root(project)
         if not main or not os.path.isfile(os.path.join(src_root, main)):
             raise ProjectError(f"主文件不存在：{main}", 422)
-        if config.DOCX_EXPORT_RUNTIME == "docker" and not shutil.which("docker"):
-            raise ProjectError("导出运行时为 docker，但当前环境不可用（或改用 PATENT_STUDIO_DOCX_EXPORT_RUNTIME=local）", 503)
-        if config.DOCX_EXPORT_RUNTIME == "local" and not shutil.which(config.DOCX_EXPORT_PANDOC):
-            raise ProjectError("导出运行时为 local，但镜像内未找到 pandoc（部署镜像应内置）", 503)
+        pandoc_runner.ensure_runtime_ready(config.DOCX_EXPORT_RUNTIME, which_fn=shutil.which)
 
         digest = latex_build.digest_source(project)
         eid = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:6]
         e_dir = os.path.join(exports_dir(project), eid)
         src_dir = os.path.join(e_dir, "src")
+        assets_dir = os.path.join(e_dir, "assets")
         os.makedirs(src_dir, exist_ok=True)
         for rel in digest:
             dst = os.path.join(src_dir, rel)
             os.makedirs(os.path.dirname(dst) or src_dir, exist_ok=True)
             shutil.copy2(os.path.join(src_root, rel), dst)
-        # 管线资产（reference/csl/lua 过滤器）随运行目录进入容器
-        assets_dir = os.path.join(e_dir, "assets")
-        os.makedirs(assets_dir, exist_ok=True)
-        for fn in os.listdir(ASSETS):
-            shutil.copy2(os.path.join(ASSETS, fn), os.path.join(assets_dir, fn))
+        pandoc_runner.copy_docx_assets(assets_dir)
 
         bib_rel = _bib_of(src_root)
         bib_abs = os.path.join(src_root, bib_rel)
@@ -252,81 +243,73 @@ def export_docx(store, pid: str) -> dict:
             )
 
         main_rel = f"src/{main.replace(os.sep, '/')}"
+        docx_post.preprocess_tex_for_pandoc(src_dir)
+        is_zh = docx_post.detect_cjk_project(src_dir, main.replace(os.sep, "/"))
+        doc_lang = "zh" if is_zh else "en"
+        ref_title = "参考文献" if is_zh else "References"
         numbering_rel = "numbering.json"
-        pg = {"w": 11419, "h": 15600, "l": 907, "r": 907, "t": 623, "b": 284, "cs": 424}
-        env = dict(os.environ)
-        env.update({
-            "PANDOC_NUMBERING_REPORT": numbering_rel,
-            "LAYOUT_PAGE_W": str(pg["w"]), "LAYOUT_PAGE_H": str(pg["h"]),
-            "LAYOUT_MAR_L": str(pg["l"]), "LAYOUT_MAR_R": str(pg["r"]),
-            "LAYOUT_MAR_T": str(pg["t"]), "LAYOUT_MAR_B": str(pg["b"]),
-            "LAYOUT_COL_SPACE": str(pg["cs"]), "LAYOUT_TITLE_PG": "1",
-        })
-        pandoc_args = [
-            "--from=latex", "--to=docx", "--standalone", "--number-sections", "--wrap=auto",
-            "--reference-doc", os.path.join("assets", "jcip-reference.docx"),
-            "--citeproc", "--csl", os.path.join("assets", "gb7714-2015-numeric.csl"),
-            "--bibliography", os.path.join("src", bib_rel),
-            "--lua-filter", os.path.join("assets", "numbering.lua"),
-            "--lua-filter", os.path.join("assets", "layout.lua"),
-            "--resource-path", "src",
-            "--output", "paper.docx", main_rel.replace("/", os.sep),
-        ]
+        layout_env = pandoc_runner.jcip_layout_env()
         t0 = time.perf_counter()
         if config.DOCX_EXPORT_RUNTIME == "docker":
-            # Windows 开发态：宿主 docker 起 pandoc/latex 镜像（只挂导出运行目录）
             cmd = (
                 "pandoc --version | head -1; "
                 "pandoc --from=latex --to=docx --standalone --number-sections --wrap=auto "
                 "--reference-doc=/proj/assets/jcip-reference.docx "
                 "--citeproc --csl=/proj/assets/gb7714-2015-numeric.csl "
+                f"--metadata reference-section-title={ref_title} "
                 f"--bibliography=/proj/src/{bib_rel} "
                 "--lua-filter=/proj/assets/numbering.lua "
                 "--lua-filter=/proj/assets/layout.lua "
                 "--resource-path=/proj/src "
                 f"--output=/proj/paper.docx /proj/{main_rel}"
             )
-            proc = subprocess.run(
-                ["docker", "run", "--rm", "--entrypoint", "sh",
-                 "-v", f"{e_dir.replace(os.sep, '/')}:/proj", "-w", "/proj/src",
-                 "-e", f"PANDOC_NUMBERING_REPORT=/proj/{numbering_rel}",
-                 "-e", f"LAYOUT_PAGE_W={pg['w']}", "-e", f"LAYOUT_PAGE_H={pg['h']}",
-                 "-e", f"LAYOUT_MAR_L={pg['l']}", "-e", f"LAYOUT_MAR_R={pg['r']}",
-                 "-e", f"LAYOUT_MAR_T={pg['t']}", "-e", f"LAYOUT_MAR_B={pg['b']}",
-                 "-e", f"LAYOUT_COL_SPACE={pg['cs']}", "-e", "LAYOUT_TITLE_PG=1",
-                 _docker_image(), "-c", cmd],
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=config.DOCX_EXPORT_TIMEOUT_S,
+            rc, out, err = pandoc_runner.run_pandoc_docker(
+                mount_dir=e_dir,
+                workdir="/proj/src",
+                cmd=cmd,
+                env_vars={
+                    "PANDOC_NUMBERING_REPORT": f"/proj/{numbering_rel}",
+                    "PANDOC_DOC_LANG": doc_lang,
+                    **layout_env,
+                },
+                image=_docker_image(),
+                timeout_s=config.DOCX_EXPORT_TIMEOUT_S,
+                subprocess_run=subprocess.run,
             )
-            rc, out, err = proc.returncode, proc.stdout, proc.stderr
         else:
-            # local：pandoc 在本容器内直接运行（试用部署形态；无 docker 依赖/无 socket）。
-            # cwd 必须是 src/（\input 相对主文件目录解析；pandoc 3.1 对 resource-path 的
-            # include 解析与 3.6 不同——实测 cwd=导出根目录时 \input 不被内联）。
+            # local：cwd 必须是 src/（\input 相对主文件目录解析）
             src_cwd = os.path.join(e_dir, "src")
+            log_path = os.path.join(e_dir, "pandoc.log")
             local_args = [
                 "--from=latex", "--to=docx", "--standalone", "--number-sections", "--wrap=auto",
                 "--reference-doc", os.path.join("..", "assets", "jcip-reference.docx"),
                 "--citeproc", "--csl", os.path.join("..", "assets", "gb7714-2015-numeric.csl"),
+                "--metadata", f"reference-section-title={ref_title}",
                 "--bibliography", bib_rel,
                 "--lua-filter", os.path.join("..", "assets", "numbering.lua"),
                 "--lua-filter", os.path.join("..", "assets", "layout.lua"),
                 "--output", os.path.join("..", "paper.docx"),
                 os.path.basename(main_rel),
             ]
-            lenv = {k: v for k, v in env.items()}
-            lenv["PANDOC_NUMBERING_REPORT"] = os.path.join("..", "numbering.json")
-            rc = task_runner.run_task(
-                [config.DOCX_EXPORT_PANDOC, *local_args],
+            lenv = pandoc_runner.clean_local_env(
+                {
+                    "PANDOC_NUMBERING_REPORT": os.path.join("..", "numbering.json"),
+                    "PANDOC_DOC_LANG": doc_lang,
+                    **layout_env,
+                },
+                inherit_all=True,
+            )
+            rc, out, err = pandoc_runner.run_pandoc_local(
+                local_args,
                 cwd=src_cwd,
                 timeout_s=config.DOCX_EXPORT_TIMEOUT_S,
                 env=lenv,
+                log_file=log_path,
+                use_task_runner=True,
+                run_task_fn=task_runner.run_task,
             )
-            out, err = "", ""
         elapsed_ms = round((time.perf_counter() - t0) * 1000)
-        pandoc_version = ""
-        if config.DOCX_EXPORT_RUNTIME == "docker":
-            pandoc_version = out.strip().splitlines()[0] if out.strip() else ""
+        pandoc_version = out.strip().splitlines()[0] if config.DOCX_EXPORT_RUNTIME == "docker" and out.strip() else ""
         docx_path = os.path.join(e_dir, "paper.docx")
 
         numbering = None
@@ -352,7 +335,10 @@ def export_docx(store, pid: str) -> dict:
         dx: dict = {}
         if os.path.isfile(docx_path):
             try:
-                _layout_safe(docx_path)
+                _layout_safe(docx_path, columns=2)
+                docx_post.apply_eq_layout(docx_path, mode="tab")
+                docx_post.apply_meta_layout(docx_path, lang=doc_lang)
+                docx_post.polish_docx_native(docx_path, lang=doc_lang)
             except Exception as e:  # noqa: BLE001
                 status, reasons = "blocked", reasons + [f"布局安全化失败: {e}"]
             dx = _analyze_docx(docx_path)
@@ -428,21 +414,12 @@ def _bib_of(src_root: str) -> str:
 
 
 def list_exports(project) -> list[dict]:
-    out = []
-    base = exports_dir(project)
-    if not os.path.isdir(base):
-        return out
-    cur = latex_build.digest_source(project)
-    for eid in sorted(os.listdir(base), reverse=True):
-        mp = os.path.join(base, eid, MANIFEST)
-        if not os.path.isfile(mp):
-            continue
-        with open(mp, encoding="utf-8") as f:
-            m = json.load(f)
-        m["stale"] = m.get("digest") != cur
-        m["export_id"] = eid
-        out.append(m)
-    return out
+    return pandoc_runner.list_export_manifests(
+        exports_dir(project),
+        latex_build.digest_source(project),
+        ARTIFACT_NAMES,
+        strict_json=True,
+    )
 
 
 def load_export(project, eid: str) -> dict:
@@ -454,9 +431,4 @@ def load_export(project, eid: str) -> dict:
 
 
 def artifact_file(project, eid: str, name: str) -> str:
-    if name not in ARTIFACT_NAMES:
-        raise ProjectError("非法产物名", 400)
-    p = os.path.join(exports_dir(project), eid, name)
-    if not os.path.isfile(p):
-        raise ProjectError("产物不存在", 404)
-    return p
+    return pandoc_runner.resolve_export_artifact(exports_dir(project), eid, name, ARTIFACT_NAMES)

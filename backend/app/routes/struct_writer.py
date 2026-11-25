@@ -10,7 +10,6 @@
 内容变化后旧导出标记 stale）。PDF：经 STRUCT_PDF_SVC_URL 指定的转换服务从**本次 DOCX**转出；
 未配置时 501（DOCX 仍可下载）。
 """
-import hashlib
 import json
 import os
 import re
@@ -26,10 +25,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from app import auth, config
-from app.domain import events
-from app.domain import structured, structured_export
-from app.errors import error_detail
+from app.domain import events, structured, structured_export
 from app.domain.projects import ProjectError
+from app.errors import error_detail
 
 router = APIRouter(prefix="/api/projects/{pid}/struct", tags=["struct"])
 create_router = APIRouter(tags=["struct"])

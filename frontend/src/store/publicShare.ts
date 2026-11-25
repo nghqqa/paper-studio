@@ -1,19 +1,8 @@
 import { api, isNotImplemented, isShareExpired, isShareNotFound } from '@/lib/api'
-import type { Ast } from '@/types/ast'
 import type { PublicComment, PublicCommentIn, PublicShareLink, PublicShareLinkIn, PublicShareMeta } from '@/types/public-share'
 import type { Slice } from './types'
 
-/**
- * W5 客户公开审阅（docs/plan/21 §4.5；client-review-frontend 单元消费 `#/c/<token>`，share-confirm-backend 单元填实）。
- * 两半：登录态的链接管理（协作者中心「链接」tab 的「客户审阅链接」段）与 匿名态的审阅页状态（meta / ast / css / comments / confirm）。
- * 访客姓名存 localStorage `patent-studio:guest-name`（一次填写）。
- * 匿名页错误分四类：404 not_found ⇒ publicInvalid（链接失效）；410 share.expired / share.revoked ⇒ publicExpired；501 ⇒ publicUnavailable；其余 ⇒ publicError（页面显示重试）。
- * openPublic 对同一 token 的并发调用（StrictMode 双挂载 / 快速重试）复用同一批请求：`/public/<token>/meta` 404 只出现一次且只在 token 无效时出现。
- * P1-4：LaTeX / Word 论文链接 meta.layout_supported=false ⇒ 不拉 ast / css（仅 PDF 审阅，批注用 pdf:page-N 页级锚点）。
- */
 export const GUEST_NAME_KEY = 'patent-studio:guest-name'
-
-export type PublicView = 'pdf' | 'layout'
 
 export interface PublicShareSlice {
   publicLinks: PublicShareLink[]
@@ -24,11 +13,7 @@ export interface PublicShareSlice {
 
   publicToken: string | null
   publicMeta: PublicShareMeta | null
-  publicAst: Ast | null
-  /** GET /public/{token}/layout-css 文本；null = 用 layout-view.css 默认变量 */
-  publicCss: string | null
   publicComments: PublicComment[]
-  publicView: PublicView
   publicLoading: boolean
   /** 410 share.expired / share.revoked ⇒ 页面显示「链接已过期」 */
   publicExpired: boolean
@@ -43,7 +28,6 @@ export interface PublicShareSlice {
   revokePublicLink(pid: string, token: string): Promise<boolean>
 
   openPublic(token: string): Promise<void>
-  setPublicView(v: PublicView): void
   setGuestName(name: string): void
   addPublicComment(body: Omit<PublicCommentIn, 'guest_name'>): Promise<boolean>
   confirmPublic(note?: string): Promise<boolean>
@@ -60,13 +44,10 @@ const readGuestName = () => {
 
 interface PublicPayload {
   meta: PublicShareMeta
-  /** layout_supported=false（LaTeX / Word / 结构化）⇒ null，仅 PDF 审阅 */
-  ast: Ast | null
   comments: PublicComment[]
-  css: string | null
 }
 
-/** 同一 token 进行中的整批加载（meta → ast / comments / css）；settle 后清除 */
+/** 同一 token 进行中的整批加载（meta → comments）；settle 后清除 */
 const inflight = new Map<string, Promise<PublicPayload>>()
 
 function loadPublic(token: string): Promise<PublicPayload> {
@@ -74,17 +55,8 @@ function loadPublic(token: string): Promise<PublicPayload> {
   if (cached) return cached
   const p = (async () => {
     const meta = await api.publicMeta(token)
-    // P1-4：仅 PDF 审阅的链接严禁多发 layout-ast / layout-css（后端对非 markdown 明确拒绝前者）
-    if (meta.layout_supported === false) {
-      const comments = meta.scope === 'read' ? [] : await api.publicComments(token)
-      return { meta, ast: null, comments, css: null }
-    }
-    const [ast, comments, css] = await Promise.all([
-      api.publicAst(token),
-      meta.scope === 'read' ? Promise.resolve([]) : api.publicComments(token),
-      api.publicLayoutCss(token).catch(() => null),
-    ])
-    return { meta, ast, comments, css }
+    const comments = meta.scope === 'read' ? [] : await api.publicComments(token)
+    return { meta, comments }
   })()
   inflight.set(token, p)
   const settle = () => {
@@ -112,10 +84,7 @@ export const publicShareSlice: Slice<PublicShareSlice> = (set, get) => {
 
     publicToken: null,
     publicMeta: null,
-    publicAst: null,
-    publicCss: null,
     publicComments: [],
-    publicView: 'pdf',
     publicLoading: false,
     publicExpired: false,
     publicInvalid: false,
@@ -160,10 +129,9 @@ export const publicShareSlice: Slice<PublicShareSlice> = (set, get) => {
     openPublic: async (token) => {
       set({ publicToken: token, publicLoading: true, publicExpired: false, publicInvalid: false, publicUnavailable: false, publicError: null })
       try {
-        const { meta, ast, comments, css } = await loadPublic(token)
+        const { meta, comments } = await loadPublic(token)
         if (get().publicToken !== token) return
-        // 视图重置防御：隐藏切换栏的链接强制回 PDF——上一条专利链接可能把 publicView 留成 layout
-        set((s) => ({ publicMeta: meta, publicAst: ast, publicComments: comments, publicCss: css, publicView: meta.layout_supported === false ? 'pdf' : s.publicView }))
+        set({ publicMeta: meta, publicComments: comments })
       } catch (e) {
         if (get().publicToken !== token) return
         const msg = e instanceof Error ? e.message : String(e)
@@ -172,8 +140,6 @@ export const publicShareSlice: Slice<PublicShareSlice> = (set, get) => {
         if (get().publicToken === token) set({ publicLoading: false })
       }
     },
-
-    setPublicView: (publicView) => set({ publicView }),
 
     setGuestName: (name) => {
       set({ guestName: name })
@@ -212,10 +178,7 @@ export const publicShareSlice: Slice<PublicShareSlice> = (set, get) => {
       set({
         publicToken: null,
         publicMeta: null,
-        publicAst: null,
-        publicCss: null,
         publicComments: [],
-        publicView: 'pdf',
         publicLoading: false,
         publicExpired: false,
         publicInvalid: false,

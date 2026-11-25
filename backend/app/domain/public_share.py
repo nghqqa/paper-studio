@@ -34,10 +34,8 @@ from app import atomic, config
 from app.auth import access
 from app.domain import cases, events, history, latex_build, word_documents
 from app.errors import kind_error
-from patent_studio.kernel import critic
-from patent_studio.kernel.paper import normalize_document_type
 
-log = logging.getLogger("patent_studio.public")
+log = logging.getLogger("paper_studio.public")
 
 ACCESS_LOG = "public_access.jsonl"
 FONT_CANDIDATES = (
@@ -256,11 +254,9 @@ def source_format_of(project) -> str:
 
 
 def document_type_of(project) -> str:
-    """patent（缺省）/ paper；异常值不挡审阅，回退 patent。"""
-    try:
-        return normalize_document_type(project.settings.get("document_type"))
-    except ValueError:
-        return "patent"
+    """paper（缺省）/ patent；异常值不挡审阅，回退 paper。"""
+    v = str(project.settings.get("document_type") or "").strip()
+    return v if v in ("paper", "patent") else "paper"
 
 
 def _word_version_of(project_dir: str) -> tuple[int, str]:
@@ -326,44 +322,13 @@ def latest_pdf(project) -> str | None:
     return None
 
 
-PENDING_KINDS = ("ins", "del", "sub")
+def pending_revisions(_content: str = "") -> int:
+    return 0
 
 
-def pending_revisions(content: str) -> int:
-    """正文里尚未接受 / 拒绝的修订数（批注 / 高亮不算）。"""
-    if "{" not in content:
-        return 0
-    return sum(1 for m in critic.parse(content) if m["kind"] in PENDING_KINDS)
-
-
-def _build(store, pid: str, mode: str) -> str | None:
-    """按 mode 构建一次（含 PDF），返回 out.pdf 路径；失败 / 无 PDF → None。测试可替换。"""
-    from app.domain.build import run_build
-
-    out = run_build(store, pid, None, None, want_pdf=True, mode=mode)
-    if out.status != "ok" or not out.build_id:
-        return None
-    p = os.path.join(store.get(pid).studio_dir, "builds", out.build_id, "out.pdf")
-    return p if os.path.isfile(p) else None
-
-
-def baseline_pdf(store, project, baseline: str) -> str | None:
-    """客户端 PDF。markdown：正文无未决修订 ⇒ 最新构建，有 ⇒ 匹配 baseline 的构建或按 baseline 重建；
-    latex / docx / structured 无 content.md 与 critic 未决修订概念：直接取最新可用 PDF（P1-4）。"""
-    fmt = source_format_of(project)
-    if fmt != "markdown":
-        return latest_pdf(project)
-    raw = store.read_content(project.id)
-    if not pending_revisions(raw):
-        return latest_pdf(project)
-    want = critic.resolve(raw, baseline)
-    for d in _build_dirs(project):
-        p, md = os.path.join(d, "out.pdf"), os.path.join(d, "content.md")
-        if os.path.isfile(p) and os.path.isfile(md):
-            with open(md, encoding="utf-8") as f:
-                if f.read() == want:
-                    return p
-    return _build(store, project.id, baseline)
+def baseline_pdf(store, project, baseline: str = "original") -> str | None:
+    """客户端 PDF：直接取最新可用 PDF（LaTeX 构建产物 / Word 导出 PDF）。"""
+    return latest_pdf(project)
 
 
 def confirmation_out(c: cases.Confirmation) -> dict:
@@ -385,10 +350,9 @@ def meta(project, grant: Grant, org_name: str, content: str = "") -> dict:
         "sha": sha,
         "scope": grant.scope,
         "baseline": grant.baseline,
-        # 未决修订只在 markdown 正文里存在；latex / word / 结构化恒 0
-        "pending_revisions": pending_revisions(content) if fmt == "markdown" else 0,
+        "pending_revisions": 0,
         "allow_download": grant.allow_download,
-        "sub_except": [str(x) for x in project.settings.get("sub_except", [])],
+        "sub_except": [],
         "allow_copy": grant.allow_copy,
         "allow_comment": grant.allow_comment,
         "expires_at": grant.expires_at,
@@ -396,7 +360,7 @@ def meta(project, grant: Grant, org_name: str, content: str = "") -> dict:
         "pdf_ready": latest_pdf(project) is not None,
         "source_format": fmt,
         "document_type": document_type_of(project),
-        "layout_supported": fmt == "markdown",
+        "layout_supported": False,
     }
 
 

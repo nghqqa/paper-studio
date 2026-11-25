@@ -16,6 +16,8 @@ export interface ConfirmDialogProps {
   onOpenChange: (open: boolean) => void
   version: number
   guestName: string
+  ownerLabel?: string
+  isPaper?: boolean
   onGuestName: (name: string) => void
   onConfirm: (note?: string) => Promise<boolean>
 }
@@ -24,7 +26,7 @@ export interface ConfirmDialogProps {
  * 「确认定稿」对话框（21 §4.5；S9）：确认对象 vN、姓名（一次填）、可选备注；成功后由页面显示「已于 … 确认 vN」。
  * 表单随 Dialog 挂载 / 卸载，每次打开从 props 重新初始化；375 控件全 44。
  */
-export function ConfirmDialog({ open, onOpenChange, version, ...rest }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, onOpenChange, version, ownerLabel = '项目所有者', isPaper = true, ...rest }: ConfirmDialogProps) {
   const dirtyRef = useRef(false)
   const [ask, setAsk] = useState(false)
   useBeforeUnload(() => open && dirtyRef.current)
@@ -34,18 +36,23 @@ export function ConfirmDialog({ open, onOpenChange, version, ...rest }: ConfirmD
       <DialogContent size="sm" className="max-sm:grid-rows-[auto_minmax(0,1fr)]" data-testid="client-confirm-dialog">
         <DialogHeader>
           <DialogTitle>确认定稿 v{version}</DialogTitle>
-          <DialogDescription>确认后代理师将按本版进入递交流程；如仍有修改意见，请先点「有意见」。</DialogDescription>
+          <DialogDescription>确认后{ownerLabel}将按本版进入{isPaper ? '投稿' : '递交'}流程；如仍有修改意见，请先点「有意见」。</DialogDescription>
         </DialogHeader>
-        <ConfirmForm version={version} onClose={() => onOpenChange(false)} onRequestClose={requestClose} onDirty={(d) => (dirtyRef.current = d)} {...rest} />
+        <ConfirmForm version={version} ownerLabel={ownerLabel} onClose={() => onOpenChange(false)} onRequestClose={requestClose} onDirty={(d) => (dirtyRef.current = d)} {...rest} />
       </DialogContent>
       <DiscardDialog open={ask} onStay={() => setAsk(false)} onDiscard={() => { setAsk(false); onOpenChange(false) }} />
     </Dialog>
   )
 }
 
-type FormProps = Omit<ConfirmDialogProps, 'open' | 'onOpenChange'> & { onClose: () => void; onRequestClose: () => void; onDirty: (dirty: boolean) => void }
+type FormProps = Omit<ConfirmDialogProps, 'open' | 'onOpenChange' | 'isPaper'> & {
+  ownerLabel: string
+  onClose: () => void
+  onRequestClose: () => void
+  onDirty: (dirty: boolean) => void
+}
 
-function ConfirmForm({ version, guestName, onGuestName, onConfirm, onClose, onRequestClose, onDirty }: FormProps) {
+function ConfirmForm({ version, guestName, ownerLabel, onGuestName, onConfirm, onClose, onRequestClose, onDirty }: FormProps) {
   const uid = useId()
   const desktop = useIsDesktop()
   const [name, setName] = useState(guestName)
@@ -68,7 +75,7 @@ function ConfirmForm({ version, guestName, onGuestName, onConfirm, onClose, onRe
     const ok = await onConfirm(note.trim() || undefined)
     setBusy(false)
     if (ok) onClose()
-    else setErr('确认失败，请稍后再试或联系代理师')
+    else setErr(`确认失败，请稍后再试或联系${ownerLabel}`)
   }
 
   return (

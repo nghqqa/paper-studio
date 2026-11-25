@@ -1,0 +1,25 @@
+\chapter{相关理论与技术}
+\label{chap:theory}
+
+\section{引言}
+本章简要介绍本文所涉及的注意力机制与序列建模等基础理论，为后续章节的方法设计奠定基础。
+
+\section{注意力机制}
+缩放点积注意力机制\cite{vaswani2017attention}通过计算查询向量 $Q$、键向量 $K$ 与值向量 $V$ 之间的相似度权重实现全局信息聚合，其计算过程如公式~\eqref{eq:attn}~所示：
+\begin{equation}
+  \mathrm{Attention}(Q, K, V) = \mathrm{softmax}\left(\frac{QK^{\top}}{\sqrt{d_k}}\right)V
+  \label{eq:attn}
+\end{equation}
+其中，$d_k$ 表示键向量的维度。
+
+多头注意力机制通过并行投影到多个子空间并拼接输出，多行联合表达式如公式~\eqref{eq:mha}~所示（多行共用一个编号示例）：
+\begin{equation}
+  \begin{aligned}
+    \mathrm{head}_i &= \mathrm{Attention}(QW_i^Q, KW_i^K, VW_i^V) \\
+    \mathrm{MultiHead}(Q, K, V) &= \mathrm{Concat}(\mathrm{head}_1, \dots, \mathrm{head}_h) W^O
+  \end{aligned}
+  \label{eq:mha}
+\end{equation}
+
+\section{本章小结}
+本章回顾了注意力机制与多头表征的基本公式与原理。

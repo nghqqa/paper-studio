@@ -10,7 +10,6 @@ module fixture 形态（try/finally 还原环境，不污染后续认证测试�
 import importlib
 import io
 import os
-import shutil
 import sys
 
 import pytest
@@ -42,19 +41,12 @@ def _parse(c, pid, text, mode=None):
 def client(tmp_path, monkeypatch):
     projects = tmp_path / "projects"
     projects.mkdir()
-    # 项目数据一律落 tmp_path；仓库 examples/ 只读作拷贝源
-    shutil.copytree(
-        os.path.join(ROOT, "examples", "method"),
-        projects / "method",
-        ignore=shutil.ignore_patterns("*.docx", ".studio", "*.bak-*"),
-    )
     monkeypatch.setenv("PATENT_PROJECTS_DIR", str(projects))
     monkeypatch.setenv("PATENT_STUDIO_AI_PROVIDER", "mock")
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import projects as projects_mod
 
-    for m in (config, projects_mod, build, xml_export, main):
+    for m in (config, projects_mod, main):
         importlib.reload(m)
     with TestClient(main.app) as c:
         r = c.post("/api/projects", json={"id": "pap1", "title": "示例论文", "document_type": "paper"})
@@ -121,9 +113,10 @@ def test_replace_round_and_append(client):
 
 def test_non_paper_project_rejected(client):
     c, _, _ = client
-    r = _parse(c, "method", REVIEW_TEXT)
+    assert c.post("/api/projects", json={"id": "pat1", "title": "非论文", "document_type": "patent"}).status_code == 201
+    r = _parse(c, "pat1", REVIEW_TEXT)
     assert r.status_code == 400 and r.json()["detail"]["kind"] == "project"
-    assert c.get("/api/projects/method/rebuttal").status_code == 400
+    assert c.get("/api/projects/pat1/rebuttal").status_code == 400
     assert c.get("/api/projects/ghost/rebuttal").status_code == 404
 
 
@@ -186,11 +179,16 @@ def test_update_item_status_location_response(client):
 
 def test_ai_draft_requires_enabled_and_never_touches_response(client):
     c, _, app = client
+    from app.domain import org
+
     _parse(c, "pap1", "Reviewer #1\n1. A point.")
-    r = c.post("/api/projects/pap1/rebuttal/items/rb-1/draft", json={})
-    assert r.status_code == 403 and r.json()["detail"]["kind"] == "ai_disabled"
-    assert app.state.ai.provider.calls == []  # AI 关闭时零出站调用
-    c.put("/api/projects/pap1/settings", json={"ai_enabled": True})
+    org.save_org(org.Org(ai_enabled=False))
+    try:
+        r = c.post("/api/projects/pap1/rebuttal/items/rb-1/draft", json={})
+        assert r.status_code == 403 and r.json()["detail"]["kind"] == "ai_disabled_by_org"
+        assert app.state.ai.provider.calls == []  # 团队 AI 关闭时零出站调用
+    finally:
+        org.save_org(org.Org(ai_enabled=True))
     r = c.post("/api/projects/pap1/rebuttal/items/rb-1/draft", json={"context": "已补充 baseline Y 的对比"})
     assert r.status_code == 200, r.text
     body = r.json()
@@ -203,9 +201,47 @@ def test_ai_draft_requires_enabled_and_never_touches_response(client):
     assert [x["kind"] for x in app.state.ai.provider.calls] == ["rebuttal_draft"]
 
 
+def test_ai_draft_uses_user_ai_and_org_provider(client, monkeypatch):
+    c, _, app = client
+    from app import config
+    from app.domain import org, user_ai
+
+    _parse(c, "pap1", "Reviewer #1\n1. A point.")
+    # 非 mock 且未配 provider ⇒ 400 ai_not_configured
+    monkeypatch.setattr(config, "AI_PROVIDER", "aicdks")
+    r0 = c.post("/api/projects/pap1/rebuttal/items/rb-1/draft", json={})
+    assert r0.status_code == 400 and r0.json()["detail"]["kind"] == "ai_not_configured"
+
+    # 配置机构 ai_provider ⇒ 走 user_ai.resolve_ai_client（不再被 app.state.ai 截流）
+    org.save_org(org.Org(
+        ai_enabled=True,
+        ai_provider=org.AiProvider(base_url="https://api.fake.example/v1", api_key="sk-org", model_interactive="m-org"),
+    ))
+    captured = {}
+
+    class FakeResult:
+        text = '{"response": "感谢审稿人意见。", "edits_summary": "补充实验表 2"}'
+        model = "m-org"
+
+    class FakeClient:
+        def __init__(self, provider, models=None):
+            captured["base_url"] = provider.base_url
+            captured["models"] = models
+
+        async def chat(self, messages, tier, **kw):
+            captured["messages"] = messages
+            return FakeResult()
+
+    monkeypatch.setattr(user_ai, "AiClient", FakeClient)
+    r1 = c.post("/api/projects/pap1/rebuttal/items/rb-1/draft", json={})
+    assert r1.status_code == 200, r1.text
+    assert captured["base_url"] == "https://api.fake.example/v1"
+    assert r1.json()["item"]["ai_draft"]["response_draft"] == "感谢审稿人意见。"
+    assert app.state.ai.provider.calls == []
+
+
 def test_draft_missing_item_404(client):
     c, _, _ = client
-    c.put("/api/projects/pap1/settings", json={"ai_enabled": True})
     r = c.post("/api/projects/pap1/rebuttal/items/rb-42/draft", json={})
     assert r.status_code == 404 and r.json()["detail"]["kind"] == "not_found"
 
@@ -286,9 +322,7 @@ def acl(tmp_path_factory):
             "app.main",
         ):
             _fresh(name)
-        from patent_studio.asgi import create_app
-
-        app = create_app()
+        from app.main import app
 
         def register(email):
             cc = TestClient(app)

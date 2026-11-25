@@ -139,7 +139,7 @@ export function LoginPage() {
             <Alert variant="info" className="mt-4" data-testid="login-auth-off">
               <Info aria-hidden />
               <span>
-                此部署未开启账号（PATENT_STUDIO_AUTH=off），无需登录即可
+                此部署未开启账号（PAPER_STUDIO_AUTH=off），无需登录即可
                 <a href="#/" className="ml-1 font-medium text-primary underline-offset-2 hover:underline">进入工作台</a>。
               </span>
             </Alert>

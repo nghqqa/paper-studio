@@ -1,10 +1,5 @@
 # -*- coding: utf-8 -*-
-"""W5 响应 / 请求模型（docs/plan/21 §4 / §7.4.8）；与 frontend/src/types/ 的域文件逐字段对应
-（deadlines / notify / public-share / timeline / org，字段名、可空性、Literal 值）。
-
-prep 只定形状；单元实现路由时 `response_model=` 引用此处，不得另造同名模型。改动字段必须同步对应 types 文件
-并更新 frontend/src/store/README.md。时间戳一律 epoch 秒（float）；日期一律 `YYYY-MM-DD`（Asia/Shanghai，后端权威）。
-"""
+"""响应 / 请求共享 Pydantic 模型（公开审阅、机构审计、机构设置、AI 用量）。"""
 
 from typing import Literal
 
@@ -16,117 +11,12 @@ from app.domain.cases import CaseStatus
 class Actor(BaseModel):
     id: str
     display_name: str
-    # 账户预设头像色名（'' = 未选，前端按名派生），供期限中心等处头像与顶栏 / 台账同色
     avatar_color: str = ""
 
 
-# ---------- 期限（deadlines-backend） ----------
-
-DeadlineKind = Literal[
-    "oa_reply", "exam_request", "priority", "annual_fee", "review_due", "divisional", "reexam", "publication", "custom"
-]
-DeadlineRange = Literal["today", "7d", "30d", "overdue", "all"]
-DeadlineStatus = Literal["upcoming", "due_soon", "overdue", "done"]
-
-
-class LegalBasis(BaseModel):
-    text: str
-    url: str
-
-
-class Extension(BaseModel):
-    months: int
-    requested_at: str
-
-
-class DeadlineItem(BaseModel):
-    id: str
-    pid: str
-    case_no: str | None = None
-    title: str
-    kind: DeadlineKind
-    due: str
-    base_date: str | None = None
-    rule: str | None = None
-    legal_basis: LegalBasis | None = None
-    source: Literal["auto", "manual"]
-    override_reason: str | None = None
-    status: DeadlineStatus
-    days_left: int
-    owner: Actor | None = None
-    client: str | None = None
-    done: bool = False
-    done_at: float | None = None
-    extensions: list[Extension] = Field(default_factory=list)
-    # R77-01：行级写操作门控用——当前用户在 pid 案的角色；off/匿名 ⇒ None（前端视为可写）
-    my_role: str | None = None
-
-
-class DeadlineListResponse(BaseModel):
-    items: list[DeadlineItem]
-    counts: dict[Literal["today", "7d", "30d", "overdue"], int]
-    holidays_missing: bool = False
-
-
-class DeadlineOverrideIn(BaseModel):
-    due: str | None = None
-    override_reason: str = Field(min_length=1, max_length=500)
-
-
-class DeadlineDoneIn(BaseModel):
-    done: bool = True
-
-
-# ---------- 通知 / 催办（notify-audit-backend） ----------
-
-NotificationKind = Literal["mention", "assign", "deadline", "confirm", "ai", "nudge", "system"]
-
-
-class Notification(BaseModel):
-    id: str
-    kind: NotificationKind
-    title: str
-    body: str = ""
-    href: str | None = None
-    pid: str | None = None
-    actor: Actor | None = None
-    read: bool = False
-    created_at: float
-
-
-class NotificationListResponse(BaseModel):
-    items: list[Notification]
-    unread: int
-    has_more: bool = False
-
-
-class ReadAllResult(BaseModel):
-    updated: int
-
-
-class NudgeIn(BaseModel):
-    deadline_id: str | None = None
-    user_id: str | None = None
-    message: str | None = Field(default=None, max_length=500)
-
-
-class WebhookTestIn(BaseModel):
-    url: str | None = None  # 空 = 用已存 settings.notify_webhook_url
-
-
-class WebhookTestResult(BaseModel):
-    ok: bool
-    detail: str = ""
-
-
-class NudgeResult(BaseModel):
-    notified: int
-
-
-# ---------- 客户公开审阅（share-confirm-backend） ----------
+# ---------- 公开审阅（share-confirm-backend） ----------
 
 PublicShareScope = Literal["read", "comment", "confirm"]
-# 客户看哪份正文（W9 domain-02）：original = 撰写人已定正文（未决修订按拒绝）；final = 含未决修订（按接受渲染）
 PublicShareBaseline = Literal["original", "final"]
 
 
@@ -168,19 +58,15 @@ class PublicShareMeta(BaseModel):
     sha: str
     scope: PublicShareScope
     baseline: PublicShareBaseline = "original"
-    # 当前正文里尚未接受 / 拒绝的修订数（ins / del / sub）；>0 时客户页提示本审阅版按 baseline 渲染
     pending_revisions: int = 0
-    # studio.json settings.sub_except：客户页版面渲染行内格式时这些子串内的 `_` 不作下标
     sub_except: list[str] = []
     allow_download: bool
     expires_at: float | None = None
     confirmation: Confirmation | None = None
     pdf_ready: bool = False
-    # P1-4 论文工程适配：studio.json source_format / document_type（缺省即旧 Markdown 专利行为）
-    source_format: str = "markdown"
-    document_type: str = "patent"
-    # False ⇒ 客户页仅 PDF 审阅（LaTeX / Word / 结构化无 content.md 版面）
-    layout_supported: bool = True
+    source_format: str = "latex"
+    document_type: str = "paper"
+    layout_supported: bool = False
 
 
 class PublicAnchor(BaseModel):
@@ -201,53 +87,7 @@ class PublicConfirmIn(BaseModel):
     note: str | None = Field(default=None, max_length=2000)
 
 
-# ---------- 时间线 / 备注 / 审阅指派（share-confirm-backend） ----------
-
-TimelineEventKind = Literal[
-    "case.created",
-    "case.status",
-    "note",
-    "share.created",
-    "share.confirmed",
-    "deliver.filed",
-    "oa.round",
-    "deadline.done",
-    "deadline.undone",
-    "deadline.override",
-    "review.assigned",
-    "export.downloaded",
-    "ai.proposal",
-]
-
-
-class TimelineEvent(BaseModel):
-    id: str
-    kind: TimelineEventKind
-    ts: float
-    actor: Actor | None = None
-    text: str
-    mentions: list[str] = Field(default_factory=list)
-    data: dict = Field(default_factory=dict)
-
-
-class TimelineResponse(BaseModel):
-    items: list[TimelineEvent]
-
-
-class NoteIn(BaseModel):
-    body: str = Field(min_length=1, max_length=4000)
-
-
-class ReviewAssignIn(BaseModel):
-    user_id: str
-    due: str | None = None
-
-
-class ReviewAssignResult(BaseModel):
-    deadline_id: str | None = None
-
-
-# ---------- 机构审计 / 设置 / AI 用量（notify-audit-backend / agent-core-backend） ----------
+# ---------- 机构审计 / 设置 / AI 用量 ----------
 
 OrgAuditKind = Literal[
     "auth.login",
@@ -376,61 +216,5 @@ class AiUsageSummary(BaseModel):
     budget: int
     by_project: list[AiUsageByProject] = Field(default_factory=list)
     by_model: list[AiUsageByModel] = Field(default_factory=list)
-    # per-user 每日配额（v0.6.7）：rows 含跨天残留（展示层按 day==today 过滤）；0=不限
     user_quota: int = 0
     by_user: list["AiUsageByUser"] = Field(default_factory=list)
-
-
-# ---------- OA 轮次（oa-import-backend） ----------
-
-OaRoundKind = Literal["first", "subsequent", "reexam", "rejection"]
-OaDelivery = Literal["electronic", "mail"]
-
-
-class OaRound(BaseModel):
-    id: str
-    kind: OaRoundKind
-    issued_on: str
-    delivery: OaDelivery
-    deadline_id: str | None = None
-    items: int = 0
-    extensions: list[Extension] = Field(default_factory=list)
-    filed_on: str | None = None
-    created_at: float
-
-
-class OaRoundIn(BaseModel):
-    kind: OaRoundKind
-    issued_on: str
-    delivery: OaDelivery = "electronic"
-
-
-class OaRoundPatch(BaseModel):
-    kind: OaRoundKind | None = None
-    issued_on: str | None = None
-    delivery: OaDelivery | None = None
-    extension_months: int | None = Field(default=None, ge=1, le=2)
-
-
-class OaRoundsResponse(BaseModel):
-    rounds: list[OaRound]
-
-
-# ---------- 递交页字段级错误（preflight-backend） ----------
-
-
-class DeliverError(BaseModel):
-    field: str
-    code: str
-    message: str
-
-
-class DeliverErrorsResponse(BaseModel):
-    errors: list[DeliverError]
-
-
-# ---------- 构建 tagged PDF 开关（three-view） ----------
-
-
-class BuildTagged(BaseModel):
-    pdf_tagged: bool = False

@@ -40,8 +40,7 @@ def matrix(tmp_path_factory):
     try:
         for name in ("app.config", "app.auth.db", "app.auth.acl", "app.auth.router", "app.main"):
             _fresh(name)
-        from patent_studio.asgi import create_app
-        app = create_app()
+        from app.main import app
 
         def new_client():
             return TestClient(app)
@@ -363,9 +362,7 @@ def test_preview_sidecar_not_configured(matrix, monkeypatch):
     assert r.status_code == 501
     assert "未配置" in r.json()["detail"]["message"] or "未配置" in r.json()["detail"].get("message", "")
     # 无产物残留
-    import app.routes.struct_writer as sw
-    from app.domain import structured
-    from patent_studio.asgi import create_app  # noqa: F401（确保 app 模块已加载）
+    import app.main  # noqa: F401 - 确保 app 模块已加载
     d = None
 
 
@@ -394,8 +391,8 @@ def test_registry_and_template_create():
     try:
         for name in ("app.config", "app.auth.db", "app.auth.acl", "app.auth.router", "app.main"):
             _fresh(name)
-        from patent_studio.asgi import create_app
-        c = TestClient(create_app())
+        from app.main import app
+        c = TestClient(app)
         c.post("/api/auth/register", json={"email": "boot@tpl.example.com", "password": PW})  # 已存在 400 可容忍
         c.post("/api/auth/cookie/login", data={"username": "boot@tpl.example.com", "password": PW},
                headers={"Content-Type": "application/x-www-form-urlencoded"})

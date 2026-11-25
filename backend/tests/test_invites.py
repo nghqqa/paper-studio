@@ -99,7 +99,7 @@ def test_invite_consumed_on_register_and_login(on):
     assert su.get(INV).json() == []
     roles = {m["email"]: m["role"] for m in su.get("/api/projects/method/members").json()}
     assert roles["new@example.com"] == "reviewer"
-    assert _login(on, "new@example.com").get("/api/projects/method/collab").json()["mode"] == "review"
+    assert _login(on, "new@example.com").get("/api/projects/method").json()["role"] == "reviewer"
 
     # 登录消费 + upgrade_only：已注册邮箱走 POST /invites 会直接成员，所以用 create_pending 直接写 pending
     # （router.set_member 未注册分支的入口），登录后 editor 不被 viewer 降级

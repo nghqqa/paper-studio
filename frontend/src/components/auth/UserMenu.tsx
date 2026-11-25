@@ -1,5 +1,5 @@
 import { Building2, CircleUserRound, KeyRound, LogOut, ShieldCheck, UserRoundCog } from 'lucide-react'
-import { initialOf, labelText, userColor } from '@/collab/colors'
+import { initialOf, labelText, userColor } from '@/lib/colors'
 import { Avatar } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown'
 import { FOCUS_RING, cn } from '@/lib/utils'
@@ -16,7 +16,6 @@ import { signOut } from './session'
 export function UserMenu({ className }: { className?: string }) {
   const status = useStudio((s) => s.authStatus)
   const user = useStudio((s) => s.user)
-  const paper = useStudio((s) => s.product === 'paper')
   if (status === 'off' || status === 'unknown') return null
   if (status === 'anon' || !user) {
     return (
@@ -67,10 +66,10 @@ export function UserMenu({ className }: { className?: string }) {
         {user.is_superuser && (
           <DropdownMenuItem onSelect={() => { window.location.hash = '/admin' }} data-testid="user-menu-admin">
             <Building2 className="size-4 text-fg-muted" aria-hidden />
-            {paper ? '平台管理…' : '机构管理…'}
+            平台管理…
           </DropdownMenuItem>
         )}
-        <DropdownMenuItem onSelect={() => { window.location.hash = '/account' }} data-testid="user-menu-password">
+        <DropdownMenuItem onSelect={() => { window.location.hash = '/account?tab=security' }} data-testid="user-menu-password">
           <KeyRound className="size-4 text-fg-muted" aria-hidden />
           修改密码…
         </DropdownMenuItem>

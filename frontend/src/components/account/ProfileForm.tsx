@@ -1,12 +1,11 @@
 import { useId, useState, type FormEvent } from 'react'
-import { labelText } from '@/collab/colors'
+import { labelText } from '@/lib/colors'
 import { Button } from '@/components/ui/button'
 import { Field, FieldControl, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import type { User } from '@/lib/types'
 import { cn, touchHit } from '@/lib/utils'
-import { AVATAR_COLORS, AVATAR_COLOR_HEX, PAPER_USER_TITLES, USER_TITLES, shownUserTitle, avatarColorFor, type AvatarColor, type MeIn, type UserTitle } from '@/types/account'
-import { useStudio } from '@/store'
+import { AVATAR_COLORS, AVATAR_COLOR_HEX, PAPER_USER_TITLES, shownUserTitle, avatarColorFor, type AvatarColor, type MeIn, type UserTitle } from '@/types/account'
 import { validateProfile, type FormErrors } from './formErrors'
 
 export interface ProfileFormProps {
@@ -24,8 +23,7 @@ export interface ProfileFormProps {
  * 只提交改动过的字段；改密码在 PasswordForm。单列 max-w-form（640），375 全宽。
  */
 export function ProfileForm({ user, saving, unavailable, onSave, mobile = false }: ProfileFormProps) {
-  const paper = useStudio((s) => s.product === 'paper')
-  const initialTitle = shownUserTitle(user.title ?? '', paper)
+  const initialTitle = shownUserTitle(user.title ?? '')
   const uid = useId()
   const [name, setName] = useState(user.display_name)
   const [title, setTitle] = useState<UserTitle>(initialTitle)
@@ -84,7 +82,7 @@ export function ProfileForm({ user, saving, unavailable, onSave, mobile = false 
         <legend className="text-sm font-medium">头衔</legend>
         <p className={cn('text-xs text-fg-muted', mobile && 'mt-1')}>仅展示（成员列表 / 批注署名），不影响权限。</p>
         <div className={cn('flex flex-wrap', mobile ? 'gap-group-m' : 'gap-1.5')} role="radiogroup" aria-label="头衔" data-testid="profile-titles">
-          {(['', ...(paper ? PAPER_USER_TITLES : USER_TITLES)] as UserTitle[]).map((t) => (
+          {(['', ...PAPER_USER_TITLES] as UserTitle[]).map((t) => (
             <label key={t || 'none'} className={cn('relative inline-flex', mobile && touchHit)}>
               <input type="radio" name={`${uid}-title`} value={t} checked={title === t} onChange={() => setTitle(t)} className="peer sr-only" />
               <span className="inline-flex h-sm-control cursor-pointer items-center rounded-full border px-3 text-xs peer-checked:border-primary peer-checked:bg-primary-soft peer-checked:text-link peer-focus-visible:outline-2 peer-focus-visible:outline-solid peer-focus-visible:outline-offset-1 peer-focus-visible:outline-ring peer-disabled:cursor-default peer-disabled:opacity-50">

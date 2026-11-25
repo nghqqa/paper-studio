@@ -29,80 +29,40 @@ METHOD_ROLE = {"GET": "viewer", "HEAD": "viewer", "OPTIONS": "viewer"}
 ROUTE_ROLE = {
     "/api/projects/{pid}/word/save": "reviewer",
     "/api/projects/{pid}/word/export/pdf": "viewer",
-    "/api/projects/{pid}/build": "viewer",
-    "/api/projects/{pid}/latex/build": "viewer",  # w21：编译只写 .studio/latex-builds，不改源码
-    "/api/projects/{pid}/latex/export-docx": "viewer",  # 实验性 DOCX 导出：与编译同门槛（只写 .studio/docx-exports）
+    "/api/projects/{pid}/latex/build": "viewer",  # 编译只写 .studio/latex-builds，不改源码
+    "/api/projects/{pid}/latex/export-docx": "viewer",
     "/api/projects/{pid}/latex/docx-exports": "viewer",
     "/api/projects/{pid}/latex/docx-exports/{eid}/artifacts/{name}": "viewer",
-    "/api/projects/{pid}/lint": "viewer",
-    "/api/projects/{pid}/preflight": "viewer",
-    "/api/projects/{pid}/ast": "viewer",
-    "/api/projects/{pid}/export/xml": "viewer",
     "/api/projects/{pid}/members": "owner",
     "/api/projects/{pid}/members/{user_id}": "owner",
     "/api/projects/{pid}/share": "owner",
     "/api/projects/{pid}/share/{token}": "owner",
-    "/api/projects/{pid}/critic": "viewer",  # POST 只解析 CriticMarkup（可带未保存正文），不写源码
     "/api/projects/{pid}/comments": "viewer",
     "/api/projects/{pid}/comments/{cid}": "viewer",
     "/api/projects/{pid}/comments/{cid}/replies": "viewer",
     "/api/projects/{pid}/comments/{cid}/resolve": "viewer",
     "/api/projects/{pid}/comments/{cid}/reopen": "viewer",
-    "/api/projects/{pid}/leave": "viewer",  # W4-A：任何成员都能退出自己的视图（owner 由路由自己拒绝）
-    # W4-A 台账写入：agent 及以上（路由自身也挂 require_role("agent")，这里让 403 文案一致）
+    "/api/projects/{pid}/leave": "viewer",
     "PUT /api/projects/{pid}/case": "agent",
     "/api/projects/{pid}/case/status": "agent",
     "/api/projects/{pid}/list-state": "agent",
-    # W4-B：源文档写路由放 reviewer 进门，正文校验在路由内（check_source_write）；GET 仍是 viewer
-    "/api/projects/{pid}/content": "reviewer",
-    "/api/projects/{pid}/docs/{book}": "reviewer",
-    "/api/projects/{pid}/blocks": "reviewer",
-    "/api/projects/{pid}/blocks/{block_id:path}": "reviewer",
     "/api/projects/{pid}/access": "owner",
     "/api/projects/{pid}/invites": "owner",
     "/api/projects/{pid}/invites/{email}": "owner",
-    "/api/projects/{pid}/collab-settings": "viewer",  # PUT 由路由内 require_role("owner")
-    # W4-E E1：全部打包只渲染到 .studio/deliver，与 /build /export/xml 同门槛
-    "/api/projects/{pid}/deliver/bundle": "viewer",
-    # ---- W5（docs/plan/21 §7.4.8）预填；单元实现路由时不改此表 ----
-    # deadlines-backend：重算 / 改期 / 完成 = 案件台账写入门槛（agent）；GET /api/deadlines 无 pid，路由内按可见案过滤
-    "/api/projects/{pid}/deadlines/compute": "agent",
-    "/api/projects/{pid}/deadlines/{deadline_id}": "agent",
-    "/api/projects/{pid}/deadlines/{deadline_id}/done": "agent",
-    # notify-audit-backend：催办 = 主管（agent+）
-    "/api/projects/{pid}/nudge": "agent",
-    # share-confirm-backend：公开链接管理 owner；时间线 viewer；备注 reviewer 起；审阅指派 agent
+    "/api/projects/{pid}/collab-settings": "viewer",
     "/api/projects/{pid}/public-links": "owner",
     "/api/projects/{pid}/public-links/{token}": "owner",
-    "/api/projects/{pid}/timeline": "viewer",
-    "/api/projects/{pid}/notes": "reviewer",
-    "/api/projects/{pid}/review-assign": "agent",
-    # agent-core-backend：run 门槛 viewer 进门，路由内按 ScenarioInfo.min_role 再校验；proposals 列表 viewer；
-    # apply 写 content.md ⇒ reviewer 进门 + check_source_write；dismiss reviewer
-    "/api/projects/{pid}/agent/run": "viewer",
-    "/api/projects/{pid}/agent/jobs": "viewer",
-    "/api/projects/{pid}/agent/proposals": "viewer",
-    "/api/projects/{pid}/agent/proposals/{proposal_id}/apply": "reviewer",
-    "/api/projects/{pid}/agent/proposals/{proposal_id}/dismiss": "reviewer",
-    "/api/projects/{pid}/ai/budget": "viewer",
-    # oa-import-backend：轮次 = 台账写入（agent）；GET viewer；解析 PDF reviewer
-    "GET /api/projects/{pid}/oa/rounds": "viewer",
-    "/api/projects/{pid}/oa/rounds": "agent",
-    "/api/projects/{pid}/oa/rounds/{rid}": "agent",
-    # preflight-backend：递交页错误只读
-    "/api/projects/{pid}/deliver/errors": "viewer",
-    # ---- v0.4 智能文献管理：读/外部查询 viewer；写（提交/编辑/删除/合并/建bib）走默认 editor ----
-    "/api/projects/{pid}/library/import": "viewer",  # 解析预览，不落盘
-    "/api/projects/{pid}/library/lookup": "viewer",  # 外部元数据查询，不落盘
-    "/api/projects/{pid}/library/verify": "viewer",  # 参考文献真实性核验（只读+写缓存）
-    "/api/projects/{pid}/library/reindex": "viewer",  # 只写 .studio 缓存视图
+    # 智能文献管理
+    "/api/projects/{pid}/library/import": "viewer",
+    "/api/projects/{pid}/library/lookup": "viewer",
+    "/api/projects/{pid}/library/verify": "viewer",
+    "/api/projects/{pid}/library/reindex": "viewer",
     "/api/projects/{pid}/library/citations": "viewer",
     "/api/projects/{pid}/library/export": "viewer",
-    "/api/projects/{pid}/library/bibliography": "viewer",  # CSL 渲染，只读
+    "/api/projects/{pid}/library/bibliography": "viewer",
     "/api/projects/{pid}/library/entries/{rid}/ai-suggest": "editor",
     "/api/projects/{pid}/library/entries/{rid}/confirm": "editor",
-    # ---- v0.4 论文 AI 修改提案：生成/列表 viewer（审阅者可发起建议请求）；
-    # 状态流转 reviewer 进门（与 agent/proposals 同门槛；真正改正文由编辑器 canEdit 把守） ----
+    # 论文 AI 修改提案
     "/api/projects/{pid}/paper-proposals": "viewer",
     "/api/projects/{pid}/paper-proposals/generate": "viewer",
     "/api/projects/{pid}/paper-proposals/disclosure": "viewer",
@@ -154,7 +114,10 @@ async def _check_access(request: Request, user, pid: str, need: str) -> None:
     if user.is_superuser:
         return
     role = await acl.role_for(pid, user.id)
-    if role is None and not os.path.isfile(os.path.join(config.PROJECTS_DIR, pid, "content.md")):
+    pdir = os.path.join(config.PROJECTS_DIR, pid)
+    if role is None and not (
+        os.path.isfile(os.path.join(pdir, "studio.json")) or os.path.isfile(os.path.join(pdir, "content.md"))
+    ):
         raise HTTPException(404, error_detail("not_found", "项目不存在"))
     if not role_at_least(role, need):
         raise forbidden(need)
@@ -170,18 +133,6 @@ async def my_role(pid: str, user) -> str | None:
     from app.auth import acl
 
     return await acl.role_for(pid, user.id)
-
-
-async def check_source_write(pid: str, user, base: str, new: str) -> None:
-    """源文档写入前调（14 §4.1）：reviewer 的改动必须全部落在 CriticMarkup 内（acl.reviewer_allowed），
-    否则 403 detail=reviewer。
-    off / 匿名 / 非 reviewer 直接放行（角色门槛已由 project_access 校验）。"""
-    if await my_role(pid, user) != "reviewer":
-        return
-    from app.auth import acl
-
-    if not acl.reviewer_allowed(base, new):
-        raise HTTPException(403, error_detail("forbidden", "审阅者只能提出 CriticMarkup 建议与批注", detail="reviewer"))
 
 
 async def access_touch(pid: str, user) -> None:

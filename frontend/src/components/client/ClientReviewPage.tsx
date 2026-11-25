@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState, type ClipboardEvent, type CSSProperties } from 'react'
+import { useCallback, useEffect, useState, type ClipboardEvent, type CSSProperties } from 'react'
 import {
   AlertTriangle,
   CheckCircle2,
@@ -6,8 +6,6 @@ import {
   Download,
   FileCheck2,
   FileText,
-  Highlighter,
-  LayoutTemplate,
   Link2Off,
   MessageSquarePlus,
   MessageSquareText,
@@ -17,58 +15,21 @@ import { Toasts } from '@/components/shell/Toasts'
 import { Button } from '@/components/ui/button'
 import { Count } from '@/components/ui/count'
 import { Countdown } from '@/components/ui/countdown'
-import { EmptyState , NOT_IMPLEMENTED_TITLE } from '@/components/ui/empty-state'
-import { Segmented } from '@/components/ui/segmented'
+import { EmptyState, NOT_IMPLEMENTED_TITLE } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { StatusDot } from '@/components/ui/status-dot'
 import { useIsDesktop } from '@/hooks/useMisc'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { pageTitle } from '@/lib/brand'
+import { fmtDateTime } from '@/lib/format'
 import { useStudio } from '@/store'
-import type { PublicView } from '@/store/publicShare'
 import type { PublicShareMeta } from '@/types/public-share'
-import { anchorForBlock, anchorForQuote, type PublicAnchor } from './anchor'
+import type { PublicAnchor } from './anchor'
 import { ClientPdfView } from './ClientPdfView'
 import { CommentSheet } from './CommentSheet'
 import { CommentThreads } from './CommentThreads'
 import { ConfirmDialog } from './ConfirmDialog'
-import { fmtDateTime } from '@/lib/format'
-
-/** 版面只读视图拖 ProseMirror/structure 重依赖——按需在打开时才拉（免登录页主包不该背它） */
-const ClientLayoutView = lazy(() => import('./ClientLayoutView').then((m) => ({ default: m.ClientLayoutView })))
-
-interface Pending {
-  anchor: PublicAnchor
-  /** 相对 <main> 的气泡位置 */
-  top: number
-  left: number
-}
-
-const BUBBLE_HALF = 72
-/** 选区 / 块矩形 → 气泡位置：顶部不高于容器 44px（免遮工具条），左右不出容器 */
-function bubbleAt(main: HTMLElement, r: DOMRect): Pick<Pending, 'top' | 'left'> {
-  const m = main.getBoundingClientRect()
-  return {
-    top: Math.max(r.top - m.top, 44),
-    left: Math.min(Math.max(r.left - m.left + r.width / 2, BUBBLE_HALF), main.clientWidth - BUBBLE_HALF),
-  }
-}
-
-const VIEW_OPTIONS = [
-  {
-    value: 'pdf' as const,
-    label: 'PDF',
-    icon: <FileText aria-hidden />,
-    'data-testid': 'client-view-pdf',
-  },
-  {
-    value: 'layout' as const,
-    label: '版面',
-    icon: <LayoutTemplate aria-hidden />,
-    'data-testid': 'client-view-layout',
-  },
-]
 
 const DAY = 86400
 
@@ -90,14 +51,8 @@ const XML_ESC: Record<string, string> = {
 }
 const escapeXml = (s: string) => s.replace(/[&<>"']/g, (c) => XML_ESC[c])
 
-/** 水印文案（同时写到 data-text，供测试 / 排查） */
 const watermarkText = (meta: PublicShareMeta) => `审阅版 · ${meta.org_name} · v${meta.version} · 仅供确认，请勿外传`
 
-/**
- * qa-03：水印不再是 DOM 文字，而是一块空图层 —— SVG data-URI 只当 mask（对角 -30° 文字的形状，平铺），
- * 颜色由 `bg-fg-subtle/40` token 提供（亮暗自动跟随，SVG 内不写任何色值）；axe 不再把它当文本算对比度。
- * 瓦片 420×240，字号 12（≥ 11 下限）。
- */
 function watermarkMask(text: string): string {
   const svg =
     '<svg xmlns="http://www.w3.org/2000/svg" width="420" height="240" viewBox="0 0 420 240">' +
@@ -115,30 +70,11 @@ function permissionText(meta: PublicShareMeta): string {
   return parts.join(' · ')
 }
 
-/** P1-4：论文档案（document_type=paper）把专利「代理师」话术换成学术通用「项目所有者」；
- *  meta 未加载（404 / 410 / 501 兜底态）或缺省档案保持原文案，不影响既有专利审阅页。 */
-function ownerTerm(meta: PublicShareMeta | null): string {
-  return meta?.document_type === 'paper' ? '项目所有者' : '代理师'
-}
-
-/**
- * `#/c/<token>` 免登录客户审阅页（S9 s9-client-review.html / S10f s10-m-client.html；21 §4.5；R-REV-05、R-MOB-03）。
- * 顶栏（logo · 案名 · 案号 · 机构 · 审阅版 vN · 截止 Countdown；≥ md 右侧 Segmented「PDF / 版面」+ 下载）
- * → 文稿区（PDF 工具条 32：页码 · 提示 · 批注数）+ 纸面恒白 + 对角水印；≥ lg 右栏 360 常驻信息 dl + 批注线程
- * → 固定底部动作条 64（左说明 · 「有意见」secondary · 「确认定稿」唯一 primary，safe-area）。
- * < md（06 §4 屏 6）：顶栏 44（logo 28 · 标题 + 信息两行 · 图标按钮 md 36 + touch-hit）→ 「PDF / 版面」Segmented md 36 居中、上下 12
- *   → 页码 / 截止 / 批注 信息行 12 muted 单行 → 纸面页边 16 → 动作条 64：「有意见」lg 44（无确认动作时为唯一 primary）· 「确认定稿」xl 44。
- * 状态：加载骨架 / 410「链接已过期，请联系代理师」/ 404「链接失效」/ 501「功能开发中」/ 其他错误可重试；审阅中遇 410 / 404（批注 / 确认被拒）也切到对应空态。
- * P1-4：LaTeX / Word / 结构化链接（meta.layout_supported=false）仅 PDF 审阅——隐藏「PDF / 版面」切换，批注走 pdf:page-N
- *   页级锚点；paper 档案把「代理师」话术换「项目所有者」，pdf_ready=false 给出「联系项目所有者生成后再试」指引。
- */
+/** `#/c/<token>` 免登录公开论文审阅页（纯 PDF 审阅 + 页级批注 + 确认定稿） */
 export function ClientReviewPage({ token }: { token: string }) {
   const desktop = useIsDesktop()
   const meta = useStudio((s) => s.publicMeta)
-  const ast = useStudio((s) => s.publicAst)
-  const css = useStudio((s) => s.publicCss)
   const comments = useStudio((s) => s.publicComments)
-  const view = useStudio((s) => s.publicView)
   const loading = useStudio((s) => s.publicLoading)
   const expired = useStudio((s) => s.publicExpired)
   const invalid = useStudio((s) => s.publicInvalid)
@@ -148,18 +84,9 @@ export function ClientReviewPage({ token }: { token: string }) {
   const toast = useStudio((s) => s.toast)
   const st = useStudio.getState
 
-  const mainRef = useRef<HTMLDivElement>(null)
-  const [pending, setPending] = useState<Pending | null>(null)
-  const [pickedId, setPickedId] = useState<string | null>(null)
-  const [composer, setComposer] = useState<{
-    open: boolean
-    anchor: PublicAnchor | null
-  }>({ open: false, anchor: null })
+  const [composer, setComposer] = useState<{ open: boolean; anchor: PublicAnchor | null }>({ open: false, anchor: null })
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [page, setPage] = useState<{ current: number; total: number }>({
-    current: 1,
-    total: 0,
-  })
+  const [page, setPage] = useState<{ current: number; total: number }>({ current: 1, total: 0 })
   const onPage = useCallback((current: number, total: number) => setPage({ current, total }), [])
 
   useEffect(() => {
@@ -168,67 +95,11 @@ export function ClientReviewPage({ token }: { token: string }) {
   }, [token, st])
 
   useEffect(() => {
-    /* meta 加载期先落通用名——否则标签页残留上一页标题（批14 auth 页同族） */
-    document.title = meta ? `${meta.title} · 客户审阅` : pageTitle('客户审阅')
+    document.title = meta ? `${meta.title} · 论文审阅` : pageTitle('论文审阅')
   }, [meta])
-
-  const clearPick = useCallback(() => {
-    setPending(null)
-    setPickedId(null)
-  }, [])
-
-  /* 拖选 / 长按：选区落在 <main> 内 → 气泡「有意见」 */
-  useEffect(() => {
-    if (!ast || meta?.scope === 'read') return
-    let timer = 0
-    const onChange = () => {
-      window.clearTimeout(timer)
-      timer = window.setTimeout(() => {
-        const sel = document.getSelection()
-        const main = mainRef.current
-        if (!sel || !main || sel.isCollapsed || sel.rangeCount === 0) return
-        const range = sel.getRangeAt(0)
-        if (!main.contains(range.commonAncestorContainer)) return
-        const text = sel.toString().trim()
-        if (!text) return
-        setPickedId(null)
-        setPending({
-          anchor: anchorForQuote(ast, text),
-          ...bubbleAt(main, range.getBoundingClientRect()),
-        })
-      }, 180)
-    }
-    document.addEventListener('selectionchange', onChange)
-    return () => {
-      window.clearTimeout(timer)
-      document.removeEventListener('selectionchange', onChange)
-    }
-  }, [ast, meta?.scope])
-
-  const onPickBlock = useCallback(
-    (blockId: string, el: HTMLElement | null) => {
-      if (!ast || meta?.scope === 'read') return
-      const anchor = anchorForBlock(ast, blockId)
-      if (!anchor) return
-      const main = mainRef.current
-      if (!main || !el) {
-        setComposer({ open: true, anchor })
-        return
-      }
-      setPickedId(blockId)
-      setPending({ anchor, ...bubbleAt(main, el.getBoundingClientRect()) })
-    },
-    [ast, meta?.scope],
-  )
 
   const openComposer = (anchor: PublicAnchor | null) => {
     setComposer({ open: true, anchor })
-    setPending(null)
-  }
-
-  const setView = (v: PublicView) => {
-    clearPick()
-    st().setPublicView(v)
   }
 
   const allowCopy = meta?.allow_copy ?? true
@@ -244,32 +115,13 @@ export function ClientReviewPage({ token }: { token: string }) {
   const confirmedThis = meta?.confirmation != null && meta.confirmation.version === meta.version
   const left = daysLeft(meta?.expires_at ?? null)
   const openCount = comments.filter((c) => !c.resolved).length
-  const owner = ownerTerm(meta)
-  /* P1-4：LaTeX / Word / 结构化工程无 content.md 版面（layout_supported=false）⇒ 仅 PDF 审阅 */
-  const layoutOk = meta?.layout_supported !== false
-  const isPaper = meta?.document_type === 'paper'
-  const ready = meta != null && (meta.layout_supported === false || ast != null) && !expired && !invalid
+  const owner = '项目所有者'
+  const ready = meta != null && !expired && !invalid
 
-  /** 仅 PDF 审阅的批注锚点：当前页（pdf:page-N），不依赖 ast 选块 */
   const pageAnchor = useCallback((): PublicAnchor => {
     const n = Math.max(1, page.current || 1)
     return { block_id: `pdf:page-${n}`, line: n, quote: `第 ${n} 页` }
   }, [page.current])
-
-  /** 无选区时的兜底锚点：版面可用 ⇒ 整文（标题块）；仅 PDF ⇒ 当前页 */
-  const fallbackAnchor = useCallback((): PublicAnchor | null => {
-    if (ast) {
-      const whole = anchorForBlock(ast, 'title')
-      return whole && { ...whole, quote: '' }
-    }
-    return pageAnchor()
-  }, [ast, pageAnchor])
-
-  const viewSwitch = ready && layoutOk && (
-    <div data-testid="client-viewbar" className={cn(!desktop && 'flex shrink-0 items-center justify-center bg-app px-page-m py-3')}>
-      <Segmented value={view} onValueChange={setView} options={VIEW_OPTIONS} aria-label="查看方式" size="md" className={cn(!desktop && 'w-full')} />
-    </div>
-  )
 
   const watermark = meta && (
     <div
@@ -277,11 +129,7 @@ export function ClientReviewPage({ token }: { token: string }) {
       data-testid="client-watermark"
       data-text={watermarkText(meta)}
       className="pointer-events-none absolute inset-0 z-base bg-fg-subtle/40 [-webkit-mask-image:var(--client-watermark)] [mask-image:var(--client-watermark)] [print-color-adjust:exact]"
-      style={
-        {
-          '--client-watermark': watermarkMask(watermarkText(meta)),
-        } as CSSProperties
-      }
+      style={{ '--client-watermark': watermarkMask(watermarkText(meta)) } as CSSProperties}
     />
   )
 
@@ -296,10 +144,7 @@ export function ClientReviewPage({ token }: { token: string }) {
         {meta ? (
           <div className="flex min-w-0 flex-1 flex-col">
             <h1 className="truncate text-sm font-semibold text-fg-strong md:text-base" data-testid="client-title" title={meta.title}>{meta.title}</h1>
-            <p
-              className="flex min-w-0 items-center gap-1 truncate text-xs text-fg-muted"
-              title={[meta.case_no, meta.org_name, `审阅版 v${meta.version}`].filter(Boolean).join(' · ')}
-            >
+            <p className="flex min-w-0 items-center gap-1 truncate text-xs text-fg-muted" title={[meta.case_no, meta.org_name, `审阅版 v${meta.version}`].filter(Boolean).join(' · ')}>
               {meta.case_no && (
                 <>
                   <span className="font-mono tabular-nums">{meta.case_no}</span>
@@ -314,9 +159,8 @@ export function ClientReviewPage({ token }: { token: string }) {
             </p>
           </div>
         ) : (
-          <h1 className="flex-1 text-sm font-semibold text-fg-strong">客户审阅</h1>
+          <h1 className="flex-1 text-sm font-semibold text-fg-strong">论文审阅</h1>
         )}
-        {desktop && viewSwitch}
         {ready && meta.allow_download && (
           <Button asChild variant="ghost" size={desktop ? 'md' : 'icon-md'} aria-label="下载 PDF" title="下载 PDF" data-testid="client-download">
             <a href={pdfUrl} download>
@@ -326,7 +170,7 @@ export function ClientReviewPage({ token }: { token: string }) {
           </Button>
         )}
         {ready && !desktop && canComment && (
-          <Button variant="ghost" size="icon-md" aria-label={`批注 ${comments.length} 条`} title={`批注 ${comments.length} 条`} onClick={() => openComposer(ast ? null : pageAnchor())} data-testid="client-comments-toggle" className="relative">
+          <Button variant="ghost" size="icon-md" aria-label={`批注 ${comments.length} 条`} title={`批注 ${comments.length} 条`} onClick={() => openComposer(pageAnchor())} data-testid="client-comments-toggle" className="relative">
             <MessageSquareText aria-hidden />
             <Count value={comments.length} tone="brand" className="absolute top-0 right-0" />
           </Button>
@@ -337,7 +181,6 @@ export function ClientReviewPage({ token }: { token: string }) {
         <>
           <div className="grid min-h-0 min-w-0 grid-cols-[minmax(0,1fr)] lg:grid-cols-[minmax(0,1fr)_var(--w-companion)]">
             <main aria-label="文稿" className="flex min-h-0 min-w-0 flex-col">
-              {!desktop && viewSwitch}
               <div
                 className={cn(
                   'flex shrink-0 items-center whitespace-nowrap bg-app text-xs text-fg-muted',
@@ -345,29 +188,18 @@ export function ClientReviewPage({ token }: { token: string }) {
                 )}
                 data-testid="client-doctb"
               >
-                {view === 'pdf' ? (
-                  page.total > 0 ? (
-                    <span className="tabular-nums">
-                      第 {page.current} / {page.total} 页
-                    </span>
-                  ) : (
-                    <span>PDF</span>
-                  )
+                {page.total > 0 ? (
+                  <span className="tabular-nums">
+                    第 {page.current} / {page.total} 页
+                  </span>
                 ) : (
-                  <span>版面</span>
+                  <span>PDF</span>
                 )}
                 <span className="flex-1" />
                 {!desktop && meta.expires_at && (
                   <span className={cn('inline-flex items-center gap-inline-m tabular-nums', left != null && left <= 3 ? 'text-danger-fg' : 'text-fg-muted')} data-testid="client-deadline">
                     <Clock className="size-3.5" aria-hidden />
                     {fmtDate(meta.expires_at)} 前{canConfirm ? '确认' : '查看'}
-                  </span>
-                )}
-                {/* 拖选批注依赖版面 AST 文字层；仅 PDF 链接不显示此提示，改用「有意见」页级入口 */}
-                {canComment && ast != null && (
-                  <span className="hidden items-center gap-1 lg:inline-flex">
-                    <Highlighter className="size-3.5" aria-hidden />
-                    选中文字即可批注
                   </span>
                 )}
                 {!desktop && (
@@ -377,50 +209,18 @@ export function ClientReviewPage({ token }: { token: string }) {
                   </span>
                 )}
               </div>
-              {meta.pending_revisions > 0 && (
-                <p
-                  role="status"
-                  className={cn('flex shrink-0 items-start gap-1.5 bg-warn-bg text-xs leading-5 text-warn-fg', desktop ? 'border-b border-border px-3 py-1.5' : 'px-page-m py-2')}
-                  data-testid="client-pending-notice"
-                  data-baseline={meta.baseline}
-                >
-                  <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
-                  <span>
-                    {meta.baseline === 'final'
-                      ? `本审阅版含 ${meta.pending_revisions} 处代理师尚未确定的修改建议（已按接受显示）；确认前请以代理师最终定稿为准。`
-                      : `代理师尚有 ${meta.pending_revisions} 处修改建议待处理；本审阅版只显示已确定的正文。`}
-                  </span>
-                </p>
-              )}
 
-              <div ref={mainRef} className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-paper-canvas" data-testid="client-main" data-view={view}>
+              <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden bg-paper-canvas" data-testid="client-main" data-view="pdf">
                 <div className="mx-auto h-full w-full max-w-page">
-                  {view === 'pdf' ? (
-                    isPaper && !meta.pdf_ready ? (
-                      /* P1-4：论文 PDF 未编译 / 未导出——不进 ClientPdfView 的专利文案（「切到版面」对本链接不成立），
-                         直接给可执行的指引；批注入口不受影响（页级锚点 fallback 默认第 1 页） */
-                      <div className="flex h-full items-center justify-center bg-paper-canvas p-page-m" data-testid="client-pdf-pending-paper">
-                        <EmptyState icon={FileText} title="PDF 尚未生成" reason="作者尚未编译或导出当前版本 PDF，请联系项目所有者生成后再试。" />
-                      </div>
-                    ) : (
-                      <ClientPdfView url={pdfUrl} ready={meta.pdf_ready} onPage={onPage} />
-                    )
-                  ) : ast ? (
-                    /* layout_supported=false 时 view 恒为 pdf，不会进此分支；ast 判空同时完成类型收窄 */
-                    <Suspense fallback={<Skeleton className="mx-auto mt-8 h-[60vh] w-full max-w-page" />}>
-                      <ClientLayoutView ast={ast} css={css} onPickBlock={onPickBlock} pickedId={pickedId} subExcept={meta.sub_except} />
-                    </Suspense>
-                  ) : null}
+                  {!meta.pdf_ready ? (
+                    <div className="flex h-full items-center justify-center bg-paper-canvas p-page-m" data-testid="client-pdf-pending-paper">
+                      <EmptyState icon={FileText} title="PDF 尚未生成" reason="作者尚未编译或导出当前版本 PDF，请联系项目所有者生成后再试。" />
+                    </div>
+                  ) : (
+                    <ClientPdfView url={pdfUrl} ready={meta.pdf_ready} onPage={onPage} />
+                  )}
                 </div>
                 {watermark}
-                {pending && (
-                  <div className="absolute z-panel -translate-x-1/2 -translate-y-full pb-2" style={{ top: pending.top, left: pending.left }}>
-                    <Button size={desktop ? 'sm' : 'lg'} className="shadow-lg" onClick={() => openComposer(pending.anchor)} data-testid="client-selection-comment">
-                      <MessageSquarePlus aria-hidden />
-                      有意见
-                    </Button>
-                  </div>
-                )}
               </div>
             </main>
 
@@ -473,7 +273,7 @@ export function ClientReviewPage({ token }: { token: string }) {
               ) : (
                 <p className="hidden min-w-0 flex-1 truncate text-xs text-fg-muted md:block">
                   {!desktop && openCount > 0 ? `${openCount} 条批注待${owner}处理 · ` : ''}
-                  {canConfirm ? `确认定稿后${owner}将进入${isPaper ? '投稿' : '递交'}流程；仍可继续批注。` : `意见会实时同步给${owner}。`}
+                  {canConfirm ? `确认定稿后${owner}将进入投稿流程；仍可继续批注。` : `意见会实时同步给${owner}。`}
                 </p>
               )}
               {canComment && (
@@ -481,7 +281,7 @@ export function ClientReviewPage({ token }: { token: string }) {
                   variant={!desktop && !(canConfirm && !confirmedThis) ? 'default' : 'secondary'}
                   size="lg"
                   className={cn(!desktop && (confirmedThis ? 'shrink-0' : 'flex-1'))}
-                  onClick={() => openComposer(ast ? null : pageAnchor())}
+                  onClick={() => openComposer(pageAnchor())}
                   data-testid="client-comment"
                 >
                   <MessageSquarePlus aria-hidden />
@@ -507,13 +307,9 @@ export function ClientReviewPage({ token }: { token: string }) {
             ownerLabel={owner}
             onGuestName={(n) => st().setGuestName(n)}
             onSubmit={async (body) => {
-              const anchor = composer.anchor ?? fallbackAnchor()
-              if (!anchor) return false
+              const anchor = composer.anchor ?? pageAnchor()
               const ok = await st().addPublicComment({ anchor, body })
-              if (ok) {
-                toast(`意见已发送给${owner}`, 'success')
-                clearPick()
-              }
+              if (ok) toast(`意见已发送给${owner}`, 'success')
               return ok
             }}
           />
@@ -522,6 +318,8 @@ export function ClientReviewPage({ token }: { token: string }) {
             onOpenChange={setConfirmOpen}
             version={meta.version}
             guestName={guestName}
+            ownerLabel={owner}
+            isPaper
             onGuestName={(n) => st().setGuestName(n)}
             onConfirm={async (note) => {
               const ok = await st().confirmPublic(note)
@@ -542,7 +340,7 @@ export function ClientReviewPage({ token }: { token: string }) {
           ) : invalid ? (
             <EmptyState icon={Link2Off} title="链接失效" reason={`这个审阅链接不存在或已被删除；请核对链接是否完整，或让${owner}重新发送。`} className="pt-10" data-testid="client-invalid" />
           ) : unavailable ? (
-            <EmptyState icon={FileCheck2} title={NOT_IMPLEMENTED_TITLE} reason={`客户审阅链接尚未在此部署开放，请联系${owner}获取文件。`} className="pt-10" data-testid="client-unavailable" />
+            <EmptyState icon={FileCheck2} title={NOT_IMPLEMENTED_TITLE} reason={`公开审阅链接尚未在此部署开放，请联系${owner}获取文件。`} className="pt-10" data-testid="client-unavailable" />
           ) : (
             <EmptyState
               icon={AlertTriangle}

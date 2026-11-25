@@ -83,8 +83,6 @@ beforeEach(() => {
   useStudio.getState().resetPublic()
   useStudio.setState({ toasts: [], guestName: '' })
   vi.spyOn(api, 'publicMeta').mockResolvedValue(paperMeta())
-  vi.spyOn(api, 'publicAst').mockRejectedValue(new Error('should not fetch ast'))
-  vi.spyOn(api, 'publicLayoutCss').mockRejectedValue(new Error('should not fetch css'))
   vi.spyOn(api, 'publicComments').mockResolvedValue([])
 })
 
@@ -97,10 +95,8 @@ afterEach(async () => {
 })
 
 describe('ClientReviewPage 论文工程适配（P1-4）', () => {
-  it('LaTeX 论文链接：不请求 layout-ast/css、隐藏切换条、顶栏不渲染 null 案号', async () => {
+  it('LaTeX 论文链接：仅渲染 PDF 审阅视图、隐藏切换条、顶栏不渲染 null 案号', async () => {
     const el = await mount(<ClientReviewPage token="tok-latex" />)
-    expect(api.publicAst).not.toHaveBeenCalled()
-    expect(api.publicLayoutCss).not.toHaveBeenCalled()
     expect(q('[data-testid="client-viewbar"]', el)).toBeNull()
     expect(q('[data-testid="client-pdf"]', el)).not.toBeNull()
     expect(q('[data-testid="client-header"]', el)!.textContent).not.toContain('null')
@@ -151,11 +147,30 @@ describe('ClientReviewPage 论文工程适配（P1-4）', () => {
     expect(useStudio.getState().toasts.some((t) => t.text.includes('项目所有者'))).toBe(true)
   })
 
-  it('视图重置防御：上一链接停在 layout，打开 layout_supported=false 论文链接强制回 pdf', async () => {
-    useStudio.getState().setPublicView('layout')
+  it('公开审阅页始终渲染 pdf 视图', async () => {
     const el = await mount(<ClientReviewPage token="tok-reset" />)
-    expect(useStudio.getState().publicView).toBe('pdf')
-    expect(useStudio.getState().publicAst).toBeNull()
     expect(q('[data-testid="client-main"]', el)!.dataset.view).toBe('pdf')
+  })
+
+  it('论文模式确认定稿弹窗展示「项目所有者」与「投稿」，不泄露「代理师」', async () => {
+    const el = await mount(<ClientReviewPage token="tok-confirm-paper" />)
+    await act(async () => q('[data-testid="client-confirm"]', el)!.click())
+    const dlg = q('[data-testid="client-confirm-dialog"]')!
+    expect(dlg.textContent).toContain('项目所有者')
+    expect(dlg.textContent).toContain('投稿')
+    expect(dlg.textContent).not.toContain('代理师')
+  })
+
+  it('App 路由放行论文模式下的 #/c/<token> 免登录审阅页', async () => {
+    window.location.hash = '#/c/tok-app'
+    vi.spyOn(useStudio.getState(), 'fetchMeta').mockImplementation(async () => {
+      useStudio.setState({ product: 'paper', authStatus: 'anon' })
+    })
+    const { default: App } = await import('@/App')
+    const el = await mount(<App />)
+    await act(async () => { await vi.waitFor(() => expect(q('[data-testid="page-client"]', el)).not.toBeNull()) })
+    expect(q('[data-testid="patent-page-unavailable"]', el)).toBeNull()
+    expect(q('[data-testid="client-token"]', el)!.textContent).toBe('tok-app')
+    window.location.hash = ''
   })
 })

@@ -17,13 +17,12 @@ import subprocess
 import tempfile
 
 from app import config
-from app.domain import structured
+from app.domain import pandoc_runner, structured
 
-ASSETS = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                      "..", "docx_export_assets"))
+ASSETS = pandoc_runner.DOCX_ASSETS_DIR
 
 PROFILE = "jcip"
-LAYOUT_PARAMS = {"w": 11419, "h": 15600, "l": 907, "r": 907, "t": 623, "b": 284, "cs": 424}
+LAYOUT_PARAMS = pandoc_runner.JCIP_LAYOUT_PARAMS
 
 
 def _resource_files(project_dir: str, content: dict) -> tuple[dict, dict]:
@@ -46,12 +45,7 @@ def _resource_files(project_dir: str, content: dict) -> tuple[dict, dict]:
 
 
 def _pandoc_version() -> str:
-    try:
-        r = subprocess.run([config.DOCX_EXPORT_PANDOC or "pandoc", "--version"],
-                           capture_output=True, text=True, timeout=30)
-        return (r.stdout.splitlines() or ["?"])[0].strip()
-    except Exception as e:
-        return f"unavailable: {e}"
+    return pandoc_runner.local_pandoc_version(subprocess_run=subprocess.run)
 
 
 def _local_pandoc() -> tuple[str, str]:
@@ -81,9 +75,7 @@ def export_docx(project_dir: str, content: dict, content_sha: str, content_vid: 
         figs = os.path.join(src, "figs")
         assets = os.path.join(workdir, "assets")
         os.makedirs(figs, exist_ok=True)
-        os.makedirs(assets, exist_ok=True)
-        for fn in os.listdir(ASSETS):
-            shutil.copy2(os.path.join(ASSETS, fn), os.path.join(assets, fn))
+        pandoc_runner.copy_docx_assets(assets)
 
         res_files, res_digests = _resource_files(project_dir, content)
         for _rid, fname in res_files.items():
@@ -95,19 +87,14 @@ def export_docx(project_dir: str, content: dict, content_sha: str, content_vid: 
         with open(tex_path, "w", encoding="utf-8", newline="\n") as f:
             f.write(latex)
 
-        env = dict(os.environ)
-        env.update({f"LAYOUT_{k}": str(v) for k, v in LAYOUT_PARAMS.items()})
-        env["PANDOC_NUMBERING_REPORT"] = os.path.join(workdir, "numbering.json")
+        layout_env = pandoc_runner.jcip_layout_env(LAYOUT_PARAMS)
+        env = pandoc_runner.clean_local_env(
+            {"PANDOC_NUMBERING_REPORT": os.path.join(workdir, "numbering.json"), **layout_env},
+            inherit_all=True,
+        )
 
         docx = os.path.join(workdir, "paper.docx")
         if runtime == "docker":
-            # Windows 开发态：宿主 docker 起 pandoc/latex 镜像（只挂导出运行目录）——
-            # 与 docx_export.py 的 docker 运行时同一模式（本机已实测）。
-            env_pairs = []
-            for k in ("PANDOC_NUMBERING_REPORT",):
-                env_pairs += [f"-e {k}={env[k]}"]
-            for k, v in LAYOUT_PARAMS.items():
-                env_pairs += [f"-e LAYOUT_{k}={v}"]
             cmd = (
                 "pandoc --from=latex --to=docx --standalone --number-sections --wrap=auto "
                 "--reference-doc=/proj/assets/jcip-reference.docx "
@@ -116,17 +103,20 @@ def export_docx(project_dir: str, content: dict, content_sha: str, content_vid: 
                 "--resource-path=/proj/src "
                 "--output=/proj/paper.docx /proj/src/main.tex"
             )
-            proc = subprocess.run(
-                ["docker", "run", "--rm", "--entrypoint", "sh",
-                 "-v", workdir.replace(os.sep, "/") + ":/proj",
-                 *env_pairs, "pandoc/latex:3.6.4", "-c", cmd],
-                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
+            rc, _out, err = pandoc_runner.run_pandoc_docker(
+                mount_dir=workdir,
+                workdir="/proj",
+                cmd=cmd,
+                env_vars={"PANDOC_NUMBERING_REPORT": "/proj/numbering.json", **layout_env},
+                image="pandoc/latex:3.6.4",
+                timeout_s=300,
+                subprocess_run=subprocess.run,
             )
-            if proc.returncode != 0 or not os.path.exists(docx):
-                raise RuntimeError(f"pandoc(docker) 转换失败 rc={proc.returncode}\n{proc.stderr[-1200:]}")
+            if rc != 0 or not os.path.exists(docx):
+                raise RuntimeError(f"pandoc(docker) 转换失败 rc={rc}\n{err[-1200:]}")
         else:
             args = [
-                binary, "--from=latex", "--to=docx", "--standalone", "--number-sections",
+                "--from=latex", "--to=docx", "--standalone", "--number-sections",
                 "--wrap=auto",
                 "--reference-doc", os.path.join(assets, "jcip-reference.docx"),
                 "--lua-filter", os.path.join(assets, "numbering.lua"),
@@ -135,10 +125,16 @@ def export_docx(project_dir: str, content: dict, content_sha: str, content_vid: 
                 "--output", os.path.join(workdir, "paper.docx"),
                 tex_path,
             ]
-            proc = subprocess.run(args, capture_output=True, text=True,
-                                  encoding="utf-8", errors="replace", timeout=300, env=env)
-            if proc.returncode != 0 or not os.path.exists(docx):
-                raise RuntimeError(f"pandoc 转换失败 rc={proc.returncode}\n{proc.stderr[-1200:]}")
+            rc, _out, err = pandoc_runner.run_pandoc_local(
+                args,
+                cwd=workdir,
+                timeout_s=300,
+                env=env,
+                binary=binary,
+                subprocess_run=subprocess.run,
+            )
+            if rc != 0 or not os.path.exists(docx):
+                raise RuntimeError(f"pandoc 转换失败 rc={rc}\n{err[-1200:]}")
 
         report = {}
         if os.path.exists(env["PANDOC_NUMBERING_REPORT"]):

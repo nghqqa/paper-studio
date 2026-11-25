@@ -33,7 +33,13 @@ export function PaperProjectInfo({ row, onClose }: { row: ProjectSummary; onClos
         <div className="space-y-1"><Label htmlFor="paper-info-title">项目名称</Label><Input id="paper-info-title" required maxLength={200} value={title} onChange={(e) => setTitle(e.target.value)} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1"><Label htmlFor="paper-info-stage">写作阶段</Label><select id="paper-info-stage" className="h-9 w-full rounded-md border border-border bg-panel px-2 text-sm" value={stage} onChange={(e) => setStage(e.target.value as typeof stage)}>{PAPER_STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></div>
-          <div className="space-y-1"><Label htmlFor="paper-info-deadline">投稿截止</Label><Input id="paper-info-deadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} /></div>
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="paper-info-deadline">投稿截止</Label>
+              {deadline && <button type="button" className="text-xs text-fg-muted hover:text-fg" onClick={() => setDeadline('')}>清除</button>}
+            </div>
+            <Input id="paper-info-deadline" type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} />
+          </div>
         </div>
         <div className="space-y-1"><Label htmlFor="paper-info-venue">投稿目标</Label><Input id="paper-info-venue" maxLength={200} placeholder="期刊或会议名称" value={venue} onChange={(e) => setVenue(e.target.value)} /></div>
         <div className="grid grid-cols-2 gap-3">

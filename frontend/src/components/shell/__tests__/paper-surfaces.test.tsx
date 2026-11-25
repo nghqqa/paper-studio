@@ -11,8 +11,6 @@ import { ShortcutsDialog } from '../ShortcutsDialog'
 import { MarkdownPaperWorkbench } from '@/components/paper/MarkdownPaperWorkbench'
 import { CollabDrawer } from '@/components/collab-center'
 
-vi.mock('@/components/editor/Editor', () => ({ Editor: ({ chrome }: { chrome: boolean }) => <div data-testid="paper-editor" data-chrome={String(chrome)} /> }))
-vi.mock('@/components/preview/PreviewPane', () => ({ PreviewPane: () => <div>论文预览</div> }))
 const banned = /专利|发明人|代理师|代理人|案卷|权利要求|说明书|CNIPA|知撰|客户确认|OA 轮次/
 const user = { id: 'u-paper', email: 'author@paper.example.com', display_name: '作者', title: '研究员' as const, avatar_color: '', is_superuser: true }
 const initial = useStudio.getInitialState()
@@ -72,12 +70,6 @@ it.each(['members', 'org', 'audit', 'ai'])('论文管理员 %s 页面只展示�
     clean()
   }
 })
-it('论文用户级 AI 面板无专利语境残留，禁用提示为团队口径', async () => {
-  useStudio.setState({ pid: 'word-sample', settings: { document_type: 'paper', source_format: 'docx', abstract_figure: null, spec_figures: [], sub_except: [], abstract_limit: 300, style: { ai_enabled: false } }, agentDisabledByOrg: true })
-  const { AiPanel } = await import('@/components/ai/AiPanel')
-  await mount(<AiPanel />); clean()
-  expect(document.querySelector('[data-testid="ai-org-disabled"]')?.textContent).toContain('团队已禁用 AI')
-})
 it('旧职业头衔不会在论文资料中显示，也不会因其他资料修改被自动覆写', async () => {
   const save = vi.fn().mockResolvedValue(null)
   await mount(<ProfileForm user={{ ...user, title: '发明人' }} saving={false} unavailable={false} onSave={save} />)
@@ -95,18 +87,12 @@ it('论文快捷键只介绍当前写作能力', async () => {
   expect(document.body.textContent).toContain('Alt+=')
   expect(document.querySelector('[data-testid="shortcuts-layout"]')).toBeNull()
 })
-it('Markdown 论文恢复为完整源码，不加载旧业务标签栏', async () => {
-  useStudio.setState({ activeBook: 'claims', editorView: 'layout' })
+it('Markdown 论文展示下线迁移提示，不加载旧业务标签栏', async () => {
   await mount(<MarkdownPaperWorkbench pid="md-paper" />); clean()
-  expect(useStudio.getState().activeBook).toBe('all')
-  expect(useStudio.getState().editorView).toBe('source')
-  expect(document.querySelector('[data-testid="paper-editor"]')?.getAttribute('data-chrome')).toBe('false')
-  await act(async () => useStudio.setState({ activeBook: 'claims', editorView: 'layout' }))
-  expect(useStudio.getState().activeBook).toBe('all')
-  expect(useStudio.getState().editorView).toBe('source')
+  expect(document.querySelector('[data-testid="markdown-paper-workbench"]')?.textContent).toContain('旧版 Markdown 工作台已下线')
 })
 it('论文共享链接（P1-4 开放）：owner 打开「链接」tab 拉 /public-links 并渲染公开审阅链接段', async () => {
-  useStudio.setState({ collabCenterOpen: true, collabCenterTab: 'links', pid: 'word-sample', project: { id: 'word-sample', title: '论文示例', mtime: 1, figs: [], has_settings_file: true, backups: [], settings: { document_type: 'paper', source_format: 'docx', abstract_figure: null, spec_figures: [], sub_except: [], abstract_limit: 300, style: {} }, role: 'owner', content: '' } })
+  useStudio.setState({ collabCenterOpen: true, collabCenterTab: 'links', pid: 'word-sample', project: { id: 'word-sample', title: '论文示例', mtime: 1, settings: { document_type: 'paper', source_format: 'docx' }, role: 'owner' } })
   await mount(<CollabDrawer />); clean()
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/public-links'))).toBe(true)
   expect(document.querySelector('[data-testid="collab-public-links"]')).not.toBeNull()
@@ -120,4 +106,18 @@ it('工作区配置请求失败后可重试，不回落到旧产品界面', asyn
   vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ product: 'paper' })))
   await useStudio.getState().fetchMeta()
   expect(useStudio.getState().product).toBe('paper'); expect(useStudio.getState().metaError).toBeNull()
+})
+it('App 根级挂载 CreateProjectDialog：工作台路由下 dialog=create 正常弹框不锁死热键', async () => {
+  window.location.hash = '#/p/word-sample'
+  useStudio.setState({ dialog: 'create', product: 'paper', authStatus: 'authed', wordEditorEnabled: false, wordEditorReady: false })
+  vi.spyOn(useStudio.getState(), 'fetchMeta').mockImplementation(async () => {
+    useStudio.setState({ product: 'paper', wordEditorEnabled: false, wordEditorReady: false })
+  })
+  vi.spyOn(useStudio.getState(), 'loadMe').mockResolvedValue(undefined)
+  vi.spyOn(useStudio.getState(), 'loadBootstrap').mockResolvedValue(undefined)
+  vi.spyOn(useStudio.getState(), 'openProject').mockResolvedValue(undefined)
+  const { default: App } = await import('@/App')
+  await mount(<App />)
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('[data-testid="new-paper-dialog"]')).not.toBeNull()) })
+  window.location.hash = '#/'
 })

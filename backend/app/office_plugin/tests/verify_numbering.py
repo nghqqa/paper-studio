@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import subprocess
 import uuid
 import xml.etree.ElementTree as ET
+from pathlib import Path
 from zipfile import ZipFile
 
 HERE = Path(__file__).resolve().parent

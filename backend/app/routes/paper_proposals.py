@@ -37,11 +37,15 @@ ACTION_PROMPTS = {
     "condense": "凝练压缩至约一半篇幅，保留全部关键信息、结论与数据。",
     "expand": "在忠实原意的前提下适度扩写：补充过渡与解释性语句；不编造数据与引用。",
     "custom": "按用户给出的修改指令执行。",
-    "deai": "去除文本中的 AI 生成痕迹：消除模板化句式、过度对仗的排比、空洞总结句与冗余连接词；\
-\\        改为自然的学术行文，句式长短结合、用具体表述替代空泛形容。保持原意、术语、数据与引用完全不变，不增删事实。",
-    "writing": "根据指令撰写一段学术论文正文：规范的学术语气、清晰的逻辑推进；\
-\\        如需引用文献只能使用上下文中已给出的引用键，禁止编造文献、数据与实验结果；\
-\\        只输出指令要求的一段正文，不输出标题、解释或寒暄。",
+    "deai": (
+        "去除文本中的 AI 生成痕迹：消除模板化句式、过度对仗的排比、空洞总结句与冗余连接词；"
+        "改为自然的学术行文，句式长短结合、用具体表述替代空泛形容。保持原意、术语、数据与引用完全不变，不增删事实。"
+    ),
+    "writing": (
+        "根据指令撰写一段学术论文正文：规范的学术语气、清晰的逻辑推进；"
+        "如需引用文献只能使用上下文中已给出的引用键，禁止编造文献、数据与实验结果；"
+        "只输出指令要求的一段正文，不输出标题、解释或寒暄。"
+    ),
 }
 
 _PROTECT_RULES = (
@@ -174,9 +178,9 @@ async def list_proposals(pid: str, request: Request, status: str | None = None, 
 async def get_disclosure(pid: str, request: Request, lang: str = "zh", format: str = "markdown"):
     """只读导出 AI 使用披露声明（严格依据提案落盘台账，不调用 AI，不依赖机构 AI 开关）。"""
     project = request.app.state.store.get(pid)
-    meta = getattr(project, "meta", None) or {}
-    sub = meta.get("submission") if isinstance(meta.get("submission"), dict) else {}
-    title = str(meta.get("title") or getattr(project, "title", "") or "").strip()
+    settings = project.settings if isinstance(project.settings, dict) else {}
+    sub = settings.get("submission") if isinstance(settings.get("submission"), dict) else {}
+    title = str(getattr(project, "title", "") or settings.get("title") or "").strip()
     venue = str((sub or {}).get("venue") or "").strip()
     return pp.build_disclosure(project.dir, pid, title=title, venue=venue, lang=lang, fmt=format)
 

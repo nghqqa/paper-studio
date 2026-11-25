@@ -38,9 +38,7 @@ def matrix(tmp_path_factory):
                 importlib.reload(sys.modules[name])
             else:
                 importlib.import_module(name)
-        from patent_studio.asgi import create_app
-
-        app = create_app()
+        from app.main import app
 
         def register(name):
             client = TestClient(app)

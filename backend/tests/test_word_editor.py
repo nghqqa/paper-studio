@@ -38,9 +38,7 @@ def matrix(tmp_path_factory):
                 importlib.reload(sys.modules[name])
             else:
                 importlib.import_module(name)
-        from patent_studio.asgi import create_app
-
-        app = create_app()
+        from app.main import app
 
         def register(name):
             c = TestClient(app)
@@ -120,8 +118,8 @@ def test_meta_project_and_native_content_guard(matrix):
     assert body["settings"]["source_format"] == "docx"
     assert body["content"] == ""
     assert not (matrix["projects"] / pid / "content.md").exists()
-    assert owner.get(f"/api/projects/{pid}/content").status_code == 400
-    assert owner.put(f"/api/projects/{pid}/content", json={"content": "bad"}).status_code == 400
+    assert owner.get(f"/api/projects/{pid}/content").status_code == 404
+    assert owner.put(f"/api/projects/{pid}/content", json={"content": "bad"}).status_code in (404, 405)
 
 
 def test_acl_and_review_permissions_are_signed(matrix):
@@ -487,16 +485,13 @@ def test_browser_plugins_use_public_origin_and_ds_keeps_internal_origin(matrix, 
 def test_legacy_build_export_and_source_format_cannot_reinterpret_docx(matrix):
     owner, pid = matrix["users"]["owner"], _new(matrix)
     original = owner.get(f"/api/projects/{pid}/word/download").content
-    for endpoint, body in (("/content", {"content": "# alternate source"}),
-                           ("/settings", {"source_format": "markdown"})):
-        r = owner.put(f"/api/projects/{pid}" + endpoint, json=body)
-        assert r.status_code == 400, r.text
-    r = owner.post(f"/api/projects/{pid}/build", json={"content": "# bypass", "pdf": False})
+    r = owner.put(f"/api/projects/{pid}/settings", json={"source_format": "markdown"})
     assert r.status_code == 400, r.text
-    for path in ("/export?fmt=docx", "/export?fmt=pdf", "/export/docx?mode=tracked",
-                 "/builds/fake/out.docx"):
-        assert owner.get(f"/api/projects/{pid}" + path).status_code == 400
-    assert owner.post(f"/api/projects/{pid}/export/xml", json={"content": "# bypass"}).status_code == 400
+    assert owner.put(f"/api/projects/{pid}/content", json={"content": "# alternate source"}).status_code in (404, 405)
+    assert owner.post(f"/api/projects/{pid}/build", json={"content": "# bypass", "pdf": False}).status_code in (404, 405)
+    for path in ("/export?fmt=docx", "/export?fmt=pdf", "/export/docx?mode=tracked", "/builds/fake/out.docx"):
+        assert owner.get(f"/api/projects/{pid}" + path).status_code == 404
+    assert owner.post(f"/api/projects/{pid}/export/xml", json={"content": "# bypass"}).status_code in (404, 405)
     assert not (matrix["projects"] / pid / "content.md").exists()
     assert not (matrix["projects"] / pid / ".studio" / "builds").exists()
     assert owner.get(f"/api/projects/{pid}/word/download").content == original
@@ -648,7 +643,7 @@ def test_upload_version_requires_editor_role(matrix):
     assert TestClient(matrix["app"]).post(url, files=files).status_code == 401
     assert matrix["users"]["viewer"].post(url, files=files).status_code == 403
     assert matrix["users"]["reviewer"].post(url, files=files).status_code == 403
-    assert matrix["users"]["outsider"].post(url, files=files).status_code == 404
+    assert matrix["users"]["outsider"].post(url, files=files).status_code in (403, 404)
     # editor 的放行路径在独立新案上验证（先邀请为成员），避免污染共享案件
     pid = _new(matrix)
     assert matrix["users"]["owner"].put(

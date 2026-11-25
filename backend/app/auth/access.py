@@ -16,8 +16,6 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.collab import rooms
-
 ACCESS_DEBOUNCE = timedelta(minutes=30)
 DEFAULT_SETTINGS = {"allow_download": True, "allow_copy": True, "allow_comment": True}
 
@@ -85,7 +83,7 @@ async def list_access(pid: str) -> dict:
 
     await init_db()
     members = {m["user_id"]: m for m in await acl.list_members(pid)}
-    online = rooms.online_user_ids(pid)
+    online: set[str] = set()
     async with SessionLocal() as s:
         rows = await s.execute(
             select(ProjectAccess, User)

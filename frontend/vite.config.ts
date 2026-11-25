@@ -41,7 +41,6 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    // 测试以 ?raw 读仓库根 examples/*/content.md（jsdom 环境走 client 变换，受 fs.allow 约束）
     fs: { allow: [path.resolve(import.meta.dirname, '..')] },
     proxy: {
       '/api': { target: process.env.VITE_API_TARGET ?? 'http://127.0.0.1:8000', changeOrigin: true, ws: true },
@@ -49,5 +48,16 @@ export default defineConfig({
   },
   build: {
     chunkSizeWarningLimit: 1500,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            { name: 'vendor-codemirror', test: /[\\/]node_modules[\\/](@codemirror|@lezer|style-mod|crelt|@marijn[\\/]find-cluster-break)[\\/]/ },
+            { name: 'vendor-katex', test: /[\\/]node_modules[\\/]katex[\\/]/ },
+            { name: 'vendor-prosemirror', test: /[\\/]node_modules[\\/]prosemirror-[^\\/]+[\\/]/ },
+          ],
+        },
+      },
+    },
   },
 })

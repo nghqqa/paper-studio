@@ -218,7 +218,7 @@ describe('LoginPage（07 §7.1）', () => {
   it('auth=off：说明文案 + 进入工作台链接；已登录：显示邮箱与「进入工作台 / 切换账号」', async () => {
     useStudio.setState({ authStatus: 'off' })
     let el = await mount(<LoginPage />)
-    expect(q('[data-testid="login-auth-off"]', el)?.textContent).toContain('PATENT_STUDIO_AUTH=off')
+    expect(q('[data-testid="login-auth-off"]', el)?.textContent).toContain('PAPER_STUDIO_AUTH=off')
     await act(async () => root?.unmount())
     host.remove()
     useStudio.setState({ authStatus: 'authed', user: me })
@@ -242,7 +242,7 @@ describe('UserMenu（07 §7.1；W4-E 改密收敛到 #/account）', () => {
     expect(q<HTMLAnchorElement>('[data-testid="topbar-login"]', el)?.getAttribute('href')).toBe('#/login')
   })
 
-  it('authed：头像首字母；菜单含只读邮箱 / 修改密码… / 退出登录；「修改密码…」跳 #/account（W4-E：无旧改密对话框）', async () => {
+  it('authed：头像首字母；菜单含只读邮箱 / 修改密码… / 退出登录；「修改密码…」跳 #/account?tab=security（W4-E：无旧改密对话框）', async () => {
     const logout = vi.fn(async () => {})
     useStudio.setState({ authStatus: 'authed', user: { ...me, display_name: 'zhang', is_superuser: true }, logout })
     const el = await mount(<UserMenu />)
@@ -262,7 +262,7 @@ describe('UserMenu（07 §7.1；W4-E 改密收敛到 #/account）', () => {
     const pw = q<HTMLElement>('[data-testid="user-menu-password"]', menu!)!
     await act(async () => pw.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' })))
     await act(async () => pw.click())
-    expect(window.location.hash).toBe('#/account')
+    expect(window.location.hash).toBe('#/account?tab=security')
     expect(useStudio.getState().dialog).toBeNull()
     expect(q('[data-testid="password-dialog"]')).toBeNull()
   })

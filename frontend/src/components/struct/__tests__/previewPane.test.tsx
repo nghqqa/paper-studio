@@ -3,9 +3,9 @@ import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-vi.mock('@/components/attachments/AttachmentPdf', () => ({
+vi.mock('@/components/pdf/SimplePdfView', () => ({
   default: () => null,
-  AttachmentPdf: () => null,
+  SimplePdfView: () => null,
 }))
 
 import { StructPreviewPane, type PreviewState } from '../StructPreviewPane'

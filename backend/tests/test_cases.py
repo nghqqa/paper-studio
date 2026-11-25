@@ -7,7 +7,6 @@ auth off（单机）与 on（viewer / editor / agent / owner / 超管）都覆�
 import importlib
 import json
 import os
-import shutil
 import sys
 
 import pytest
@@ -25,7 +24,6 @@ def _reload_app():
     import app.auth.router
     import app.routes
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import projects as projects_mod
 
     importlib.reload(config)
@@ -37,19 +35,18 @@ def _reload_app():
     importlib.reload(projects_mod)
     importlib.reload(app.routes)  # project_or_404 的 ProjectError 同样要重绑
     importlib.reload(routes_cases)  # 重绑 ProjectError（projects 已重载）
-    importlib.reload(build)
-    importlib.reload(xml_export)
     return importlib.reload(main)
 
 
 def _projects(tmp_path):
     projects = tmp_path / "projects"
     projects.mkdir()
-    for pid in ("method", "system"):
-        shutil.copytree(
-            os.path.join(ROOT, "examples", pid),
-            projects / pid,
-            ignore=shutil.ignore_patterns("*.docx", ".studio", "*.bak-*"),
+    for pid, title in (("method", "示例论文一"), ("system", "示例论文二")):
+        d = projects / pid
+        d.mkdir()
+        (d / "studio.json").write_text(
+            json.dumps({"document_type": "paper", "source_format": "latex", "title": title}, ensure_ascii=False),
+            encoding="utf-8",
         )
     return projects
 
@@ -77,7 +74,7 @@ def on(tmp_path, monkeypatch):
 
 
 def _snapshot(d):
-    return {name: open(os.path.join(d, name), "rb").read() for name in ("content.md", "studio.json")}
+    return {"studio.json": open(os.path.join(d, "studio.json"), "rb").read()}
 
 
 def _messages(project_dir):
@@ -89,6 +86,7 @@ def _messages(project_dir):
 
 def test_put_case_patches_only_given_fields_and_commits(client):
     c, projects = client
+    snap_before = _snapshot(projects / "method")
     r = c.put(
         "/api/projects/method/case",
         json={"case_no": "P-001", "client": "甲方", "deadlines": [{"kind": "filing", "due": "2099-01-01"}]},
@@ -108,8 +106,8 @@ def test_put_case_patches_only_given_fields_and_commits(client):
     assert c.put("/api/projects/nope/case", json={"client": "x"}).status_code == 404
     assert c.put("/api/projects/method/case", json={"status": "review"}).status_code == 422
     assert c.get("/api/projects/method/case").json()["status"] == "drafting"
-    # 台账写入不碰正文 / 排版
-    assert _snapshot(projects / "method") == _snapshot(os.path.join(ROOT, "examples", "method"))
+    # 台账写入不碰项目设置
+    assert _snapshot(projects / "method") == snap_before
 
 
 def test_put_case_dates_persist_and_unknown_date_keys_rejected(client):
@@ -170,9 +168,6 @@ def test_status_event_does_not_pollute_content_save(client):
     assert c.post("/api/projects/method/case/status", json={"status": "review"}).status_code == 200
     log = history.log(str(projects / "method"))
     assert log[0]["added"] == 0 and log[0]["deleted"] == 0
-    md = (projects / "method" / "content.md").read_text(encoding="utf-8")
-    assert c.put("/api/projects/method/content", json={"content": md + "\n"}).status_code == 200
-    assert history.commit(str(projects / "method"), "save") is None  # 正文 save 不带 case.json
 
 
 # ---------------------------------------------------------------- off：标签 ----
@@ -531,23 +526,6 @@ def test_on_bulk_checks_each_project(on):
         .status_code
         == 401
     )
-
-
-def test_on_import_docx_sets_case_owner_and_acl(on):
-    """Word 导入建案与新建案一致：case.owner_user_id = 导入者，ACL owner 行落库（非超管也能在列表里看到）。"""
-    from tests.test_import import build_native_fixture
-
-    main, projects = on
-    users = {}
-    for email in ("boss", "agent"):
-        users[email] = _register(main, f"{email}@example.com")["id"]
-    agent = _login(main, "agent@example.com")
-    r = agent.post("/api/projects/import/docx", files={"file": ("imp.docx", build_native_fixture())})
-    assert r.status_code == 201, r.text
-    pid = r.json()["project"]["id"]
-    assert cases.load_case(str(projects / pid)).owner_user_id == users["agent"]
-    assert [row["id"] for row in agent.get("/api/projects").json()] == [pid]
-    assert agent.get(f"/api/projects/{pid}").json()["role"] == "owner"
 
 
 def test_save_case_atomic_write_no_tmp_residue(tmp_path):

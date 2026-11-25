@@ -3,9 +3,18 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { commentsApi } from '@/lib/api/comments'
 import { libraryApi } from '@/lib/api/library'
 import { bridgeAlive, runRefsTaskAuto } from '@/lib/api/refsPlugin'
 import { WordSidePanels } from '../WordSidePanels'
+
+vi.mock('@/lib/api/comments', () => ({
+  commentsApi: {
+    comments: vi.fn(),
+    replyComment: vi.fn(),
+    resolveComment: vi.fn(),
+  },
+}))
 
 vi.mock('@/lib/api/library', () => ({
   libraryApi: {
@@ -21,7 +30,7 @@ vi.mock('@/lib/api/refsPlugin', () => ({
 }))
 
 // LibraryPanel 桩：透出回调与样式 prop，供点击触发（面板本体行为由其自身测试覆盖）
-vi.mock('@/components/latex/LibraryPanel', () => {
+vi.mock('@/components/paper/LibraryPanel', () => {
   const FIXTURE = [
     { reference_id: 'rid-1', citation_key: 'a2026', title: '甲' },
     { reference_id: 'rid-2', citation_key: 'b2026', title: '乙' },
@@ -43,8 +52,9 @@ vi.mock('@/components/latex/LibraryPanel', () => {
   }
 })
 
-vi.mock('@/components/latex/ProposalPanel', () => ({ ProposalPanel: () => null }))
+vi.mock('@/components/paper/ProposalPanel', () => ({ ProposalPanel: () => null }))
 vi.mock('@/components/word/WordPreflightPanel', () => ({ WordPreflightPanel: () => null }))
+vi.mock('@/components/rebuttal/RebuttalPanel', () => ({ RebuttalPanel: () => null }))
 
 let root: Root | null = null
 let host: HTMLElement
@@ -220,5 +230,73 @@ describe('WordSidePanels 文献面板（P1-0-A）', () => {
     expect(btn).not.toBeNull()
     await click('word-warning-renumber-btn')
     expect(onRenumber).toHaveBeenCalledWith('gb-t-7714-2015')
+  })
+
+  it.each([
+    ['preflight', '投稿检查'],
+    ['rebuttal', '回复信'],
+    ['comments', '批注'],
+  ] as const)('侧栏 %s 展示正确标题「%s」而非误显论文助手', async (tab, expectedTitle) => {
+    vi.mocked(commentsApi.comments).mockResolvedValue([])
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+    act(() => root!.render(
+      <WordSidePanels
+        pid="p"
+        docKey="doc-key-1"
+        canEdit
+        saving={false}
+        stateSha={null}
+        stateVersion={null}
+        open={tab}
+        onClose={() => {}}
+      />))
+    await flush()
+    expect(host.querySelector('[data-testid="word-panel-title"]')!.textContent).toContain(expectedTitle)
+  })
+
+  it('批注面板展示外部审阅页级批注并支持回复与标记已解决', async () => {
+    const extComment = {
+      id: 'c-ext-1',
+      anchor: { block_id: 'pdf:page-3', line: 3, quote: '第 3 页' },
+      body: '表 2 数据请核对单位',
+      author: { id: null, name: '李导师' },
+      created_at: 1700000000,
+      updated_at: 1700000000,
+      resolved: false,
+      replies: [],
+      source: 'client' as const,
+    }
+    vi.mocked(commentsApi.comments).mockResolvedValue([extComment])
+    vi.mocked(commentsApi.replyComment).mockResolvedValue(extComment)
+    vi.mocked(commentsApi.resolveComment).mockResolvedValue({ ...extComment, resolved: true })
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    root = createRoot(host)
+    act(() => root!.render(
+      <WordSidePanels
+        pid="p"
+        docKey="doc-key-1"
+        canEdit
+        saving={false}
+        stateSha={null}
+        stateVersion={null}
+        open="comments"
+        onClose={() => {}}
+      />))
+    await flush()
+    expect(host.textContent).toContain('外部审阅')
+    expect(host.textContent).toContain('表 2 数据请核对单位')
+    await click('word-comment-reply-c-ext-1')
+    const inp = host.querySelector<HTMLInputElement>('[data-testid="word-comment-reply-body-c-ext-1"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(inp, '已改为 ms')
+      inp.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await click('word-comment-reply-send-c-ext-1')
+    expect(commentsApi.replyComment).toHaveBeenCalledWith('p', 'c-ext-1', '已改为 ms')
+    await click('word-comment-resolve-c-ext-1')
+    expect(commentsApi.resolveComment).toHaveBeenCalledWith('p', 'c-ext-1', true)
   })
 })

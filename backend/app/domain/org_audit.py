@@ -21,8 +21,8 @@ from datetime import UTC, date, datetime, time
 from typing import get_args
 
 from app import config
+from app.domain import db_sink as sink
 from app.domain import events
-from app.notify import sink
 from app.schemas import Actor, OrgAuditEvent, OrgAuditKind, OrgAuditResponse
 
 KINDS: frozenset[str] = frozenset(get_args(OrgAuditKind))

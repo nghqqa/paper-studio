@@ -13,6 +13,7 @@
 import asyncio
 import json
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import asdict, dataclass
@@ -21,7 +22,43 @@ from typing import Literal, Protocol
 import httpx
 
 from app import config
-from app.ai import prompts
+
+_TAG_RE = re.compile(r"^\[(?:patent|paper)-studio:([a-z_]+)\]")
+
+
+def kind_of(messages: list[dict]) -> str:
+    for m in messages:
+        if m.get("role") == "system":
+            mt = _TAG_RE.match(m.get("content") or "")
+            if mt:
+                return mt.group(1)
+    return "chat"
+
+
+def strip_fence(text: str) -> str:
+    t = text.strip()
+    if t.startswith("```"):
+        t = t.split("\n", 1)[1] if "\n" in t else ""
+        if t.rstrip().endswith("```"):
+            t = t.rstrip()[:-3]
+    return t.strip()
+
+
+def parse_json(text: str, schema: dict | None = None) -> dict:
+    t = strip_fence(text)
+    try:
+        data = json.loads(t)
+    except json.JSONDecodeError:
+        start = t.find("{")
+        if start < 0:
+            raise
+        data, _ = json.JSONDecoder().raw_decode(t[start:])
+    if not isinstance(data, dict):
+        raise ValueError("输出不是 JSON 对象")
+    for k in (schema or {}).get("required", []):
+        if k not in data:
+            raise ValueError(f"缺少字段：{k}")
+    return data
 
 Purpose = Literal["interactive", "heavy"]
 ErrorKind = Literal["no_key", "timeout", "upstream", "format", "disabled"]
@@ -382,7 +419,7 @@ class AiClient:
         return {
             "pid": os.path.basename(project_dir) if project_dir else None,
             "purpose": purpose,
-            "kind": prompts.kind_of(messages) or "chat",
+            "kind": kind_of(messages) or "chat",
             "requested_model": self.model_map[purpose],
             "stream": stream,
             "job_id": job_id,
@@ -555,10 +592,9 @@ class AiClient:
 
 
 def from_env() -> AiClient:
-    """main.py 启动时按 PATENT_STUDIO_AI_PROVIDER 构造：mock ⇒ AgentMockProvider（MockProvider + 智能体夹具）；
-    否则 OpenAICompatProvider(key)。"""
-    from app.ai.prompts_agent import AgentMockProvider
-
+    """main.py 启动时按 AI_PROVIDER 构造：mock ⇒ MockProvider；否则 OpenAICompatProvider(key)。"""
     if config.AI_PROVIDER == "mock":
-        return AiClient(AgentMockProvider())
+        from app.ai.mock import MockProvider
+
+        return AiClient(MockProvider())
     return AiClient(OpenAICompatProvider(config.AI_KEY))

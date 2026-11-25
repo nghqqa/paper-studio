@@ -50,23 +50,27 @@ class ShareIn(BaseModel):
 
 
 if config.AUTH_ON:
-    from app.auth import acl
-    from app.auth.schemas import UserCreate, UserRead
-    from app.auth.users import auth_backend, fastapi_users, get_jwt_strategy
-    from app.auth.db import SessionLocal, UserManager, get_user_manager, init_db
-    from app.auth.models import User
+    import asyncio
+    import secrets
+
     from fastapi_users import exceptions as user_exceptions
     from fastapi_users.db import SQLAlchemyUserDatabase
     from sqlalchemy import select
-    import asyncio
-    import secrets
+
+    from app.auth import acl
+    from app.auth.db import SessionLocal, UserManager, get_user_manager, init_db
+    from app.auth.models import User
+    from app.auth.schemas import UserCreate, UserRead
+    from app.auth.users import auth_backend, fastapi_users, get_jwt_strategy
+
+    _USER_MANAGER_DEP = Depends(get_user_manager)
 
     class SetupPasswordIn(BaseModel):
         token: str = Field(min_length=1, max_length=4096)
         password: str = Field(min_length=8, max_length=1024)
 
     @router.post("/auth/setup-password")
-    async def setup_password(body: SetupPasswordIn, request: Request, manager=Depends(get_user_manager)):
+    async def setup_password(body: SetupPasswordIn, request: Request, manager=_USER_MANAGER_DEP):
         # Tokens are issued only by the server-side provisioning CLI. fastapi-users
         # binds them to the current password hash and expiry; replay fails after use.
         try:

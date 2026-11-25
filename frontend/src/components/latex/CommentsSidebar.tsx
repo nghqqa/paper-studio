@@ -12,6 +12,7 @@ import { commentsApi } from '@/lib/api/comments'
  */
 export interface LatexCommentAnchor {
   file?: string | null
+  block_id?: string | null
   line?: number | null
   line_start?: number | null
   line_end?: number | null
@@ -28,6 +29,7 @@ export interface LatexCommentItem {
   anchor: LatexCommentAnchor
   author: { id: string | null; name: string }
   created_at: number
+  source?: string
   replies: Array<{ id: string; body: string; author: { name: string }; created_at: number }>
 }
 
@@ -40,6 +42,7 @@ interface Props {
   /** 当前光标行（创建锚点用）；null 时创建按钮禁用 */
   currentLine: number | null
   onJump(file: string, line: number): void
+  onJumpPage?(page: number): void
   reloadSignal: number
 }
 
@@ -47,7 +50,7 @@ function timeOf(ts: number): string {
   return new Date(ts * 1000).toLocaleString()
 }
 
-export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine, onJump, reloadSignal }: Props) {
+export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine, onJump, onJumpPage, reloadSignal }: Props) {
   const [comments, setComments] = useState<LatexCommentItem[] | null>(null)
   const [scope, setScope] = useState<'current' | 'all'>('current')
   const [status, setStatus] = useState<'open' | 'resolved' | 'all'>('open')
@@ -60,8 +63,8 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
   const refresh = useCallback(async () => {
     try {
       const all = (await commentsApi.comments(pid)) as unknown as LatexCommentItem[]
-      // 只展示 LaTeX 文件锚点（带 file 的批注）；patent/paper 的块锚点不在本工作台
-      setComments(all.filter((c) => !!c.anchor?.file))
+      // 保留 LaTeX 文件锚点 + 免登录外部审阅 / PDF 页级锚点；专利块锚点不在本工作台
+      setComments(all.filter((c) => !!c.anchor?.file || c.source === 'client' || (c.anchor?.block_id ?? '').startsWith('pdf:')))
       setError('')
     } catch (e) {
       setError(errTextLocal(e))
@@ -73,7 +76,7 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
   }, [refresh, reloadSignal])
 
   const visible = (comments ?? []).filter((c) => {
-    if (scope === 'current' && c.anchor?.file !== activePath) return false
+    if (scope === 'current' && c.anchor?.file && c.anchor.file !== activePath) return false
     if (status === 'open' && c.resolved) return false
     if (status === 'resolved' && !c.resolved) return false
     return true
@@ -178,13 +181,15 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
           {dirty
             ? '有未保存修改——请先保存，再基于服务器版本创建批注'
             : activePath
-              ? `在 ${activePath} 第 ${currentLine ?? '—'} 行创建批注`
+              ? currentLine != null
+                ? `在 ${activePath} 第 ${currentLine} 行创建批注`
+                : `请先在编辑器中点击 ${activePath} 要批注的源码行`
               : '未打开文件'}
         </div>
         <textarea
           className="w-full rounded border border-line bg-panel p-1.5 text-xs text-fg"
           rows={2}
-          placeholder={canCreate ? '批注内容…' : dirty ? '先保存后可创建' : '定位到要批注的行'}
+          placeholder={baseReady ? '批注内容…' : dirty ? '先保存后可创建' : '请先在左侧编辑器中点击要批注的源码行'}
           value={newBody}
           onChange={(e) => setNewBody(e.target.value)}
           disabled={!baseReady}
@@ -214,6 +219,9 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
                   <Circle aria-hidden className="size-3.5 text-warning" />
                 )}
                 <span className="font-medium text-fg-strong">{c.author.name}</span>
+                {c.source === 'client' && (
+                  <span className="rounded bg-sunken px-1 text-2xs text-fg-muted">外部审阅</span>
+                )}
                 <span>· {timeOf(c.created_at)}</span>
                 <span
                   className={cn('ml-auto', c.resolved ? 'text-ok' : 'text-warning')}
@@ -237,6 +245,27 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
                   {c.anchor.stale && <span className="text-warning">位置待核对</span>}
                 </div>
               )}
+              {!c.anchor?.file && c.anchor?.block_id?.startsWith('pdf:page-') && (() => {
+                const m = c.anchor.block_id.match(/^pdf:page-(\d+)$/)
+                const pageNum = m ? Number(m[1]) : null
+                return (
+                  <div className="mt-1 flex items-center gap-1 text-fg-muted">
+                    {pageNum && onJumpPage ? (
+                      <button
+                        className="truncate hover:underline"
+                        disabled={busy}
+                        title={`跳转到 PDF 第 ${pageNum} 页`}
+                        onClick={() => onJumpPage(pageNum)}
+                        data-testid={`latex-comment-jump-page-${c.id}`}
+                      >
+                        PDF 第 {pageNum} 页
+                      </button>
+                    ) : (
+                      <span>{c.anchor.quote || c.anchor.block_id}</span>
+                    )}
+                  </div>
+                )
+              })()}
               {c.anchor?.quote && (
                 <div className="mt-1 rounded bg-app px-1.5 py-1 text-fg-muted" title="创建时的源码上下文">
                   {c.anchor.quote}

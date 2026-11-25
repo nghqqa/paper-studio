@@ -24,12 +24,20 @@ from app.domain.library import LibraryEntry
 CACHE_FILE = os.path.join(".studio", "citation-verify.json")
 MAX_BATCH = 25
 
-_NON_WORD_RE = re.compile(r"[^a-z0-9\u4e00-\u9fff]+")
+_ASCII_WORD_RE = re.compile(r"[a-z0-9]{2,}")
+_CJK_RUN_RE = re.compile(r"[\u4e00-\u9fff]+")
 
 
 def _norm_tokens(text: str) -> set[str]:
-    cleaned = _NON_WORD_RE.sub(" ", (text or "").lower()).strip()
-    return {t for t in cleaned.split() if len(t) >= 2 or ("\u4e00" <= t <= "\u9fff")}
+    lower = (text or "").lower()
+    tokens: set[str] = set(_ASCII_WORD_RE.findall(lower))
+    for run in _CJK_RUN_RE.findall(lower):
+        if len(run) == 1:
+            tokens.add(run)
+        else:
+            for i in range(len(run) - 1):
+                tokens.add(run[i : i + 2])
+    return tokens
 
 
 def _title_similarity(local_title: str, remote_title: str) -> float:
@@ -48,6 +56,9 @@ def _first_surname(authors: list[str]) -> str:
     raw = (authors[0] or "").strip()
     if not raw:
         return ""
+    compact = re.sub(r"[\s,，·.]+", "", raw)
+    if compact and re.fullmatch(r"[\u4e00-\u9fff]+", compact):
+        return compact
     if "," in raw:
         surname = raw.split(",", 1)[0].strip()
     else:
@@ -116,8 +127,9 @@ async def _find_authoritative(entry: LibraryEntry) -> tuple[dict[str, Any] | Non
             elif exc.status != 422:
                 last_err = exc.message
 
-    # 3. 标题关键词检索（OpenAlex，按最高标题相似度挑候选）
-    if title and len(title) >= 6:
+    # 3. 标题关键词检索（OpenAlex，按最高标题相似度挑候选；中文标题允许 ≥4 字）
+    min_title_len = 4 if _CJK_RUN_RE.search(title) else 6
+    if title and len(title) >= min_title_len:
         try:
             cands = await library_sources.search_openalex(title, limit=5)
             best = None

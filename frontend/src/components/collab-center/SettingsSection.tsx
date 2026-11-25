@@ -1,6 +1,5 @@
 import { Switch } from '@/components/ui/switch'
 import type { CollabSettings } from '@/types/collab-center'
-import { useStudio } from '@/store'
 import { cn } from '@/lib/utils'
 import { ErrorLine } from './shared'
 
@@ -21,17 +20,16 @@ export interface SettingsSectionProps {
 }
 
 const ITEMS: { key: keyof CollabSettings; label: string; hint: string }[] = [
-  { key: 'allow_download', label: '允许下载', hint: '关闭后 viewer 看不到 DOCX / PDF 下载入口' },
-  { key: 'allow_copy', label: '允许复制', hint: '关闭后 viewer 的编辑器禁用复制' },
-  { key: 'allow_comment', label: '允许评论', hint: '关闭后 viewer 不能添加批注' },
+  { key: 'allow_download', label: '允许下载', hint: '关闭后只读访客看不到 DOCX / PDF 下载入口' },
+  { key: 'allow_copy', label: '允许复制', hint: '关闭后只读访客的编辑器禁用复制' },
+  { key: 'allow_comment', label: '允许评论', hint: '关闭后只读访客不能添加批注' },
 ]
 
 export function SettingsSection({ settings, canManage, unavailable, loading = false, error = null, onRetry, onChange }: SettingsSectionProps) {
-  const paper = useStudio((s) => s.product === 'paper')
   return (
     <div className="flex flex-col divide-y divide-border px-3 text-sm" data-slot="SettingsSection" data-testid="collab-settings">
       {unavailable && (
-        <p className="py-3 text-xs text-fg-muted" data-testid="collab-settings-unavailable">{paper ? '协作设置尚未实现，以下为缺省值。' : '协作设置（B1-access-log）尚未实现，以下为缺省值。'}</p>
+        <p className="py-3 text-xs text-fg-muted" data-testid="collab-settings-unavailable">协作设置尚未实现，以下为缺省值。</p>
       )}
       {error && onRetry && <ErrorLine label="协作设置加载失败" error={error} onRetry={onRetry} testId="collab-settings-error" />}
       {ITEMS.map(({ key, label, hint }) => {

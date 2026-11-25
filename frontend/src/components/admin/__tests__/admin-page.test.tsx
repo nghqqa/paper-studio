@@ -157,18 +157,24 @@ function router(overrides: Record<string, (init?: RequestInit) => Response> = {}
 }
 
 describe('二级导航 #/admin?tab=', () => {
-  it('1440：左栏四项，默认成员；hash 切换到 org / audit / ai 渲染对应面板 + axe', async () => {
+  it('1440：左栏六项，默认成员；hash 切换到 org / audit / ai 渲染对应面板 + axe', async () => {
     router()
     await mount(<AdminPage />)
     expect(q('[data-testid="subnav-desktop"]')).not.toBeNull()
-    expect(qa('[data-testid^="admin-tab-"]').map((el) => el.dataset.testid)).toEqual(['admin-tab-members', 'admin-tab-org', 'admin-tab-audit', 'admin-tab-ai'])
+    expect(qa('[data-testid^="admin-tab-"]').map((el) => el.dataset.testid)).toEqual([
+      'admin-tab-members',
+      'admin-tab-org',
+      'admin-tab-audit',
+      'admin-tab-ai',
+      'admin-tab-templates',
+      'admin-tab-doctor',
+    ])
     expect(q('[data-testid="admin-tab-members"]')?.getAttribute('aria-current')).toBe('page')
     expect(q('[data-testid="admin-tab-org"]')?.getAttribute('href')).toBe('#/admin?tab=org')
     expect(q('[data-testid="member-table"], [data-testid="member-table-empty"]')).not.toBeNull()
     await goTab('#/admin?tab=org')
     await flush()
     expect(q('[data-testid="admin-org-panel"]')).not.toBeNull()
-    expect(q('[data-testid="admin-holidays"]')?.textContent).toContain('缺失')
     expect(await serious(host)).toEqual([])
     await goTab('#/admin?tab=audit')
     await flush()
@@ -219,13 +225,10 @@ describe('二级导航 #/admin?tab=', () => {
     expect(act_.className).toContain('h-md-control')
     expect(sup.parentElement?.className).toContain('[&>button]:flex-1')
     expect(sup.parentElement?.className).toContain('gap-group-m')
-    expect(q('[data-testid="admin-tags-card"]')?.className).toContain('gap-group-m')
-    expect(q('[data-testid="admin-templates-card"]')?.className).toContain('gap-group-m')
-    expect(q('[data-testid="admin-manage-tags"]')?.className).toContain('h-md-control')
     expect(await serious(host)).toEqual([])
   })
 
-  it('W8 1440：桌面不变——成员表 <table>、行内按钮 sm、卡片 gap-3', async () => {
+  it('W8 1440：桌面不变——成员表 <table>、行内按钮 sm、卡片 gap-10', async () => {
     const members = [
       { id: 'u1', email: 'me@x', display_name: '王代理', title: '代理师', avatar_color: '', is_superuser: true, is_active: true, last_login_at: null },
     ]
@@ -235,7 +238,6 @@ describe('二级导航 #/admin?tab=', () => {
     await flush()
     expect(q('table[data-testid="member-table"]')).not.toBeNull()
     expect(q('[data-testid="member-toggle-super"]')?.className).toContain('h-sm-control')
-    expect(q('[data-testid="admin-tags-card"]')?.className).toContain('gap-3')
     expect(q('[data-testid="admin-card"]')?.className).toContain('gap-10')
   })
 })
@@ -293,9 +295,8 @@ describe('R-ADM-02 审计', () => {
     expect(describeAudit(ev('share.created', { token: 'tok_secret', scope: 'comment', baseline: 'abc', expires_at: null }))).toBe('可批注 · 长期有效')
     expect(describeAudit(ev('share.revoked', { token: 'tok_secret' }))).toBe('')
     expect(describeAudit(ev('share.confirmed', { token: 'tok', name: '张客户', version: 2, sha: 'deadbeef', note: '同意' }))).toBe('确认人 张客户 · 第 2 版 · 同意')
-    expect(describeAudit(ev('export.downloaded', { fmt: 'bundle.zip' }))).toBe('递交包')
+    expect(describeAudit(ev('export.downloaded', { fmt: 'bundle.zip' }))).toBe('归档包')
     expect(describeAudit(ev('ai.sent', { job_id: 'j-1', scenario: '改写', calls: 2, chars: 1200, model: 'swe-2-max', usage: {}, truncated: true }))).toBe('改写 · swe-2-max · 1200 字 · 已截断')
-    expect(describeAudit(ev('deliver.filed', { application_no: '2026101234567', filed: '2026-09-01' }))).toBe('申请号 2026101234567 · 递交日 2026-09-01')
     expect(describeAudit(ev('admin.user', { user_id: 'u1', email: 'li@x.com', changes: { is_superuser: true, title: '代理师' } })))
       .toBe('li@x.com → 授予超管、头衔「代理师」')
     expect(describeAudit(ev('admin.user', { user_id: 'u1', email: 'li@x.com', changes: { is_active: false } })))
@@ -307,7 +308,7 @@ describe('R-ADM-02 审计', () => {
       ev('ai.sent', { job_id: 'j-1', scenario: 's' }),
     ]) expect(describeAudit(e)).not.toMatch(/tok_secret|b4c1|j-1|=/)
   })
-  it('审计表「案卷」列显示案名而非 pid；详情列为人话', async () => {
+  it('审计表「项目」列显示项目名而非 pid；历史遗留事件收敛为「历史操作记录」', async () => {
     router()
     useStudio.setState({ projects: [{ id: 'method', title: '一种时间序列预测方法', mtime: 0 }] })
     window.location.hash = '#/admin?tab=audit'
@@ -318,7 +319,7 @@ describe('R-ADM-02 审计', () => {
     expect(rows[0].textContent).toContain('一种时间序列预测方法')
     expect(rows[0].textContent).toContain('swe-2-max')
     expect(rows[0].textContent).not.toMatch(/model=|案卷 method/)
-    expect(rows[1].textContent).toContain('第 3 版')
+    expect(rows[1].textContent).toContain('历史操作记录')
     expect(q<HTMLAnchorElement>('[data-testid="audit-table"] tbody a')?.getAttribute('href')).toBe('#/p/method')
   })
   it('auditQueryFrom：空值不进查询；kind=全部 → undefined', () => {
@@ -418,7 +419,7 @@ describe('R-AI-01 / R-AI-09 机构 AI', () => {
     expect(put.body).toEqual({ ai_enabled: false })
     expect(useStudio.getState().orgSettings?.ai_enabled).toBe(false)
     expect(q('[data-testid="org-ai-enabled"]')?.getAttribute('aria-checked')).toBe('false')
-    expect(q('[data-testid="org-ai-disabled-alert"]')?.textContent).toContain('全机构')
+    expect(q('[data-testid="org-ai-disabled-alert"]')?.textContent).toContain('全团队')
     expect(await serious(host)).toEqual([])
   })
   it('日预算：非整数 / 负数报字段错误；合法 → PUT {ai_daily_tokens}', async () => {
@@ -489,23 +490,14 @@ describe('R-AI-01 / R-AI-09 机构 AI', () => {
   })
 })
 
-describe('机构面板', () => {
-  it('默认协作：允许 viewer 评论开关 → PUT {default_collab}；节假日「缺失」只读徽章；settings 501 → 协作区 EmptyState', async () => {
-    const calls = router()
+describe('团队设置面板', () => {
+  it('展示团队名称表单与论文协作说明；/api/admin/org 501 → unavailable 提示', async () => {
+    router()
     window.location.hash = '#/admin?tab=org'
     await mount(<AdminPage />)
     await flush()
     expect(q<HTMLInputElement>('[data-testid="org-name"]')?.value).toBe('甲乙丙知识产权')
-    const holidays = q('[data-testid="admin-holidays"]')!
-    expect(holidays.textContent).toContain('缺失')
-    expect(holidays.querySelector('input, button, [role="switch"]')).toBeNull()
-    const sw = q('[data-testid="collab-viewer-comment"]')!
-    expect(sw.getAttribute('aria-checked')).toBe('true')
-    await click(sw)
-    await click(q('[data-testid="collab-save"]'))
-    await flush()
-    const put = calls.find((c) => c.url === '/api/admin/settings' && c.method === 'PUT')!
-    expect(put.body).toEqual({ default_collab: { editor_mode: 'edit', allow_viewer_comment: false } })
+    expect(q('[data-testid="admin-org-panel"]')?.textContent).toContain('论文项目可分别邀请合作者')
     expect(await serious(host)).toEqual([])
 
     await act(async () => root?.unmount())
@@ -513,9 +505,9 @@ describe('机构面板', () => {
     useStudio.setState(initial, true)
     useStudio.setState({ authStatus: 'authed', user: me })
     vi.restoreAllMocks()
-    router({ '/api/admin/settings': () => notImplemented('org-settings') })
+    router({ '/api/admin/org': () => notImplemented('org') })
     await mount(<AdminPage />)
     await flush()
-    expect(q('[data-testid="admin-collab-unavailable"]')?.textContent).toContain('功能开发中')
+    expect(q('[data-testid="org-unavailable"]')?.textContent).toContain('501')
   })
 })

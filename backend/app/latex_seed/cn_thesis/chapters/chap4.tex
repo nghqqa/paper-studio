@@ -1,0 +1,27 @@
+\chapter{原型系统设计与实现}
+\label{chap:system}
+
+\section{系统需求分析}
+为验证所提框架在实际科研写作场景中的可用性，本文设计并实现了一套协同写作原型系统，涵盖用户管理、文档编辑、文献核验与格式导出等核心模块。
+
+\section{数据库设计}
+系统核心用户信息表的字段设计如表~\ref{tab:user}~所示。
+
+\begin{table}[htbp]
+  \centering
+  \caption{用户信息表字段设计}
+  \label{tab:user}
+  \begin{tabular}{llll}
+    \toprule
+    字段名 & 字段代码 & 字段类型 & 备注 \\
+    \midrule
+    用户 ID & user\_id & INT & 唯一主键（自增） \\
+    用户名 & username & VARCHAR & 登录名（唯一） \\
+    用户邮箱 & email & VARCHAR & 电子邮箱（唯一） \\
+    创建时间 & created\_at & DATETIME & 账号创建时间 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{本章小结}
+本章介绍了原型系统的功能模块与核心数据结构设计。

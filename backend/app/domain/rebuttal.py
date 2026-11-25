@@ -24,7 +24,6 @@ from pypdf.errors import PdfReadError
 
 from app import atomic
 from app.ai import client as ai_client
-from app.ai import prompts
 
 FILE = os.path.join(".studio", "rebuttal", "state.json")
 ROUNDS_DIR = os.path.join(".studio", "rebuttal", "rounds")
@@ -611,7 +610,7 @@ async def generate_draft(store, pid: str, ai, item_id: str, context: str | None 
     try:
         r = await ai.chat(_draft_messages(project.title, snap, context), "interactive", project_dir=d)
         try:
-            data = prompts.parse_json(r.text, _DRAFT_SCHEMA)
+            data = ai_client.parse_json(r.text, _DRAFT_SCHEMA)
             resp = str(data.get("response") or "").strip()
             summ = str(data.get("edits_summary") or "").strip()
             if not resp:

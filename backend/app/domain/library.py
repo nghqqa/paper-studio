@@ -288,26 +288,6 @@ def parse_bibtex_text(text: str, *, offset_line: int = 0) -> BibParseResult:
     return out
 
 
-def parse_bibtex_text(text: str, *, offset_line: int = 0) -> BibParseResult:
-    """整段 BibTeX 文本 → 逐块解析结果（坏块逐条报错，不吞整库）。@string 块前置共享给后续条目。"""
-    out = BibParseResult()
-    string_blocks: list[str] = []
-    for block, line_no, btype in split_bib_blocks(text):
-        if btype == "string":
-            string_blocks.append(block)
-            continue
-        if btype in ("comment", "preamble"):
-            continue
-        # 宏块前置：条目内 `conf # {NIPS}` 一类引用可解析
-        payload = ("\n".join(string_blocks) + "\n" + block) if string_blocks else block
-        entry, err = _block_to_entry(payload, line_no + offset_line, btype)
-        if err is not None:
-            out.errors.append(err)
-        elif entry is not None:
-            out.entries.append(entry)
-    return out
-
-
 # ---------------------------------------------------------- GB/T 7714 文本导入 ----
 # Google Scholar「引用 → GB/T 7714」等来源的纯文本引文，每非空行一条。启发式解析；
 # 解析预览逐条报错 + 用户确认后才写盘的既有流程兜底误判。
@@ -344,7 +324,7 @@ def _gbt_entry_from_line(line: str, line_no: int) -> tuple[LibraryEntry | None, 
     if not m:
         return None, BibParseError(
             line=line_no, raw=line[:400],
-            error="无法识别的 GB/T 7714 条目（应为「作者. 标题[J]. 期刊, 年, 卷(期): 页码.」形态，未找到 [J]/[C]/[M] 等类型标记）")
+            error="无法识别的 GB/T 7714 条目（应为「作者. 标题[J]. 期刊, 年, 卷(期): 页码.」形态，未找到类型标记）")
     authors_raw, title, marker, rest = m.group("authors"), m.group("title"), m.group("marker"), m.group("rest")
     authors = _gbt_authors(authors_raw)
     if not authors or not title.strip():
@@ -586,8 +566,8 @@ def _check_base(cur: str, base: str | None, rel: str) -> None:
 
 
 def _write_bib(project, rel: str, content: str) -> str:
-    from app.domain.latex_build import resolve_source_path, save_source_file
     from app.domain import latex_history
+    from app.domain.latex_build import resolve_source_path, save_source_file
 
     resolve_source_path(project, rel)  # 路径安全校验（穿越/内部目录）
     if not os.path.isfile(os.path.join(project.dir, *rel.split("/"))):
@@ -665,7 +645,9 @@ def apply_refresh_to_bib(project, rel: str, base: str | None,
         new = cur
         for old_raw, new_raw in replacements:
             if old_raw not in new:
-                raise kind_error("stale", "原始 BibTeX 片段在文件中已不存在（可能被直接编辑过），请刷新后重试", detail=rel)
+                raise kind_error(
+                    "stale", "原始 BibTeX 片段在文件中已不存在（可能被直接编辑过），请刷新后重试", detail=rel
+                )
             new = new.replace(old_raw, new_raw, 1)
         if additions:
             add = "\n\n".join(format_bibtex(e) for e in additions)
@@ -1048,34 +1030,6 @@ def apply_cite_renames(project, updates: list[dict]) -> list[dict]:
     for upd in updates:
         if str(upd.get("path", "")) not in done:
             results.append({"path": str(upd.get("path", "")), "ok": True, "replaced": 0})
-    return results
-
-
-def _apply_cite_renames_legacy_unused(project, updates: list[dict]) -> list[dict]:
-    r"""正文 \cite 键改名（合并/去重后）：updates = [{path, base, renames: {old: new}}]。
-    每文件先 base-sha 校验；只在引用命令花括号内做全词替换；返回每文件结果。"""
-    from app.domain.latex_build import list_source_files, read_source_file
-
-    tex_set = {f["path"] for f in list_source_files(project) if f["path"].lower().endswith(".tex")}
-    results = []
-    for upd in updates:
-        rel = str(upd.get("path", ""))
-        renames: dict[str, str] = {k: v for k, v in (upd.get("renames") or {}).items() if k != v}
-        if rel not in tex_set:
-            results.append({"path": rel, "ok": False, "error": "不是工程内 .tex 文件"})
-            continue
-        try:
-            cur = read_source_file(project, rel)
-        except Exception as e:  # noqa: BLE001
-            results.append({"path": rel, "ok": False, "error": str(e)})
-            continue
-        _check_base(cur, upd.get("base"), rel)
-        new_text, counts = _rename_keys_in_text(cur, renames)
-        if not counts:
-            results.append({"path": rel, "ok": True, "replaced": 0})
-            continue
-        sha = _write_bib(project, rel, new_text)  # 同一原子写路径（.tex 在白名单内）
-        results.append({"path": rel, "ok": True, "replaced": sum(counts.values()), "sha": sha})
     return results
 
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, FileDown, History, Loader2, RefreshCw, Save, Sparkles, Upload, Users, MessageSquareQuote, ShieldCheck } from 'lucide-react'
+import { BookOpen, FileDown, History, Loader2, RefreshCw, Save, Sparkles, Upload, Users, MessageSquareQuote, MessageSquareText, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ApiError } from '@/lib/api/net'
 import { wordApi, type WordCitationStyle, type WordRenumberResult, type WordState } from '@/lib/api/word'
@@ -40,7 +40,7 @@ function WordSession({ pid }: { pid: string }) {
   const [versionsOpen, setVersionsOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [renumberBusy, setRenumberBusy] = useState(false)
-  const [sidePanel, setSidePanel] = useState<'library' | 'proposals' | 'preflight' | 'rebuttal' | null>(null)
+  const [sidePanel, setSidePanel] = useState<'library' | 'proposals' | 'preflight' | 'rebuttal' | 'comments' | null>(null)
   const [docKey, setDocKey] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
 
@@ -278,6 +278,7 @@ function WordSession({ pid }: { pid: string }) {
         <Button variant={sidePanel === 'proposals' ? 'default' : 'outline'} size="sm" onClick={() => setSidePanel((v) => (v === 'proposals' ? null : 'proposals'))} aria-expanded={sidePanel === 'proposals'} data-testid="word-proposals-toggle"><Sparkles aria-hidden /> 论文助手</Button>
         <Button variant={sidePanel === 'preflight' ? 'default' : 'outline'} size="sm" disabled={phase !== 'ready' || busy} onClick={() => setSidePanel((v) => (v === 'preflight' ? null : 'preflight'))} aria-expanded={sidePanel === 'preflight'} data-testid="word-preflight-toggle"><ShieldCheck aria-hidden /> 投稿检查</Button>
         <Button variant={sidePanel === 'rebuttal' ? 'default' : 'outline'} size="sm" disabled={phase !== 'ready' || busy} onClick={() => setSidePanel((v) => (v === 'rebuttal' ? null : 'rebuttal'))} aria-expanded={sidePanel === 'rebuttal'} data-testid="word-rebuttal-toggle"><MessageSquareQuote aria-hidden /> 回复信</Button>
+        <Button variant={sidePanel === 'comments' ? 'default' : 'outline'} size="sm" disabled={phase !== 'ready' || busy} onClick={() => setSidePanel((v) => (v === 'comments' ? null : 'comments'))} aria-expanded={sidePanel === 'comments'} data-testid="word-comments-toggle"><MessageSquareText aria-hidden /> 批注</Button>
       </header>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border bg-panel px-3 py-1.5 text-xs text-fg-muted" role="status" aria-live="polite">
         <span>{busy ? '正在等待保存确认…' : hasChanges ? '有修改待确认保存' : state?.saving ? '文档服务正在回传文件…' : state ? `已保存版本 ${state.version}` : '正在读取文档…'}</span>

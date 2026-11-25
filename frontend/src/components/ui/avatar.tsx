@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { PEER_COLORS, labelText } from '@/collab/colors'
+import { PEER_COLORS, labelText } from '@/lib/colors'
 import { cn } from '@/lib/utils'
 
 /** Avatar 24 / 32 / 40；AvatarGroup ≤max（默认 5）+ 溢出计数。fallback 取 name 首字；底色为用户色盘时首字自动取可读前景 */

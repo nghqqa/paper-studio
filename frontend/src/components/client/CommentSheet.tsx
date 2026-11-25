@@ -31,7 +31,7 @@ export interface CommentSheetProps {
  * 375 从底部滑出（max-h 85dvh，控件 xl 44），1440 右侧抽屉（右栏已常驻线程列表，此处只留撰写区）。
  * 姓名空时禁用发送并聚焦姓名框。内容随 Sheet 挂载 / 卸载，每次打开从 props 重新初始化。
  */
-export function CommentSheet({ open, onOpenChange, ownerLabel = '代理师', ...rest }: CommentSheetProps) {
+export function CommentSheet({ open, onOpenChange, ownerLabel = '项目所有者', ...rest }: CommentSheetProps) {
   const desktop = useIsDesktop()
   // 草稿守卫（批67）：意见正文已输入时 Esc/外点隐式关先 DiscardDialog；发送成功与继续编辑直关
   const [dirty, setDirty] = useState(false)
@@ -121,7 +121,7 @@ function Composer({ desktop, onClose, onDirty, anchor, comments, guestName, onGu
             autoFocus={nameOk}
             maxLength={PUBLIC_COMMENT_BODY_MAX}
             value={body}
-            placeholder="例如：权利要求 1 中「弹性件」应改为「弹簧」"
+            placeholder="例如：第 3.2 节图 2 的符号与正文记号不一致"
             onChange={(e) => setBody(e.target.value)}
             data-testid="client-comment-input"
           />

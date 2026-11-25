@@ -24,8 +24,7 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app import atomic, auth, config, deadlines
-from app.collab import rooms as collab_rooms
+from app import atomic, auth, config
 from app.domain import cases, events, history
 from app.errors import error_detail
 from app.routes import project_or_404
@@ -88,9 +87,7 @@ async def put_case(request: Request, pid: str, body: cases.CasePatch, user: auth
         with atomic.studio_lock(p.dir, "case"):
             case = case_or_404(p.dir)
             case = cases.apply_patch(case, body)
-            if cases.DEADLINE_INPUT_FIELDS.intersection(fields):
-                case, _ = deadlines.recompute(case)
-            # 批80：_update 内含 git commit——offload 防阻塞事件循环
+            # git 提交 offload 防阻塞事件循环
             case = await asyncio.to_thread(_update, p.dir, case, fields, user)
     else:
         case = case_or_404(p.dir)
@@ -234,9 +231,6 @@ async def delete_project(request: Request, pid: str, user: auth.CurrentUser):
     _project(request, pid)
     if cases.get_state(cases.user_key(user), pid) != "trashed":
         raise _conflict("须先移入回收站再永久删除")
-    for (p, _book), room in list(collab_rooms.ROOMS.items()):
-        if p == pid:
-            await collab_rooms.drop(room)
     title = request.app.state.store.get(pid).title
     request.app.state.store.delete(pid)
     cases.forget_project(pid)

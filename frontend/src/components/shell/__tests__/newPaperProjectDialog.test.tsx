@@ -132,13 +132,18 @@ describe('NewPaperProjectDialog', () => {
     expect(wordApi.create).toHaveBeenCalledWith({ title: '未命名论文', template: 'jcip', venue: '中文信息学报', field: '', rank: 'CCF-A' })
   })
 
-  it('文档服务未配置时阻止 Word 创建，不伪装成功', async () => {
+  it('文档服务未配置时默认切换 LaTeX 可用，手动切回 Word 仍阻止创建，不伪装成功', async () => {
     const { wordApi } = await import('@/lib/api/word')
     useStudio.setState({ wordEditorReady: false })
     const h = await mount(<NewPaperProjectDialog open onOpenChange={() => {}} onZipImport={() => {}} />)
     // 断言对象=模式 Segmented 的选项（对话框描述文案里允许出现「结构化中文论文」字样）
     const modeButtons = [...(document.querySelector('[data-testid="np-mode"]')?.querySelectorAll('button') ?? [])]
     expect(modeButtons.some((b) => b.textContent?.includes('结构化'))).toBe(false)
+    await act(async () => { await vi.waitFor(() => expect(findButton(h, 'np-template-ieee')).not.toBeNull()) })
+    expect(findButton(h, 'np-create')!.disabled).toBe(false)
+    await act(async () => {
+      for (const b of modeButtons) if (b.textContent?.includes('Word')) b.click()
+    })
     expect(findButton(h, 'np-create')!.disabled).toBe(true)
     expect(findButton(h, 'np-word-unavailable')!.textContent).toContain('ONLYOFFICE')
     expect(wordApi.create).not.toHaveBeenCalled()

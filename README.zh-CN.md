@@ -44,9 +44,9 @@
 ## 核心能力
 
 ### 1. 双模写作：原生 LaTeX + 原生 Word
-- **LaTeX 工程工作台**：多文件 `.tex/.bib/.cls/.sty` 原样保留，CodeMirror 编辑 + 自动保存与编译（`pdfLaTeX` / `XeLaTeX`）+ 编译可中止 + 右侧实时 PDF 预览 + SyncTeX 双向定位 + `\cite`/`\ref` 补全 + 124 项 KaTeX 符号面板 + 跨文件搜索（`Ctrl+Shift+F`）+ 项目级 Git 历史快照 + GitHub/Gitea 推拉同步 + Word 双向导入导出。
+- **LaTeX 工程工作台**：多文件 `.tex/.bib/.cls/.sty` 原样保留，CodeMirror 编辑 + 自动保存与编译（`pdfLaTeX` / `XeLaTeX` / `LuaLaTeX` + `biber`）+ 编译可中止 + 右侧实时 PDF 预览 + 跨文件 `\input/\include` 大纲 + SyncTeX 双向定位 + `\cite`/`\ref` 补全 + 124 项 KaTeX 符号面板 + 跨文件搜索（`Ctrl+Shift+F`）+ 项目级 Git 历史快照 + GitHub/Gitea 推拉同步 + Word 双向导入导出（标准单栏 / 学位论文 / 中文信息学报双栏）。
 - **Word 原生工作台（可选 `--profile word`）**：基于独立容器部署的 ONLYOFFICE Docs 社区版，保留原生分页、表格、页眉、分栏、评论与修订，并内置四大插件：
-  - **LaTeX 公式插件**：通过 LaTeX 插入与再次编辑原生 OMML 公式；公式末尾输入 `#(n)` 回车生成居中公式+右对齐编号（纯制表位排版，不插表格），支持全文重编号与引用核对。
+  - **LaTeX 公式插件**：通过 LaTeX 插入与再次编辑原生 OMML 公式；公式末尾输入 `#(n)` 回车生成居中公式+右对齐编号（纯制表位排版，不插表格），支持继承光标字号、长公式编号另起一行与旧编号表格转换。
   - **文献与引文插件**：支持 GB/T 7714-2015、IEEE、Springer LNCS、ACM、Elsevier Vancouver 顺序编码样式，支持上标合并引用 `[1,2]`、按正文首现序一键重排与参考文献表重建。
   - **科研图表与方法图**：支持折线/柱状/散点/饼图数据图以及 **Excalidraw 方法图**（持久化 `.excalidraw` 场景真源 + 高清 PNG 导出），一键插入/原位更新 Word 正文或发布至 LaTeX `figures/`。
 
@@ -119,7 +119,7 @@ docker compose up -d
 我们坚持诚实披露当前工程边界：
 
 - **ONLYOFFICE 社区版限制**：以独立容器运行（AGPLv3），受上游社区版 **20 并发连接**上限约束；大团队可将 `PAPER_STUDIO_ONLYOFFICE_URL` 指向自采商业版 Document Server。
-- **Word 引用与公式编号**：受限于 ONLYOFFICE 社区版未开放原生 Word 引文域与 SEQ 域，目前采用平台托管文本/制表位机制，配合一键重排与完整性校验闭环。
+- **Word 引用与公式编号**：受限于 ONLYOFFICE 社区版未开放原生 Word 引文域与 SEQ 域，文献引用采用平台托管块配合一键按正文出现顺序重排与完整性校验闭环；公式编号采用制表位普通文本（支持长公式编号另起一行与旧编号表格转换，不含跨公式自动重编号）。
 - **桌面 Word / WPS 版式保真**：仓库不分发受版权限制的商业中文字体；可在服务器 `./fonts` 目录挂载已授权字体，并在正式投稿前使用桌面 Word / WPS 核对最终分页。
 - **LaTeX 并发编辑**：采用基于 `base_sha` 的乐观并发冲突保护，暂不支持类似 Overleaf 的多人实时光标同编同一 `.tex` 文件。
 

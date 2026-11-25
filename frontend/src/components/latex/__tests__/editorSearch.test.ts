@@ -99,4 +99,39 @@ describe('ProjectContentIndex（工程内容索引）', () => {
     expect(index.isPartial).toBe(true)
     expect(index.searchAll('find')).toHaveLength(1)
   })
+
+  it('collectOutline：从主文件递归展开 \\include / \\input 并支持实时覆盖', async () => {
+    const { deps } = makeDeps([
+      {
+        path: 'main.tex',
+        size: 50,
+        editable: true,
+        content: '\\chapter*{摘要}\n\\include{chapters/chap1}\n% \\include{chapters/ignored}\n\\input{chapters/chap2.tex}\n',
+      },
+      {
+        path: 'chapters/chap1.tex',
+        size: 50,
+        editable: true,
+        content: '\\chapter{绪论}\n\\section{研究背景}\n',
+      },
+      {
+        path: 'chapters/chap2.tex',
+        size: 50,
+        editable: true,
+        content: '\\chapter{核心方法}\n\\subsection{模型设计}\n',
+      },
+    ])
+    const index = new ProjectContentIndex(deps)
+    await index.ensure()
+    const outline = index.collectOutline('main.tex', {
+      'chapters/chap2.tex': '\\chapter{核心方法（修订）}\n\\subsection{模型设计}\n',
+    })
+    expect(outline).toEqual([
+      { file: 'main.tex', line: 1, level: 0, title: '摘要' },
+      { file: 'chapters/chap1.tex', line: 1, level: 0, title: '绪论' },
+      { file: 'chapters/chap1.tex', line: 2, level: 1, title: '研究背景' },
+      { file: 'chapters/chap2.tex', line: 1, level: 0, title: '核心方法（修订）' },
+      { file: 'chapters/chap2.tex', line: 2, level: 2, title: '模型设计' },
+    ])
+  })
 })

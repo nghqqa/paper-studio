@@ -1,5 +1,0 @@
-export { FigureBookView, type FigureBookViewProps } from './FigureBookView'
-export { FigureCard, type FigureCardProps } from './FigureCard'
-export { FigureToolbar, type FigureToolbarProps } from './FigureToolbar'
-export { WidthHandle, type WidthHandleProps } from './WidthHandle'
-export { UploadDrop, type UploadDropProps } from './UploadDrop'

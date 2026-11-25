@@ -1,0 +1,40 @@
+\chapter{核心方法与实验分析}
+\label{chap:method}
+
+\section{问题形式化描述}
+我们将论文协同修订建模为带显式人工确认门控的状态迁移序列，目标损失函数如公式~\eqref{eq:loss}~所示：
+\begin{equation}
+  \mathcal{L}(\theta) = \sum_{i=1}^{N} \ell(f_\theta(x_i), y_i) + \lambda \|\theta\|_2^2
+  \label{eq:loss}
+\end{equation}
+
+\section{模型优化过程}
+参数迭代更新与收敛判定由多行独立编号公式~\eqref{eq:update}~与公式~\eqref{eq:stop}~给出：
+\begin{align}
+  \theta^{(t+1)} &= \theta^{(t)} - \eta \nabla_\theta \mathcal{L}(\theta^{(t)}) \label{eq:update} \\
+  \Delta_t &= \|\theta^{(t+1)} - \theta^{(t)}\|_2 < \varepsilon \label{eq:stop}
+\end{align}
+
+\section{实验设计与结果分析}
+\subsection{实验数据集与对比结果}
+表~\ref{tab:exp}~展示了不同方法在中文（CH）与英文（EN）基准数据集上的对比实验结果（标准多级表头三线表示例）。
+
+\begin{table}[htbp]
+  \centering
+  \caption{不同基线方法在基准数据集上的性能对比}
+  \label{tab:exp}
+  \begin{tabular}{lcccc}
+    \toprule
+    \multirow{2}{*}{\textbf{方法}} & \multicolumn{2}{c}{\textbf{CH 数据集}} & \multicolumn{2}{c}{\textbf{EN 数据集}} \\
+    \cmidrule(lr){2-3} \cmidrule(lr){4-5}
+    & Acc & $F_1$ & Acc & $F_1$ \\
+    \midrule
+    基线方法 A\cite{he2016deep} & 0.869 & 0.868 & 0.845 & 0.798 \\
+    基线方法 B\cite{devlin2019bert} & 0.907 & 0.913 & 0.881 & 0.820 \\
+    \textbf{本文方法（Ours）} & \textbf{0.951} & \textbf{0.942} & \textbf{0.917} & \textbf{0.910} \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\section{本章小结}
+本章提出了核心优化框架，并通过对比实验验证了方法的有效性与稳健性。

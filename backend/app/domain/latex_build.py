@@ -23,7 +23,6 @@ import shutil
 import subprocess
 import threading
 import time
-import uuid
 
 from app import config
 from app.domain import latex_history, task_runner

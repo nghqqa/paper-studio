@@ -15,7 +15,7 @@ export function CommentThreads({ comments, className, canComment = true }: { com
         icon={MessageSquareText}
         title="还没有意见"
         /* 只读链接（scope=read / allow_comment=false）不提示拖选批注——侧栏权限行已写明「仅阅读」 */
-        reason={canComment ? '拖选文字或点某一段即可针对具体位置提出。' : undefined}
+        reason={canComment ? '点击下方「有意见」即可针对当前页提出批注。' : undefined}
         className={className}
         data-testid="client-comments-empty"
       />

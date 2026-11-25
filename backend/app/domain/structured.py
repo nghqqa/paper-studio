@@ -205,7 +205,7 @@ def _esc_text(t: str) -> str:
 
 
 def _inline_refs(t: str) -> str:
-    """[[eq:id]] → \eqref{eq:id}；[[fig:id]] → 图~\ref{fig:id}；[[tab:id]] → 表~\ref{tab:id}。"""
+    """[[eq:id]] → \\eqref{eq:id}；[[fig:id]] → 图~\ref{fig:id}；[[tab:id]] → 表~\ref{tab:id}。"""
 
     def sub(m):
         kind, oid = m.group(1), m.group(2)

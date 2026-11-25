@@ -1,5 +1,4 @@
 export { CollabDrawer } from './CollabDrawer'
-export { ModeIndicator, type ModeIndicatorProps } from './ModeIndicator'
 export { MembersSection, type MembersSectionProps } from './MembersSection'
 export { InvitesRow, type InvitesRowProps } from './InvitesRow'
 export { LinksSection, type LinksSectionProps } from './LinksSection'

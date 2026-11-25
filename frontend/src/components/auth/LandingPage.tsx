@@ -93,6 +93,7 @@ export function LandingPage() {
             <a href="#features" className="text-sm text-fg-muted hover:text-fg transition-colors max-md:hidden">功能</a>
             <a href="#scenes" className="text-sm text-fg-muted hover:text-fg transition-colors max-md:hidden">场景</a>
             <a href="#faq" className="text-sm text-fg-muted hover:text-fg transition-colors max-md:hidden">FAQ</a>
+            <a href="#/changelog" className="text-sm text-fg-muted hover:text-fg transition-colors max-md:hidden" data-testid="landing-nav-changelog">更新日志</a>
             <a href="https://github.com/nghqqa/paper-studio" target="_blank" rel="noreferrer" className="text-sm text-fg-muted hover:text-fg transition-colors max-sm:hidden">GitHub</a>
             <LoginLink />
             <Button asChild size="sm">
@@ -296,6 +297,8 @@ export function LandingPage() {
             <a href="#features" className="hover:text-fg transition-colors">功能</a>
             <a href="#scenes" className="hover:text-fg transition-colors">场景</a>
             <a href="#faq" className="hover:text-fg transition-colors">FAQ</a>
+            <a href="#/manual" className="hover:text-fg transition-colors" data-testid="landing-manual">使用手册</a>
+            <a href="#/changelog" className="hover:text-fg transition-colors" data-testid="landing-changelog">更新日志</a>
             <a href="#/login" className="hover:text-fg transition-colors">登录</a>
           </span>
           <span className="flex items-center gap-4">

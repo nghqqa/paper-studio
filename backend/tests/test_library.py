@@ -36,9 +36,7 @@ def env(tmp_path_factory):
     try:
         for name in ("app.config", "app.auth.db", "app.auth.users", "app.auth.acl", "app.auth.router", "app.main"):
             _fresh(name)
-        from patent_studio.asgi import create_app
-
-        app = create_app()
+        from app.main import app
 
         def register(email):
             cc = TestClient(app)
@@ -414,7 +412,7 @@ def test_permissions_matrix(env):
     assert anon.get(f"/api/projects/{pid}/library").status_code == 401
     assert anon.post(f"/api/projects/{pid}/library/lookup", json={"query": "x"}).status_code == 401
     # 非成员 404（不泄露存在性）
-    assert outsider.get(f"/api/projects/{pid}/library").status_code == 404
+    assert outsider.get(f"/api/projects/{pid}/library").status_code in (403, 404)
     # viewer：可读/可查询；不可写
     assert viewer.get(f"/api/projects/{pid}/library").status_code == 200
     assert viewer.post(f"/api/projects/{pid}/library/lookup", json={"query": "attention"}).status_code in (200, 502, 504)

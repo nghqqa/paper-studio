@@ -1,9 +1,9 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { ProposalPanel } from '../ProposalPanel'
+import { ProposalPanel } from '@/components/paper/ProposalPanel'
 import type { PaperProposal } from '@/lib/api/paperProposals'
-import type { ApplyOutcome, AnchorLike } from '../proposalApply'
+import type { ApplyOutcome, AnchorLike } from '@/components/paper/proposalApply'
 
 // @vitest-environment jsdom
 

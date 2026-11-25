@@ -12,7 +12,6 @@
 unknown（绝不输出"全部通过"）；不设模板未明示的阈值类规则。
 """
 import io
-import json
 import re
 import zipfile
 

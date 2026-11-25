@@ -59,14 +59,28 @@ export interface DocxExportManifest {
   stale?: boolean
 }
 
-/** 通用 Word 导出（v0.6.7 导师阅读版；pandoc 默认样式 + 工程自带 .bib citeproc） */
+/** Word 导出模板：academic=标准学术单栏（默认）；thesis=学位论文（大论文）；jcip=中文信息学报双栏 */
+export type WordExportProfile = 'academic' | 'thesis' | 'jcip'
+
+/** LaTeX → Word 导出清单（原生学术单栏 / 中文信息学报双栏） */
 export interface WordExportManifest {
   export_id: string
   pid: string
   main: string
+  profile?: WordExportProfile
+  profile_display?: string
+  lang?: 'zh' | 'en'
+  eq_layout?: 'tab' | 'table'
   digest: Record<string, string>
   status: 'pass' | 'degraded' | 'blocked'
   degrades: string[]
+  numbering?: {
+    equations?: { label: string; n: number }[]
+    figures?: { id: string; n: number }[]
+    tables?: { id: string; n: number }[]
+    rewritten_refs?: number
+    warnings?: string[]
+  } | null
   tool: { pandoc: string; runtime: string; exit_code: number; duration_ms: number }
   artifacts: Record<string, string>
   stale?: boolean
@@ -187,11 +201,11 @@ export const latexApi = {
     }),
   docxExports: (pid: string) =>
     req<{ exports: DocxExportManifest[] }>(`/api/projects/${enc(pid)}/latex/docx-exports`),
-  /** 通用 Word 导出（v0.6.7 导师阅读版）：同步 pandoc；产物为转换语义而非排版结果，需人工核对 */
-  exportWord: (pid: string) =>
+  /** 原生体验 Word 导出：支持标准学术单栏（默认）与中文信息学报双栏 */
+  exportWord: (pid: string, opts?: { profile?: WordExportProfile; eq_layout?: 'tab' | 'table' }) =>
     req<WordExportManifest>(`/api/projects/${enc(pid)}/latex/export-word`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(opts ?? {}),
     }),
   wordExports: (pid: string) =>
     req<{ exports: WordExportManifest[] }>(`/api/projects/${enc(pid)}/latex/word-exports`),

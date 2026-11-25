@@ -38,7 +38,7 @@ const links: PublicShareLink[] = [
 
 beforeEach(() => {
   useStudio.getState().resetCollabCenter()
-  useStudio.setState({ pid: 'method', toasts: [], members: [], shareLinks: [], publicLinks: [], publicLinksUnavailable: false, user: me, project: null, collabReadonly: false, peers: [] })
+  useStudio.setState({ pid: 'method', toasts: [], members: [], shareLinks: [], publicLinks: [], publicLinksUnavailable: false, user: me, project: null })
   vi.spyOn(api, 'members').mockResolvedValue([owner])
   vi.spyOn(api, 'shareLinks').mockResolvedValue([])
   vi.spyOn(api, 'invites').mockResolvedValue([])
@@ -143,33 +143,13 @@ describe('PublicLinksSection（21 §4.5 / §7.2 行 12）', () => {
     expect(onRevoke).toHaveBeenCalledWith('pub-a')
   })
 
-  it('W9 domain-02：无未决修订 ⇒ 无警告 / 无基线选择且 onCreate 不带 baseline；有 N 条 ⇒ 警告含 N、缺省「我已定的正文」→ baseline:original，改选「含未决修订」→ final；final 链接卡有徽章', async () => {
+  it('纯 Paper 公开链接不展示未决修订警告或基线选择，默认按 confirm/7 天/禁下载提交', async () => {
     const onCreate = vi.fn().mockResolvedValue(null)
-    let el = await mount(<PublicLinksSection links={links} loading={false} unavailable={false} canManage onCreate={onCreate} onRevoke={noop} />)
+    const el = await mount(<PublicLinksSection links={links} loading={false} unavailable={false} canManage onCreate={onCreate} onRevoke={noop} />)
     expect(q('[data-testid="collab-public-link-pending"]', el)).toBeNull()
     expect(q('[data-testid="collab-public-link-baseline"]', el)).toBeNull()
-    expect(q('[data-testid="collab-public-link-baseline-pub-a"]', el)).toBeNull()
     await click(q('[data-testid="collab-public-link-create"]', el)!)
     expect(onCreate).toHaveBeenLastCalledWith({ scope: 'confirm', ttl_days: 7, allow_download: false })
-
-    await act(async () => root?.unmount())
-    host?.remove()
-    const finalLink: PublicShareLink = { ...links[0], token: 'pub-final', baseline: 'final' }
-    el = await mount(<PublicLinksSection links={[...links, finalLink]} loading={false} unavailable={false} canManage pendingRevisions={2} onCreate={onCreate} onRevoke={noop} />)
-    const warn = q('[data-testid="collab-public-link-pending"]', el)!
-    expect(warn.getAttribute('role')).toBe('status')
-    expect(q('[data-testid="collab-public-link-pending-count"]', el)!.textContent).toBe('2')
-    expect(warn.textContent).toContain('不会把待定建议当作定稿')
-    expect(q('[data-testid="collab-public-link-baseline"]', el)!.textContent).toContain('我已定的正文')
-    expect(q('[data-testid="collab-public-link-baseline-pub-final"]', el)!.textContent).toBe('含未决修订')
-    expect(q('[data-testid="collab-public-link-baseline-pub-a"]', el)).toBeNull()
-    await click(q('[data-testid="collab-public-link-create"]', el)!)
-    expect(onCreate).toHaveBeenLastCalledWith({ scope: 'confirm', ttl_days: 7, allow_download: false, baseline: 'original' })
-
-    await openSelect(q('[data-testid="collab-public-link-baseline"]', el)!)
-    await click(option('含未决修订（建议全部视为接受）'))
-    await click(q('[data-testid="collab-public-link-create"]', el)!)
-    expect(onCreate).toHaveBeenLastCalledWith({ scope: 'confirm', ttl_days: 7, allow_download: false, baseline: 'final' })
     expect(await violations(el)).toEqual([])
   })
 
@@ -180,7 +160,7 @@ describe('PublicLinksSection（21 §4.5 / §7.2 行 12）', () => {
     host.remove()
 
     el = await mount(<PublicLinksSection links={[]} loading={false} unavailable={false} canManage onCreate={async () => null} onRevoke={noop} />)
-    expect(q('[data-testid="collab-public-links-empty"]', el)!.textContent).toContain('尚无客户审阅链接')
+    expect(q('[data-testid="collab-public-links-empty"]', el)!.textContent).toContain('尚无公开审阅链接')
     await act(async () => root?.unmount())
     host.remove()
 
@@ -195,8 +175,8 @@ describe('PublicLinksSection（21 §4.5 / §7.2 行 12）', () => {
     expect(q('[data-testid="collab-public-link-form"]', el)).not.toBeNull()
   })
 
-  it('P1-4 paper=true：话术适配论文场景（标题/说明/审阅者可以/允许审阅者下载 PDF/空态），testid 与缺省 scope 契约不变', async () => {
-    const el = await mount(<PublicLinksSection paper links={[]} loading={false} unavailable={false} canManage onCreate={async () => null} onRevoke={noop} />)
+  it('P1-4：话术适配论文场景（标题/说明/审阅者可以/允许审阅者下载 PDF/空态），testid 与缺省 scope 契约不变', async () => {
+    const el = await mount(<PublicLinksSection links={[]} loading={false} unavailable={false} canManage onCreate={async () => null} onRevoke={noop} />)
     expect(el.textContent).toContain('公开审阅链接')
     expect(el.textContent).toContain('外部审阅者免登录打开 PDF，可批注、确认定稿；不显示源码，下载按此处设置。')
     expect(el.textContent).toContain('审阅者可以')
@@ -250,10 +230,9 @@ describe('CollabDrawer 集成', () => {
     expect(section.textContent).toContain('允许审阅者下载 PDF')
   })
 
-  it('P1-4 paper LaTeX 工程：正文 marks 残留也不出未决修订警告（pendingRevisions 恒 0）', async () => {
+  it('P1-4 paper LaTeX 工程：不出未决修订警告', async () => {
     useStudio.setState({
       product: 'paper',
-      marks: [{ id: 'm1', kind: 'ins', line: 1, from: 0, to: 1, a: '', b: 'x', final: 'x', original: '' }],
       project: { id: 'method', title: 'E2E 论文', settings: { source_format: 'latex', document_type: 'paper' } } as never,
     })
     useStudio.getState().openCollabCenter('links')

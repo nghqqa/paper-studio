@@ -58,8 +58,7 @@ const SHARE_SCOPE_LABEL: Record<string, string> = {
 const FMT_LABEL: Record<string, string> = {
   docx: 'Word',
   pdf: 'PDF',
-  xml: 'CNIPA XML',
-  'bundle.zip': '递交包',
+  'bundle.zip': '归档包',
 }
 
 /** 各事件 data → 一句人话（生产者字段见 backend/app/domain/org_audit.py 头注）；token / job_id / sha / user_id 等内部标识不展示 */
@@ -124,10 +123,6 @@ export function describeAudit(e: OrgAuditEvent): string {
       const bits = [str(d.scenario), str(d.model), str(d.chars) && `${str(d.chars)} 字`, d.truncated === true && '已截断']
       return bits.filter(Boolean).join(' · ')
     }
-    case 'deliver.filed': {
-      const bits = [str(d.application_no) && `申请号 ${str(d.application_no)}`, str(d.filed) && `递交日 ${str(d.filed)}`]
-      return bits.filter(Boolean).join(' · ')
-    }
     default:
       return ''
   }
@@ -149,10 +144,9 @@ export function auditQueryFrom(f: { actor: string; pid: string; from: string; to
  * 1440 DataTable；375 卡片列表。501 → EmptyState。
  */
 export function AuditPanel() {
-  const paper = useStudio((s) => s.product === 'paper')
-  const visibleKinds = KINDS.filter((k) => !paper || !/^(deadline\.|oa\.|deliver\.|case\.status|share\.confirmed)/.test(k))
-  const kindLabel = (kind: OrgAuditKind) => paper && !visibleKinds.includes(kind) ? '历史操作' : AUDIT_KIND_LABEL[kind] ?? kind
-  const details = (event: OrgAuditEvent) => paper && !visibleKinds.includes(event.kind) ? '历史操作记录' : describeAudit(event)
+  const visibleKinds = KINDS.filter((k) => !/^(deadline\.|oa\.|deliver\.|case\.status|share\.confirmed)/.test(k))
+  const kindLabel = (kind: OrgAuditKind) => (!visibleKinds.includes(kind) ? '历史操作' : AUDIT_KIND_LABEL[kind] ?? kind)
+  const details = (event: OrgAuditEvent) => (!visibleKinds.includes(event.kind) ? '历史操作记录' : describeAudit(event))
   const desktop = useIsDesktop()
   const projects = useStudio((s) => s.projects)
   const titleOf = (e: OrgAuditEvent): string => projects.find((p) => p.id === e.pid)?.title || str(e.data.title) || e.pid || ''
@@ -205,7 +199,7 @@ export function AuditPanel() {
       { id: 'data', header: '详情', enableSorting: false, cell: ({ row }) => <span className="block truncate text-xs text-fg-muted" title={details(row.original)}>{details(row.original) || '—'}</span> },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps -- titleOf 只依赖 projects
-    [projects, paper],
+    [projects],
   )
 
   if (unavailable) {

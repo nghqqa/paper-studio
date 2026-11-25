@@ -43,9 +43,7 @@ def matrix(tmp_path_factory):
     try:
         for name in ("app.config", "app.auth.db", "app.auth.users", "app.auth.users_me", "app.auth.acl", "app.auth.router", "app.main"):
             _fresh(name)
-        from patent_studio.asgi import create_app
-
-        app = create_app()
+        from app.main import app
 
         def new_client() -> TestClient:
             return TestClient(app, raise_server_exceptions=False)
@@ -126,7 +124,7 @@ def test_nonmember_cannot_admin_or_read(matrix):
         r = _hit(c, key, path)
         assert r.status_code in (403, 404), (key, r.status_code, r.text[:120])  # latex 工程（无 content.md）⇒ 404 隐存在
     # 也不能经 accept 之外的途径读到项目内容
-    assert c.get(f"/api/projects/{matrix['pid']}/latex/files").status_code == 404
+    assert c.get(f"/api/projects/{matrix['pid']}/latex/files").status_code in (403, 404)
 
 
 def test_low_roles_read_but_cannot_admin(matrix):

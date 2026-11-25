@@ -2,8 +2,8 @@
 """R6 账号地基（docs/plan/07 §3–4.1）。off 模式契约 + on 模式（monkeypatch env + tmp studio.db）。"""
 
 import importlib
+import json
 import os
-import shutil
 import sys
 import time
 from datetime import UTC, datetime, timedelta
@@ -25,7 +25,6 @@ def _reload_app():
     import app.auth
     import app.auth.router
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import projects as projects_mod
 
     importlib.reload(config)
@@ -35,19 +34,19 @@ def _reload_app():
     importlib.reload(app.auth)
     importlib.reload(app.auth.router)
     importlib.reload(projects_mod)
-    importlib.reload(build)
-    importlib.reload(xml_export)
     return importlib.reload(main)
 
 
 def _projects(tmp_path):
     projects = tmp_path / "projects"
     projects.mkdir()
-    shutil.copytree(
-        os.path.join(ROOT, "examples", "method"),
-        projects / "method",
-        ignore=shutil.ignore_patterns("*.docx", ".studio", "*.bak-*"),
+    d = projects / "method"
+    d.mkdir()
+    (d / "studio.json").write_text(
+        json.dumps({"document_type": "paper", "source_format": "latex", "title": "示例论文"}, ensure_ascii=False),
+        encoding="utf-8",
     )
+    (d / "main.tex").write_text("\\documentclass{article}\n\\begin{document}\nHello\n\\end{document}\n", encoding="utf-8")
     return projects
 
 
@@ -110,7 +109,7 @@ def test_off_auth_routes_are_501_with_error_shape(client):
 def test_off_global_dependency_adds_no_openapi_params(client):
     c, _ = client
     spec = c.get("/openapi.json").json()
-    params = spec["paths"]["/api/projects/{pid}/content"]["get"].get("parameters", [])
+    params = spec["paths"]["/api/projects/{pid}/settings"]["get"].get("parameters", [])
     assert [p["name"] for p in params] == ["pid"]
 
 
@@ -118,11 +117,10 @@ def test_roles():
     assert ROLE_RANK["owner"] > ROLE_RANK["agent"] > ROLE_RANK["editor"] > ROLE_RANK["viewer"]
     assert role_at_least("agent", "editor") and not role_at_least("viewer", "editor")
     assert not role_at_least(None, "viewer")
-    assert required_role("GET", "/api/projects/{pid}/content") == "viewer"
-    assert required_role("PUT", "/api/projects/{pid}/content") == "reviewer"  # W4-B：正文校验在 check_source_write
+    assert required_role("GET", "/api/projects/{pid}/settings") == "viewer"
     assert required_role("PUT", "/api/projects/{pid}/settings") == "editor"
     assert required_role("POST", "/api/projects/{pid}/comments") == "viewer"
-    assert required_role("POST", "/api/projects/{pid}/critic") == "viewer"  # reviewer 回读自己的修订标记
+    assert required_role("POST", "/api/projects/{pid}/latex/build") == "viewer"
     assert required_role("PUT", "/api/projects/{pid}/members") == "owner"
     assert required_role("GET", "/api/projects/{pid}/case") == "viewer"
     assert required_role("PUT", "/api/projects/{pid}/case") == "agent"
@@ -239,28 +237,20 @@ def test_on_acl_roles_and_members(on):
     ]
 
     # owner 读写 / 管成员；viewer 读可写不可；stranger 一律 403
-    assert owner.get("/api/projects/method/content").status_code == 200
-    assert owner.put("/api/projects/method/content", json={"content": "# 新标题\n\n## 摘要\n\nx"}).status_code == 200
+    assert owner.get("/api/projects/method/settings").status_code == 200
+    assert owner.put("/api/projects/method/settings", json={"title": "新标题"}).status_code == 200
     r = owner.put("/api/projects/method/members", json={"email": "viewer@example.com", "role": "viewer"})
     assert r.status_code == 200 and [m["role"] for m in r.json()] == ["owner", "viewer"]
-    assert viewer.get("/api/projects/method/content").status_code == 200
+    assert viewer.get("/api/projects/method/settings").status_code == 200
     assert viewer.get("/api/projects/method").json()["role"] == "viewer"
     assert owner.get("/api/projects/method").json()["role"] == "owner"
     assert su.get("/api/projects/method").json()["role"] == "owner"
-    r = viewer.put("/api/projects/method/content", json={"content": "# 改"})
-    assert r.status_code == 403 and r.json()["detail"]["detail"] == "reviewer"  # W4-B：源文档写入门槛 reviewer
-    # viewer 可预览：构建 / lint 只渲染不改源（不走 403），且源码不变
-    before = viewer.get("/api/projects/method/content").json()["content"]
-    assert viewer.post("/api/projects/method/lint", json={"content": "# x\n\n## 摘要\n\ny"}).status_code == 200
-    body = {"pdf": False, "content": "# x\n\n## 摘要\n\ny"}
-    assert viewer.post("/api/projects/method/build", json=body).status_code == 200
-    assert viewer.get("/api/projects/method/content").json()["content"] == before
-    assert viewer.put("/api/projects/method/docs/claims", json={"content": "1. 改"}).status_code == 403
-    assert viewer.post("/api/projects/method/blocks", json={}).status_code == 403
+    r = viewer.put("/api/projects/method/settings", json={"title": "改"})
+    assert r.status_code == 403 and r.json()["detail"]["detail"] == "editor"
     assert viewer.get("/api/projects/method/members").status_code == 403
     assert viewer.post("/api/projects/method/comments", json={"anchor": {}, "body": "x"}).status_code != 403
-    assert stranger.get("/api/projects/method/content").status_code == 403
-    assert stranger.post("/api/projects/method/build", json={"pdf": False}).status_code == 403
+    assert stranger.get("/api/projects/method/settings").status_code == 403
+    assert stranger.put("/api/projects/method/settings", json={"title": "x"}).status_code == 403
 
     # 未注册邮箱 ⇒ pending 邀请 201（W4-B D7）；非法角色 422；不能拿掉最后一个 owner（409）
     def put_member(email, role):
@@ -276,7 +266,7 @@ def test_on_acl_roles_and_members(on):
     viewer_id = viewer.get("/api/users/me").json()["id"]
     r = owner.delete(f"/api/projects/method/members/{viewer_id}")
     assert r.status_code == 200 and [m["role"] for m in r.json()] == ["owner"]
-    assert viewer.get("/api/projects/method/content").status_code == 403
+    assert viewer.get("/api/projects/method/settings").status_code == 403
     assert owner.delete(f"/api/projects/method/members/{viewer_id}").status_code == 404
 
 
@@ -316,11 +306,11 @@ def test_on_share_links_accept_and_expiry(on):
     assert forever["expires_at"] is None
     assert [x["token"] for x in su.get("/api/projects/method/share").json()] == [link["token"], forever["token"]]
 
-    assert guest.get("/api/projects/method/content").status_code == 403
+    assert guest.get("/api/projects/method/settings").status_code == 403
     assert guest.post("/api/share/nope/accept").status_code == 404
     r = guest.post(f"/api/share/{link['token']}/accept")
     assert r.status_code == 200 and r.json() == {"pid": "method", "role": "editor"}
-    assert guest.put("/api/projects/method/content", json={"content": "# by guest"}).status_code == 200
+    assert guest.put("/api/projects/method/settings", json={"title": "by guest"}).status_code == 200
     # 再领一个更低角色的链接：不降级
     r = guest.post(f"/api/share/{forever['token']}/accept")
     assert r.json() == {"pid": "method", "role": "editor"}
@@ -465,143 +455,6 @@ def test_on_create_user_cli(on, tmp_path, capsys):
     )
     c = _login(on, "admin@example.com", "pw-654321")
     assert c.get("/api/users/me").json()["display_name"] == "管理员"
-
-
-def test_import_requires_login_under_auth_on(on):
-    """R42-01：AUTH=on 下匿名 POST /projects/import/docx 此前能建案（漏 require_login）→ 现在 401。"""
-    main = on
-    c = TestClient(main.app)
-    files = {"file": ("x.docx", b"PK\x03\x04fake", "application/octet-stream")}
-    assert c.post("/api/projects/import/docx", files=files).status_code == 401
-    assert c.post("/api/import/docx/styles", files=files).status_code == 401
-
-
-def test_convert_requires_login_and_editor_under_auth_on(on):
-    """R44-01：/api/projects/convert 无 {pid} → 全局 ACL 不生效。匿名此前能建新案+对任意 pid 排队转换。"""
-    main = on
-    c = TestClient(main.app)
-    files = {"file": ("a.txt", b"some paper text here", "text/plain")}
-    data = {"questionnaire": "{}", "target": "new", "ai_ack": "true"}
-    assert c.post("/api/projects/convert", files=files, data=data).status_code == 401
-    assert c.post("/api/projects/convert", files=files, data={**data, "target": "method"}).status_code == 401
-
-    _register(c, "admin@x.cn")  # 第一个用户是 superuser
-    _register(c, "outsider@x.cn")
-    outsider = _login(main, "outsider@x.cn")
-    # 登录但非本案成员 → target=pid 应 403（editor 门槛）
-    r = outsider.post("/api/projects/convert", files=files, data={**data, "target": "method"})
-    assert r.status_code == 403 and r.json()["detail"]["kind"] == "forbidden"
-    # target=new 登录用户仍走 ai_ack 分支（不被 editor 门槛误伤）
-    r = outsider.post("/api/projects/convert", files=files, data={**data, "ai_ack": "false"})
-    assert r.status_code == 403 and r.json()["detail"]["kind"] == "ai_disabled"
-
-
-def test_templates_router_requires_login_under_auth_on(on):
-    """R44-02：/api/templates* CRUD 无任何门槛（无 {pid} → project_access 不生效）——匿名可读改删机构模板。"""
-    main = on
-    c = TestClient(main.app)
-    for m, url in (
-        ("get", "/api/templates"),
-        ("post", "/api/templates"),
-        ("put", "/api/templates/x"),
-        ("delete", "/api/templates/x"),
-    ):
-        body = {} if m in ("post", "put") else None
-        r = getattr(c, m)(url, json=body) if body is not None else getattr(c, m)(url)
-        assert r.status_code == 401, f"{m} {url} → {r.status_code}"
-
-
-def test_templates_write_requires_org_editor(on):
-    """R76-01：模板库是机构级共享资源——纯 viewer 登录者曾可经 UI 存/删全机构模板。
-    写路由（POST/PUT/DELETE）门槛 = 任一案 editor+ 或超管；读仍 require_login。"""
-    main = on
-    anon = TestClient(main.app)
-    _register(anon, "su@example.com")  # superuser
-    _register(anon, "ed@example.com")
-    _register(anon, "vw@example.com")
-    su, ed, vw = (_login(main, f"{n}@example.com") for n in ("su", "ed", "vw"))
-    # ed 在 method 拿 editor 角色；vw 只有 viewer
-    assert su.put("/api/projects/method/members", json={"email": "ed@example.com", "role": "editor"}).status_code == 200
-    assert su.put("/api/projects/method/members", json={"email": "vw@example.com", "role": "viewer"}).status_code == 200
-
-    tpl = {"name": "r76-tpl", "settings": {"style": {}}}
-    # viewer：读 200，写/删 403
-    assert vw.get("/api/templates").status_code == 200
-    assert vw.post("/api/templates", json=tpl).status_code == 403
-    assert vw.put("/api/templates/r76-tpl", json=tpl).status_code == 403
-    assert vw.delete("/api/templates/r76-tpl").status_code == 403
-    # editor（任一案）：可写可删
-    assert ed.post("/api/templates", json=tpl).status_code == 201
-    assert ed.delete("/api/templates/r76-tpl").status_code == 204
-    # 超管不在任何案也可写
-    assert su.post("/api/templates", json=tpl).status_code == 201
-
-
-def test_deadlines_items_carry_my_role(on):
-    """R77-01：聚合期限行补 my_role——viewer 行前端禁用完成/催办（写端点门槛 agent）。"""
-    main = on
-    anon = TestClient(main.app)
-    _register(anon, "su@example.com")
-    _register(anon, "vw@example.com")
-    su, vw = _login(main, "su@example.com"), _login(main, "vw@example.com")
-    assert su.put("/api/projects/method/members", json={"email": "vw@example.com", "role": "viewer"}).status_code == 200
-    assert (
-        su.put(
-            "/api/projects/method/case", json={"deadlines": [{"id": "d1", "kind": "oa_reply", "due": "2099-01-01"}]}
-        ).status_code
-        == 200
-    )
-    items = vw.get("/api/deadlines").json()["items"]
-    assert items and all(i["pid"] == "method" and i["my_role"] == "viewer" for i in items)
-    assert {i["my_role"] for i in su.get("/api/deadlines").json()["items"]} == {"owner"}
-
-
-def test_ai_jobs_acl_and_glob_guards(on):
-    """R45-01/02：/api/ai/jobs/{id} 三条端点此前无鉴权；job_id 通配符可枚举全站任务。"""
-    import json as _json
-    import time as _time
-
-    main = on
-    c = TestClient(main.app)
-    # 造一份落盘的 method 案任务（job_<12hex> 形态）
-    pid, jid = "method", "job_deadbeef0123"
-    jdir = os.path.join(os.environ["PATENT_PROJECTS_DIR"], pid, ".studio", "ai-jobs")
-    os.makedirs(jdir, exist_ok=True)
-    now = _time.time()
-    job = {
-        "id": jid,
-        "kind": "review",
-        "pid": pid,
-        "status": "done",
-        "progress": 1.0,
-        "message": "完成",
-        "result": {"comments": 3},
-        "error": None,
-        "created_at": now,
-        "updated_at": now,
-        "steps": [],
-        "queue_key": None,
-    }
-    with open(os.path.join(jdir, jid + ".json"), "w", encoding="utf-8") as f:
-        _json.dump(job, f)
-
-    # 匿名：读/取消/事件流全 401
-    assert c.get(f"/api/ai/jobs/{jid}").status_code == 401
-    assert c.post(f"/api/ai/jobs/{jid}/cancel").status_code == 401
-    assert c.get(f"/api/ai/jobs/{jid}/events").status_code == 401
-    # 通配符 id：不再命中 glob（404 而非泄露别人的任务）
-    assert c.get("/api/ai/jobs/%2A").status_code == 404
-    assert c.get("/api/ai/jobs/job_%3F%3F%3F%3F%3F%3F%3F%3F").status_code == 404
-
-    _register(c, "admin@x.cn")
-    _register(c, "outsider@x.cn")
-    outsider = _login(main, "outsider@x.cn")
-    admin = _login(main, "admin@x.cn")
-    # 非成员：读 403、取消 403；superuser 可读
-    assert outsider.get(f"/api/ai/jobs/{jid}").status_code == 403
-    assert outsider.post(f"/api/ai/jobs/{jid}/cancel").status_code == 403
-    r = admin.get(f"/api/ai/jobs/{jid}")
-    assert r.status_code == 200 and r.json()["result"]["comments"] == 3
 
 
 def test_on_comment_mutations_require_author_or_role(on):

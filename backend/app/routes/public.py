@@ -24,18 +24,26 @@ from pydantic import BaseModel, Field
 from app import config
 from app.auth import CurrentUser
 from app.domain import comments as comments_mod
-from app.domain import events, public_share
+from app.domain import events, org, public_share
 from app.errors import kind_error, not_implemented
-from app.routes.ast import _parse as parse_project_ast
 from app.routes.comments import load_reanchored
 from app.schemas import PublicAnchor, PublicShareLink, PublicShareLinkIn, PublicShareMeta
-from patent_studio.kernel import critic
-from patent_studio.kernel.style import merge_style
-from patent_studio.kernel.style_css import render_css
 
 UNIT = "share-confirm-backend"
-ORG_NAME = "知撰"
+ORG_NAME = "研稿"
 router = APIRouter(tags=["public"])
+
+
+def _org_name(project) -> str:
+    try:
+        configured = org.load_org().name.strip()
+    except Exception:  # noqa: BLE001 — org.json 异常不挡公开审阅
+        configured = ""
+    if configured:
+        return configured
+    if public_share.document_type_of(project) == "paper" or config.PRODUCT == "paper":
+        return "研稿"
+    return ORG_NAME
 
 
 class PublicLinkIn(PublicShareLinkIn):
@@ -73,7 +81,7 @@ class PublicConfirmIn(BaseModel):
 
 
 def _off():
-    return not_implemented("C1-auth", "公开链接需要开启账号（PATENT_STUDIO_AUTH=on）")
+    return not_implemented("C1-auth", "公开链接需要开启账号（PAPER_STUDIO_AUTH=on）")
 
 
 def _client(request: Request) -> tuple[str | None, str | None]:
@@ -131,9 +139,7 @@ async def public_meta(token: str, request: Request):
     g = await _grant(token, request)
     store = request.app.state.store
     project = store.get(g.pid)
-    # 未决修订只在 markdown 正文里：latex / word / 结构化不读 content.md（read_content 会 400）
-    content = store.read_content(g.pid) if public_share.source_format_of(project) == "markdown" else ""
-    return public_share.meta(project, g, ORG_NAME, content)
+    return public_share.meta(project, g, _org_name(project), "")
 
 
 @router.get("/api/public/{token}/pdf")
@@ -152,32 +158,6 @@ async def public_pdf(token: str, request: Request):
         "X-Watermark": "footer" if ok else "unavailable",
     }
     return Response(data, media_type="application/pdf", headers=headers)
-
-
-@router.get("/api/public/{token}/layout-ast")
-async def public_layout_ast(token: str, request: Request):
-    g = await _grant(token, request)
-    store = request.app.state.store
-    if public_share.source_format_of(store.get(g.pid)) != "markdown":
-        raise kind_error("validation", "当前文档模式仅支持 PDF 审阅")
-    content = critic.resolve(store.read_content(g.pid), g.baseline)
-    return parse_project_ast(store, g.pid, content, None)
-
-
-@router.get("/api/public/{token}/ast")
-async def public_ast(token: str, request: Request):
-    return await public_layout_ast(token, request)
-
-
-@router.get("/api/public/{token}/layout-css")
-async def public_layout_css(token: str, request: Request):
-    g = await _grant(token, request)
-    p = request.app.state.store.get(g.pid)
-    return Response(
-        render_css(merge_style(p.settings.get("style"))),
-        media_type="text/css; charset=utf-8",
-        headers={"Cache-Control": "no-cache"},
-    )
 
 
 @router.get("/api/public/{token}/comments")

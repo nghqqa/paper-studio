@@ -473,9 +473,7 @@ def collaborators_of(pid: str, members: list[dict], seen: dict[str, str]) -> lis
     online = 协同房间当前连着（collab.rooms.online_user_ids）；auth=off ⇒ []。"""
     if not config.AUTH_ON:
         return []
-    from app.collab import rooms
-
-    online = rooms.online_user_ids(pid)
+    online: set[str] = set()
     return [{**m, "online": m["user_id"] in online, "last_seen": seen.get(m["user_id"])} for m in members]
 
 

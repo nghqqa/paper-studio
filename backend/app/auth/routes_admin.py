@@ -16,11 +16,11 @@ W5 notify-audit-backend（docs/plan/21 §2 R-ADM-02 / R-ADM-03 / R-AI-01 机构�
 fastapi-users / SQLAlchemy 只在成员 / 审计路由内惰性 import（off 下不得把 app.auth.db 拉进来）。
 """
 
+import time
 import uuid
 
 import httpx
-
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -29,7 +29,7 @@ from app.auth import CurrentUser, login_required
 from app.domain import doctor, events, org, org_audit
 from app.domain.org import ORG_NAME_MAX, load_org, save_org
 from app.errors import error_detail, kind_error, not_implemented
-from app.schemas import AiProviderTestIn, OrgAuditResponse, OrgSettings, OrgSettingsPatch
+from app.schemas import AiProviderTestIn, AiUsageSummary, OrgAuditResponse, OrgSettings, OrgSettingsPatch
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 UNIT = "E2-account-admin"
@@ -213,7 +213,52 @@ async def put_settings(body: OrgSettingsPatch, user: CurrentUser) -> OrgSettings
     return org.apply_settings(body)
 
 
-# --------------------------------------------- per-user AI 配额（v0.6.7） ----
+# --------------------------------------------- per-user AI 配额 & 机构用量 ----
+
+
+def _today_usage_rows(project_dir: str) -> list[dict]:
+    from app.ai.client import read_usage
+
+    now_day = time.localtime()
+    today_key = (now_day.tm_year, now_day.tm_yday)
+    out = []
+    for r in read_usage(project_dir):
+        ts = r.get("ts")
+        if r.get("ok", True) and isinstance(ts, (int, float)):
+            d = time.localtime(float(ts))
+            if (d.tm_year, d.tm_yday) == today_key:
+                out.append(r)
+    return out
+
+
+@router.get("/ai-usage", response_model=AiUsageSummary)
+async def org_ai_usage(request: Request, user: CurrentUser):
+    """机构今日 AI 用量汇总（superuser / auth=off 可读）。"""
+    if config.AUTH_ON:
+        _require_superuser(user)
+    from app.ai.client import read_usage
+    from app.domain import ai_quota
+
+    store = request.app.state.store
+    by_project, by_model = [], {}
+    for pid in store.list_ids():
+        p = store.get(pid)
+        rows = _today_usage_rows(p.dir)
+        by_project.append(
+            {"pid": pid, "title": p.title, "today_tokens": sum(int(r.get("total_tokens") or 0) for r in rows)}
+        )
+        for r in read_usage(p.dir):
+            m = by_model.setdefault(r.get("model") or "?", {"model": r.get("model") or "?", "tokens": 0, "calls": 0})
+            m["tokens"] += int(r.get("total_tokens") or 0)
+            m["calls"] += 1
+    return {
+        "today_tokens": sum(x["today_tokens"] for x in by_project),
+        "budget": config.AI_DAILY_TOKENS,
+        "by_project": by_project,
+        "by_model": sorted(by_model.values(), key=lambda x: -x["tokens"]),
+        "user_quota": ai_quota.limit(),
+        "by_user": sorted(ai_quota.overview(), key=lambda x: -x["used"]),
+    }
 
 
 @router.post("/ai-usage/{uid}/reset")

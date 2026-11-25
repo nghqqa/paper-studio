@@ -137,18 +137,12 @@ export const authSlice: Slice<AuthSlice> = (set, get) => ({
 
   /* 会话边界：登出/会话过期时清账号级与机构级数据——同机换账号登录不得瞥见上一用户的通知/台账/机构/PAT/期限 */
   clearSession: () => {
-    get().resetNotify()
     get().resetAccount()
-    get().resetMcp()
-    get().resetTemplates()
-    get().resetDeadlines()
     get().resetOrg()
-    get().resetImporter()
     get().resetPublic()
-    get().clearDashFilters()
+    get().resetDashboard()
     queryClient.clear()
-    /* dash 筛选/范围/未决表单属账号域（筛选词与标签名是上一用户的）；dashView/排序等持久化查看偏好属设备域，不动 */
-    set({ tags: [], dashSelected: [], dashScope: 'all', caseFormPid: null, caseFormField: null, caseFormDraft: null, dashLoading: false })
+    set({ dashScope: 'all', dashLoading: false })
   },
 
   logout: async () => {

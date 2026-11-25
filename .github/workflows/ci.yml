@@ -29,27 +29,15 @@ jobs:
       - name: Typecheck
         working-directory: frontend
         run: pnpm exec tsc -b --force
+      - name: Lint
+        working-directory: frontend
+        run: pnpm lint
       - name: Build
         working-directory: frontend
         run: pnpm build
       - name: Unit tests (Paper Studio core suites)
         working-directory: frontend
-        run: |
-          pnpm exec vitest run \
-            src/components/auth/__tests__ \
-            src/components/admin/__tests__ \
-            src/components/account/__tests__ \
-            src/components/dashboard/__tests__ \
-            src/components/latex/__tests__ \
-            src/components/word/__tests__ \
-            src/components/figures/__tests__ \
-            src/components/rebuttal/__tests__ \
-            src/components/client/__tests__ \
-            src/components/collab-center/__tests__ \
-            src/components/shell/__tests__ \
-            src/lib/__tests__ \
-            src/types/__tests__ \
-            --maxWorkers=2 --testTimeout=30000
+        run: pnpm exec vitest run --reporter=dot --maxWorkers=2 --testTimeout=30000
 
   backend:
     name: Backend (core tests + plugin tests)
@@ -62,10 +50,11 @@ jobs:
       - name: Install Python dependencies
         working-directory: backend
         run: uv sync --frozen
+      - name: Ruff lint (Paper core)
+        working-directory: backend
+        run: uv run ruff check app
       - name: Run core paper tests
         working-directory: backend
-        env:
-          PYTHONPATH: src
         run: |
           uv run pytest \
             tests/test_paper_template_assets.py \
@@ -75,10 +64,31 @@ jobs:
             tests/test_csl_styles.py \
             tests/test_rebuttal.py \
             tests/test_paper_proposals.py \
+            tests/test_gbt7714.py \
+            tests/test_word_citations.py \
+            -q
+          uv run pytest \
+            tests/test_pandoc_runner.py \
+            tests/test_latex_word.py \
+            tests/test_latex_import_docx.py \
+            tests/test_latex_preflight.py \
+            tests/test_latex_files_panel.py \
+            tests/test_latex_history.py \
+            tests/test_library.py \
+            tests/test_library_cache.py \
+            tests/test_zotero.py \
+            tests/test_zotero_credentials.py \
+            tests/test_zotero_refresh.py \
+            tests/test_project_figures.py \
             -q
           uv run pytest tests/test_showcase_demo.py -q
           uv run pytest tests/test_citation_verify.py -q
           uv run pytest tests/test_admin_doctor.py -q
+          uv run pytest tests/test_public_share_paper.py -q
+          uv run pytest tests/test_latex_comments.py -q
+          uv run pytest tests/test_ai_polish.py -q
+          uv run pytest tests/test_ai_quota.py -q
+          uv run pytest tests/test_user_ai.py -q
       - name: Run ONLYOFFICE plugin tests
         run: |
           node --test backend/app/office_plugin/tests/*.test.cjs

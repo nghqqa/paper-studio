@@ -12,7 +12,6 @@ import { AccessSection } from '../AccessSection'
 import { CollabDrawer } from '../CollabDrawer'
 import { LinksSection } from '../LinksSection'
 import { MembersSection } from '../MembersSection'
-import { ModeIndicator } from '../ModeIndicator'
 import { SettingsSection } from '../SettingsSection'
 import { fmtExpiry, fmtSeen } from '../format'
 
@@ -72,7 +71,7 @@ const access: AccessReport = {
 beforeEach(() => {
   desktop = true
   useStudio.getState().resetCollabCenter()
-  useStudio.setState({ pid: 'method', toasts: [], members: [], membersLoading: false, shareLinks: [], shareLinksLoading: false, user: null, project: null, collabReadonly: false, peers: [] })
+  useStudio.setState({ pid: 'method', toasts: [], members: [], membersLoading: false, shareLinks: [], shareLinksLoading: false, user: null, project: null })
   vi.spyOn(api, 'members').mockResolvedValue(members)
   vi.spyOn(api, 'shareLinks').mockResolvedValue(links)
   vi.spyOn(api, 'publicLinks').mockResolvedValue([])
@@ -416,40 +415,6 @@ describe('B3 CollabDrawer 整合（store + fixture）', () => {
     vi.spyOn(api, 'setMemberRole').mockRejectedValueOnce(new ApiError(409, '至少保留一名所有者'))
     await useStudio.getState().setMemberRole('method', 'u-owner', 'editor')
     expect(useStudio.getState().toasts.map((t) => t.text)).toContain('至少保留一名所有者')
-  })
-})
-
-describe('B3 ModeIndicator（编辑 / 审阅 / 只读）', () => {
-  it('readonly 静态徽标；compact 只显示图标但保留 aria-label；可切时下拉含 编辑 / 审阅', async () => {
-    const onChange = vi.fn()
-    const el = await mount(
-      <>
-        <ModeIndicator mode="readonly" canSwitch={false} onChange={onChange} />
-        <ModeIndicator mode="review" canSwitch={false} onChange={onChange} compact />
-        <ModeIndicator mode="edit" canSwitch onChange={onChange} />
-      </>,
-    )
-    const [ro, compact, sw] = qa('[data-testid="mode-indicator"]', el)
-    expect(ro.textContent).toContain('只读')
-    expect(ro.getAttribute('data-mode')).toBe('readonly')
-    expect(compact.textContent).toBe('')
-    expect(compact.getAttribute('aria-label')).toBe('审阅模式')
-    // W7 ux-08：compact 视觉 40×40，after: 伪元素外扩 4px（包含块 = padding box 38 ⇒ 46）到 ≥44 热区；浏览器实测 -inset-0.5 只到 42
-    expect(compact.className).toMatch(/\bsize-10\b/)
-    expect(compact.className).toMatch(/\brelative\b/)
-    expect(compact.className).toMatch(/\bafter:absolute\b/)
-    expect(compact.className).toMatch(/\bafter:-inset-1\b/)
-    expect(compact.className).toMatch(/after:content-\['']/)
-    expect(sw.className).not.toMatch(/after:/)
-    await act(async () => sw.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })))
-    const items = qa('[role="menuitem"]')
-    expect(items.map((i) => i.dataset.testid)).toEqual(['mode-option-edit', 'mode-option-review'])
-    // 非模态（同全站其余 DropdownMenu）：开菜单不给页面其余内容加 aria-hidden，避免 axe aria-hidden-focus
-    expect(ro.closest('[aria-hidden="true"]')).toBeNull()
-    expect(document.querySelectorAll('[data-aria-hidden="true"]')).toHaveLength(0)
-    await click(q('[data-testid="mode-option-review"]')!)
-    expect(onChange).toHaveBeenCalledWith('review')
-    expect(await violations(el)).toEqual([])
   })
 })
 

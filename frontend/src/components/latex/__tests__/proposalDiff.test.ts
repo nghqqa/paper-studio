@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeDiff } from '../proposalDiff'
+import { computeDiff } from '@/components/paper/proposalDiff'
 
 function texts(parts: ReturnType<typeof computeDiff>) {
   return parts.map((p) => ({ t: p.type, s: p.text }))

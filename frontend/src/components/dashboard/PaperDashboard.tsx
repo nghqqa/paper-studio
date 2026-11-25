@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Columns3, Download, FileText, Filter, FolderOpen, Grid2X2, Image, Kanban, LayoutTemplate, List, Loader2, Pencil, Plus, Rows3, Search, Sparkles, Tag, Trash2, UserRound, Users, X } from 'lucide-react'
 import { UserMenu } from '@/components/auth/UserMenu'
 import { ScientificFigures } from '@/components/figures/ScientificFigures'
-import { CreateProjectDialog } from '@/components/shell/CreateProjectDialog'
+import { NewPaperProjectDialog } from '@/components/shell/NewPaperProjectDialog'
 import { Toasts } from '@/components/shell/Toasts'
 import { ImportDialog } from '@/components/latex/ImportDialog'
 import { Button } from '@/components/ui/button'
@@ -18,7 +18,7 @@ import { projectHash } from '@/lib/hash'
 import type { ProjectSummary } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useStudio, type DashScope } from '@/store'
-import { RowActions } from './CaseRow'
+import { RowActions } from './RowActions'
 import { PaperProjectInfo } from './PaperProjectInfo'
 import { deadlineDays, formatLabel, groupPaperRows, PAPER_STAGES, paperOwner, paperOwnerKey, paperStage, paperTags, sortPaperRows, stageLabel, type PaperGroup, type PaperSort } from './paperProjects'
 import './paper-dashboard.css'
@@ -31,11 +31,12 @@ const SCOPES: { id: DashScope; label: string; icon: typeof Grid2X2 }[] = [
 ]
 const COLUMNS = [
   { id: 'stage', label: '写作阶段' }, { id: 'owner', label: '负责人' }, { id: 'venue', label: '投稿目标' },
+  { id: 'field', label: '学科领域' }, { id: 'rank', label: '等级分区' },
   { id: 'deadline', label: '投稿截止' }, { id: 'tags', label: '标签' }, { id: 'modified', label: '最后修改' },
 ] as const
 type Column = typeof COLUMNS[number]['id']
 type Columns = Record<Column, boolean>
-const DEFAULT_COLUMNS: Columns = { stage: true, owner: true, venue: true, deadline: true, tags: false, modified: true }
+const DEFAULT_COLUMNS: Columns = { stage: true, owner: true, venue: true, field: false, rank: false, deadline: true, tags: false, modified: true }
 const PREFS_KEY = 'paper-project-view-v2'
 function readPreferences(): { compact: boolean; columns: Columns } {
   try {
@@ -66,7 +67,9 @@ export function PaperDashboard() {
   const load = useStudio((s) => s.loadDashboard)
   const authOff = useStudio((s) => s.authStatus === 'off')
   const user = useStudio((s) => s.user)
+  const dialog = useStudio((s) => s.dialog)
   const openDialog = useStudio((s) => s.openDialog)
+  const closeDialog = useStudio((s) => s.closeDialog)
   const scope = useStudio((s) => s.dashScope)
   const setScope = useStudio((s) => s.setDashScope)
   const setListState = useStudio((s) => s.setListState)
@@ -131,7 +134,7 @@ export function PaperDashboard() {
   }
   const rows = useMemo(() => sortPaperRows(base.filter((p) => {
     const q = query.trim().toLowerCase()
-    return (!q || [p.title, p.submission?.venue, p.submission?.field, ...paperTags(p)].some((x) => x?.toLowerCase().includes(q)))
+    return (!q || [p.title, p.submission?.venue, p.submission?.field, p.submission?.rank, ...paperTags(p)].some((x) => x?.toLowerCase().includes(q)))
       && (format === 'all' || p.source_format === format) && (stage === 'all' || paperStage(p) === stage)
       && (!tag || paperTags(p).includes(tag)) && (!owner || paperOwnerKey(p, authOff) === owner) && matchesQuick(p, quick)
   }), sort), [base, query, format, stage, tag, owner, quick, sort, authOff])
@@ -141,10 +144,18 @@ export function PaperDashboard() {
   const columns = COLUMNS.filter((c) => prefs.columns[c.id])
   function clearFilters() { setQuery(''); setFormat('all'); setStage('all'); setTag(''); setOwner(''); setQuick(''); setSelected([]) }
   function showScope(value: DashScope) { setScope(value); setArea('projects'); clearFilters() }
-  function showArea(value: Area) { setArea(value); if (value === 'venues') setScope('all'); clearFilters() }
+  function showArea(value: Area) { setArea(value); if (value === 'venues') { setScope('all'); setSort('deadline') } else if (value === 'projects') { setSort('recent') } clearFilters() }
   function toggleSelected(id: string) { setSelected((value) => value.includes(id) ? value.filter((v) => v !== id) : [...value, id]) }
   function exportRows() {
-    const value = (r: ProjectSummary, key: Column) => key === 'stage' ? stageLabel(paperStage(r)) : key === 'owner' ? paperOwner(r, authOff) : key === 'venue' ? r.submission?.venue : key === 'deadline' ? r.submission?.deadline : key === 'tags' ? paperTags(r).join('、') : new Date(r.mtime * 1000).toLocaleString('zh-CN')
+    const value = (r: ProjectSummary, key: Column) =>
+      key === 'stage' ? stageLabel(paperStage(r))
+      : key === 'owner' ? paperOwner(r, authOff)
+      : key === 'venue' ? r.submission?.venue
+      : key === 'field' ? r.submission?.field
+      : key === 'rank' ? r.submission?.rank
+      : key === 'deadline' ? r.submission?.deadline
+      : key === 'tags' ? paperTags(r).join('、')
+      : new Date(r.mtime * 1000).toLocaleString('zh-CN')
     const safe = (v: string | undefined) => v && /^[=+\-@\t\r]/.test(v) ? `'${v}` : v
     downloadCsv(`研稿-项目清单-${csvDateStamp()}`, toCsv(selectedRows.length ? selectedRows : rows, [
       { header: '论文名称', value: (r) => safe(r.title) }, { header: '文档类型', value: formatLabel },
@@ -194,10 +205,12 @@ export function PaperDashboard() {
         await downloadFile(wordApi.versionDownloadUrl(row.id, version.id), `${row.title || row.id}.docx`)
         useStudio.getState().toast(`已发起服务器已保存版本 ${saved.version} 的下载；其他窗口尚未保存的修改不在其中。`, 'info')
       }
-      else {
+      else if (row.source_format === 'latex') {
         const reply = await latexApi.builds(row.id)
         if (!reply.latest_ok_build_id) throw new Error('暂无已成功编译的 PDF，请先编译')
         await downloadFile(`/api/projects/${encodeURIComponent(row.id)}/latex/builds/${reply.latest_ok_build_id}/artifacts/out.pdf`, `${row.title || row.id}.pdf`)
+      } else {
+        useStudio.getState().toast('该格式请打开项目工作台进行导出或下载', 'info')
       }
     } catch (e) { useStudio.getState().toast(e instanceof Error ? e.message : String(e), 'error') }
   }
@@ -212,13 +225,15 @@ export function PaperDashboard() {
       {scope !== 'trash' && state === 'active' && <button disabled={!writable(row)} onClick={() => void setListState(row.id, 'trashed')} aria-label={`移到回收站 ${row.title}`} title="移到回收站"><Trash2 aria-hidden /></button>}
       {scope === 'archived' && <button disabled={!writable(row)} onClick={() => void setListState(row.id, 'trashed')} aria-label={`移入回收站 ${row.title}`} title="移入回收站"><Trash2 aria-hidden /></button>}
       {scope === 'trash' && <button disabled={busy} onClick={() => { if (confirm(`确认永久删除「${row.title || row.id}」？此操作不可恢复。`)) void deleteProject(row.id) }} aria-label={`永久删除 ${row.title}`} title="永久删除"><Trash2 aria-hidden /></button>}
-      <RowActions row={{ ...row, case: undefined }} canEdit={writable(row)} iconStates />
+      <RowActions row={row} canEdit={writable(row)} iconStates />
     </div>
   }
   function cell(row: ProjectSummary, id: Column) {
     if (id === 'stage') return <Stage row={row} />
     if (id === 'owner') { const ownerName = paperOwner(row, authOff); return <span className="paper-owner"><span className="paper-owner-avatar" aria-hidden>{ownerName === '—' ? '—' : ownerName.slice(0, 1)}</span>{ownerName}</span> }
     if (id === 'venue') return <span className="paper-venue" title={row.submission?.venue}>{row.submission?.venue || '—'}</span>
+    if (id === 'field') return <span className="paper-venue" title={row.submission?.field}>{row.submission?.field || '—'}</span>
+    if (id === 'rank') return <span className="paper-venue" title={row.submission?.rank}>{row.submission?.rank || '—'}</span>
     if (id === 'deadline') { const days = deadlineDays(row.submission?.deadline); return <span className="paper-date" data-urgent={days != null && days <= 7 && paperStage(row) !== 'accepted' || undefined}>{row.submission?.deadline || '—'}</span> }
     if (id === 'tags') return <span className="paper-tags">{paperTags(row).map((t) => <span key={t}>{t}</span>)}{!paperTags(row).length && '—'}</span>
     return <span className="paper-date" title={row.mtime ? fmtFull(row.mtime) : undefined}>{row.mtime ? fmtRelativeWords(row.mtime * 1000) : '—'}</span>
@@ -269,7 +284,7 @@ export function PaperDashboard() {
         </>}
       </main>
     </div>
-    <CreateProjectDialog onZipImport={() => setImportOpen(true)} /><ImportDialog open={importOpen} onOpenChange={setImportOpen} onCreated={(pid) => window.location.assign(`#${projectHash(pid)}`)} />
+    <NewPaperProjectDialog open={dialog === 'create'} onOpenChange={(o) => { if (!o) closeDialog() }} onZipImport={() => setImportOpen(true)} /><ImportDialog open={importOpen} onOpenChange={setImportOpen} onCreated={(pid) => window.location.assign(`#${projectHash(pid)}`)} />
     {editing && <PaperProjectInfo key={editing.id} row={editing} onClose={() => setEditing(null)} />}<Toasts />
   </div>
 }

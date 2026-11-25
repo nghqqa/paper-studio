@@ -3,7 +3,6 @@
 import importlib
 import json
 import os
-import shutil
 import sys
 
 import pytest
@@ -23,18 +22,12 @@ Minor Comment 2: There are several typos, e.g. "teh" on page 3.
 def client(tmp_path, monkeypatch):
     projects = tmp_path / "projects"
     projects.mkdir()
-    shutil.copytree(
-        os.path.join(ROOT, "examples", "method"),
-        projects / "method",
-        ignore=shutil.ignore_patterns("*.docx", ".studio", "*.bak-*"),
-    )
     monkeypatch.setenv("PATENT_PROJECTS_DIR", str(projects))
     monkeypatch.setenv("PATENT_STUDIO_AI_PROVIDER", "mock")
     from app import config, main
-    from app.domain import build, xml_export
     from app.domain import projects as projects_mod
 
-    for m in (config, projects_mod, build, xml_export, main):
+    for m in (config, projects_mod, main):
         importlib.reload(m)
     with TestClient(main.app) as c:
         r = c.post("/api/projects", json={"id": "pap1", "title": "示例论文", "document_type": "paper"})

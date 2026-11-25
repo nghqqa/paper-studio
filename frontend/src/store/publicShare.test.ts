@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, api } from '@/lib/api'
-import { SYNTH_AST } from '@/lib/__tests__/astFixture'
 import { useStudio } from '@/store'
 import type { Confirmation, PublicComment, PublicShareLink, PublicShareMeta } from '@/types/public-share'
 import { GUEST_NAME_KEY } from './publicShare'
@@ -57,7 +56,6 @@ beforeEach(() => {
   localStorage.clear()
   useStudio.getState().resetPublic()
   useStudio.setState({ publicLinks: [], publicLinksUnavailable: false, publicLinksError: null, toasts: [], guestName: '' })
-  vi.spyOn(api, 'publicLayoutCss').mockResolvedValue(':root{--ps-font:serif}')
 })
 afterEach(() => {
   useStudio.getState().resetPublic()
@@ -103,30 +101,23 @@ describe('publicShare · 链接管理（协作者中心）', () => {
 })
 
 describe('publicShare · 匿名审阅页', () => {
-  it('openPublic：meta → ast / comments / css 并行；默认视图 pdf', async () => {
+  it('openPublic：meta → comments 并行；pdf 审阅态就绪', async () => {
     vi.spyOn(api, 'publicMeta').mockResolvedValue(meta)
-    vi.spyOn(api, 'publicAst').mockResolvedValue(SYNTH_AST)
     vi.spyOn(api, 'publicComments').mockResolvedValue([comment])
     await useStudio.getState().openPublic('tok-pub-1')
     const s = useStudio.getState()
     expect(s.publicToken).toBe('tok-pub-1')
     expect(s.publicMeta).toEqual(meta)
-    expect(s.publicAst).toBe(SYNTH_AST)
     expect(s.publicComments).toEqual([comment])
-    expect(s.publicCss).toContain('--ps-font')
-    expect(s.publicView).toBe('pdf')
     expect(s.publicLoading).toBe(false)
     expect(s.publicExpired).toBe(false)
   })
 
-  it('scope=read 不拉 comments；layout-css 失败降级为 null 不报错', async () => {
+  it('scope=read 不拉 comments', async () => {
     vi.spyOn(api, 'publicMeta').mockResolvedValue({ ...meta, scope: 'read' })
-    vi.spyOn(api, 'publicAst').mockResolvedValue(SYNTH_AST)
     const comments = vi.spyOn(api, 'publicComments')
-    vi.spyOn(api, 'publicLayoutCss').mockRejectedValue(new ApiError(501, '无'))
     await useStudio.getState().openPublic('tok-pub-1')
     expect(comments).not.toHaveBeenCalled()
-    expect(useStudio.getState().publicCss).toBeNull()
     expect(useStudio.getState().publicError).toBeNull()
   })
 
@@ -165,7 +156,6 @@ describe('publicShare · 匿名审阅页', () => {
     expect(s.toasts).toHaveLength(0)
 
     vi.spyOn(api, 'publicMeta').mockResolvedValue(meta)
-    vi.spyOn(api, 'publicAst').mockResolvedValue(SYNTH_AST)
     vi.spyOn(api, 'publicComments').mockResolvedValue([])
     await useStudio.getState().openPublic('tok-ok')
     expect(useStudio.getState().publicInvalid).toBe(false)
@@ -181,7 +171,6 @@ describe('publicShare · 匿名审阅页', () => {
 
   it('W7 qa-10：同 token 并发 openPublic（StrictMode 双效应 / open→reset→open）只发一次 meta；404 也只出现一次', async () => {
     const metaSpy = vi.spyOn(api, 'publicMeta').mockResolvedValue(meta)
-    vi.spyOn(api, 'publicAst').mockResolvedValue(SYNTH_AST)
     vi.spyOn(api, 'publicComments').mockResolvedValue([])
     const st = useStudio.getState()
     const p1 = st.openPublic('tok-1')
@@ -216,7 +205,6 @@ describe('publicShare · 匿名审阅页', () => {
 
   it('setGuestName 写 localStorage；addPublicComment 带 guest_name 并追加；confirmPublic 写回 meta.confirmation', async () => {
     vi.spyOn(api, 'publicMeta').mockResolvedValue(meta)
-    vi.spyOn(api, 'publicAst').mockResolvedValue(SYNTH_AST)
     vi.spyOn(api, 'publicComments').mockResolvedValue([])
     await useStudio.getState().openPublic('tok-pub-1')
 
@@ -240,13 +228,11 @@ describe('publicShare · 匿名审阅页', () => {
   })
 
   it('resetPublic 清空审阅态但保留 guestName', () => {
-    useStudio.setState({ publicToken: 't', publicMeta: meta, publicAst: SYNTH_AST, publicView: 'layout', guestName: '张客户' })
+    useStudio.setState({ publicToken: 't', publicMeta: meta, guestName: '张客户' })
     useStudio.getState().resetPublic()
     const s = useStudio.getState()
     expect(s.publicToken).toBeNull()
     expect(s.publicMeta).toBeNull()
-    expect(s.publicAst).toBeNull()
-    expect(s.publicView).toBe('pdf')
     expect(s.guestName).toBe('张客户')
   })
 })

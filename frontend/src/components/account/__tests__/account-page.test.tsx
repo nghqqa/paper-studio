@@ -3,10 +3,10 @@ import axe from 'axe-core'
 import { act, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Pat, PatCreated, User } from '@/lib/types'
+import type { User } from '@/lib/types'
 import { DESKTOP_QUERY, useStudio } from '@/store'
 import { AccountPage } from '../AccountPage'
-import { validatePassword, validatePatName, validateProfile } from '../formErrors'
+import { validatePassword, validateProfile } from '../formErrors'
 import { readHashTab } from '../SubNav'
 
 /**
@@ -24,10 +24,7 @@ let host: HTMLElement
 let desktop = true
 const initial = useStudio.getInitialState()
 
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 const me: User = { id: 'u1', email: 'me@x', display_name: '王代理', is_superuser: false, title: '代理师', avatar_color: '' }
-const pat: Pat = { id: 'p1', name: 'Codex 本机', prefix: 'ps_abc', created_at: '2026-09-05T08:00:00+00:00', last_used_at: null }
-const created: PatCreated = { ...pat, id: 'p2', name: '新令牌', prefix: 'ps_def', token: 'ps_def.SECRET' }
 
 beforeAll(() => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
@@ -72,27 +69,10 @@ async function serious(el: Element) {
 
 const q = <T extends Element = HTMLElement>(sel: string, scope: ParentNode = document) => scope.querySelector<T>(sel)
 const qa = (sel: string, scope: ParentNode = document) => Array.from(scope.querySelectorAll<HTMLElement>(sel))
-const click = async (el: Element | null) => {
-  expect(el, 'element to click').not.toBeNull()
-  await act(async () => (el as HTMLElement).click())
-}
-const type = async (input: HTMLInputElement, v: string) => {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
-  await act(async () => {
-    setter.call(input, v)
-    input.dispatchEvent(new Event('input', { bubbles: true }))
-  })
-}
-const submit = (sel: string) => act(async () => q<HTMLFormElement>(sel)!.requestSubmit())
 const goTab = (hash: string) =>
   act(async () => {
     window.location.hash = hash
     window.dispatchEvent(new HashChangeEvent('hashchange'))
-  })
-const flush = () =>
-  act(async () => {
-    await Promise.resolve()
-    await Promise.resolve()
   })
 
 describe('formErrors', () => {
@@ -102,26 +82,23 @@ describe('formErrors', () => {
     expect(validatePassword({ current: '', next: 'short', confirm: 'x' })).toMatchObject({ current: expect.any(String), next: expect.any(String), confirm: expect.any(String) })
     expect(validatePassword({ current: 'same-secret', next: 'same-secret', confirm: 'same-secret' })).toHaveProperty('next')
     expect(validatePassword({ current: 'old-secret', next: 'new-secret-1', confirm: 'new-secret-1' })).toEqual({})
-    expect(validatePatName('', [])).toHaveProperty('name')
-    expect(validatePatName('Codex 本机', [pat])).toHaveProperty('name')
-    expect(validatePatName('新令牌', [pat])).toEqual({})
   })
   it('readHashTab：?tab= 合法取之，否则回退', () => {
-    window.location.hash = '#/account?tab=pat'
-    expect(readHashTab(['profile', 'security', 'notify', 'pat'] as const, 'profile')).toBe('pat')
+    window.location.hash = '#/account?tab=ai'
+    expect(readHashTab(['profile', 'security', 'ai'] as const, 'profile')).toBe('ai')
     window.location.hash = '#/account?tab=bogus'
-    expect(readHashTab(['profile', 'security', 'notify', 'pat'] as const, 'profile')).toBe('profile')
+    expect(readHashTab(['profile', 'security', 'ai'] as const, 'profile')).toBe('profile')
     window.location.hash = '#/account'
-    expect(readHashTab(['profile', 'security', 'notify', 'pat'] as const, 'profile')).toBe('profile')
+    expect(readHashTab(['profile', 'security', 'ai'] as const, 'profile')).toBe('profile')
   })
 })
 
 describe('#/account 二级导航', () => {
-  it('1440：左栏 200（w-side-min）四项、aria-current；切到安全 → 改密表单；375 → Segmented + 单列表单 + axe', async () => {
+  it('1440：左栏 200（w-side-min）三项、aria-current；切到安全 → 改密表单；375 → Segmented + 单列表单 + axe', async () => {
     await mount(<AccountPage />)
     const nav = q('[data-testid="subnav-desktop"]')!
     expect(nav.className).toContain('w-side-min')
-    expect(qa('[data-testid^="account-tab-"]', nav).map((a) => a.textContent?.trim())).toEqual(['资料', '安全', '通知偏好', '集成 PAT'])
+    expect(qa('[data-testid^="account-tab-"]', nav).map((a) => a.textContent?.trim())).toEqual(['资料', '安全', 'AI 接入'])
     expect(q('[data-testid="account-tab-profile"]')?.getAttribute('aria-current')).toBe('page')
     expect(q('[data-testid="profile-form"]')?.className).toContain('max-w-form')
     await goTab('#/account?tab=security')
@@ -177,67 +154,5 @@ describe('#/account 二级导航', () => {
     expect(q('[data-testid="account-card"]')?.className).toContain('gap-10')
     const dots = qa('label', q('[data-testid="profile-colors"]')!).slice(1)
     expect(dots.every((l) => l.className.includes('size-md-control') && !l.className.includes('touch-hit'))).toBe(true)
-  })
-})
-
-describe('通知偏好（无契约 → 501 EmptyState）', () => {
-  it('渲染 EmptyState「功能开发中」，不发请求', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch')
-    window.location.hash = '#/account?tab=notify'
-    await mount(<AccountPage />)
-    const empty = q('[data-testid="notify-prefs-unavailable"]')
-    expect(empty?.getAttribute('data-slot')).toBe('empty-state')
-    expect(empty?.textContent).toContain('功能开发中')
-    expect(fetchSpy).not.toHaveBeenCalled()
-    expect(await serious(host)).toEqual([])
-  })
-})
-
-describe('集成 PAT', () => {
-  it('列表 → 新建（名字校验、令牌只显示一次）→ 撤销；501 → EmptyState', async () => {
-    const calls: { url: string; method: string }[] = []
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const url = new URL(String(input), 'http://x').pathname
-      const method = init?.method ?? 'GET'
-      calls.push({ url, method })
-      if (url === '/api/pat' && method === 'GET') return json([pat])
-      if (url === '/api/pat' && method === 'POST') return json(created)
-      if (url === '/api/pat/p1' && method === 'DELETE') return new Response(null, { status: 204 })
-      throw new Error(`unexpected fetch ${method} ${url}`)
-    })
-    window.location.hash = '#/account?tab=pat'
-    await mount(<AccountPage />)
-    await flush()
-    expect(qa('[data-testid="pat-row"]')).toHaveLength(1)
-    expect(q('[data-testid="pat-list"]')?.textContent).toContain('ps_abc')
-
-    await type(q<HTMLInputElement>('[data-testid="pat-name"]')!, 'Codex 本机')
-    await submit('[data-testid="pat-form"]')
-    expect(q('[data-testid="pat-name-error"]')).not.toBeNull()
-    expect(calls.some((c) => c.method === 'POST')).toBe(false)
-
-    await type(q<HTMLInputElement>('[data-testid="pat-name"]')!, '新令牌')
-    await submit('[data-testid="pat-form"]')
-    await flush()
-    expect(calls.some((c) => c.method === 'POST')).toBe(true)
-    expect(q('[data-testid="pat-token"]')?.textContent).toContain('ps_def.SECRET')
-    expect(qa('[data-testid="pat-row"]')).toHaveLength(2)
-    expect(await serious(host)).toEqual([])
-
-    await click(q('[data-testid="pat-revoke-p1"]'))
-    await click(q('[data-testid="pat-revoke-confirm-p1"]'))
-    await flush()
-    expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/pat/p1')).toBe(true)
-    expect(qa('[data-testid="pat-row"]')).toHaveLength(1)
-
-    await act(async () => root?.unmount())
-    root = null
-    vi.restoreAllMocks()
-    useStudio.setState(initial, true)
-    useStudio.setState({ authStatus: 'authed', user: me })
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(json({ kind: 'not_implemented', detail: 'pat' }, 501))
-    await mount(<AccountPage />)
-    await flush()
-    expect(q('[data-testid="pat-unavailable"]')?.textContent).toContain('功能开发中')
   })
 })

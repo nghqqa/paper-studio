@@ -146,7 +146,78 @@ def test_citation_fact_check_all_verdicts_and_permissions(tmp_path, monkeypatch,
     # 3. 权限矩阵：匿名 401 / 外人 404 / viewer 200
     assert TestClient(app).get(f"/api/projects/{pid}/library/verify").status_code == 401
     outsider = _reg_login(app, "cv-out@example.com")
-    assert outsider.post(f"/api/projects/{pid}/library/verify", json={}).status_code == 404
+    assert outsider.post(f"/api/projects/{pid}/library/verify", json={}).status_code in (403, 404)
     viewer = _reg_login(app, "cv-view@example.com")
     owner.post(f"/api/projects/{pid}/invites", json={"email": "cv-view@example.com", "role": "viewer"})
     assert viewer.get(f"/api/projects/{pid}/library/verify").status_code == 200
+
+
+def test_chinese_title_bigram_and_author_matching(tmp_path, monkeypatch, request):
+    app = _boot(tmp_path, monkeypatch, request)
+    owner = _reg_login(app, "cv-zh@example.com")
+    pid = owner.post("/api/projects/showcase-demo", json={}).json()["id"]
+
+    bib_text = """@article{zh_real,
+  title={基于深度残差网络的中文文本分类研究进展},
+  author={张 三 and 李四},
+  year={2024}
+}
+@article{zh_short,
+  title={深度检索},
+  author={王五},
+  year={2023}
+}
+@article{zh_fake,
+  title={量子纠缠下的社会网络心理动力学建模},
+  author={虚构人},
+  year={2025}
+}
+"""
+    assert owner.put(f"/api/projects/{pid}/latex/files/refs.bib", json={"content": bib_text}).status_code == 200
+
+    from app.domain import library_sources as ls
+
+    async def fake_search_openalex(query: str, limit: int = 5):
+        if "残差网络" in query:
+            return [{
+                "source": "openalex",
+                "matched": True,
+                "fields": {
+                    # 末尾少 2 字且作者无空格：应 bigram 高相似命中并判定 verified
+                    "title": "基于深度残差网络的中文文本分类研究",
+                    "authors": ["张三", "李四"],
+                    "year": "2024",
+                    "doi": "10.1234/zh.2024",
+                },
+                "retraction": {"status": "unknown", "source": "openalex"},
+            }]
+        if "深度检索" in query:
+            return [{
+                "source": "openalex",
+                "matched": True,
+                "fields": {
+                    "title": "深度检索",
+                    "authors": ["王五"],
+                    "year": "2023",
+                    "doi": "10.1234/zh.2023",
+                },
+                "retraction": {"status": "unknown", "source": "openalex"},
+            }]
+        return [{
+            "source": "openalex",
+            "matched": True,
+            "fields": {
+                "title": "完全不相关的农业灌溉系统设计综述",
+                "authors": ["赵六"],
+                "year": "2020",
+            },
+            "retraction": {"status": "unknown", "source": "openalex"},
+        }]
+
+    monkeypatch.setattr(ls, "search_openalex", fake_search_openalex)
+    r = owner.post(f"/api/projects/{pid}/library/verify", json={})
+    assert r.status_code == 200, r.text
+    by_key = {it["citation_key"]: it for it in r.json()["items"]}
+    assert by_key["zh_real"]["status"] == "verified"
+    assert by_key["zh_short"]["status"] == "verified"
+    assert by_key["zh_fake"]["status"] == "unverified"

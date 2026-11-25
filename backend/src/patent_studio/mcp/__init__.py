@@ -1,1 +1,0 @@
-"""Registry-backed MCP adapters."""

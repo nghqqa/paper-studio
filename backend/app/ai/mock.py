@@ -9,8 +9,7 @@ import asyncio
 import os
 from collections.abc import AsyncIterator
 
-from app.ai import prompts
-from app.ai.client import MODELS, Usage
+from app.ai.client import MODELS, Usage, kind_of
 
 FIXTURES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 CHUNK = 8
@@ -33,7 +32,7 @@ class MockProvider:
         self.calls: list[dict] = []
 
     def _text(self, messages: list[dict]) -> str:
-        kind = prompts.kind_of(messages)
+        kind = kind_of(messages)
         return self.responses.get(kind) or _fixture(kind)
 
     def _usage(self, messages: list[dict], text: str) -> Usage:
@@ -43,12 +42,12 @@ class MockProvider:
 
     async def complete(self, model, messages, *, timeout, max_tokens=None, temperature=0.0):
         text = self._text(messages)
-        self.calls.append({"model": model, "stream": False, "kind": prompts.kind_of(messages)})
+        self.calls.append({"model": model, "stream": False, "kind": kind_of(messages)})
         return text, self._usage(messages, text)
 
     async def stream(self, model, messages, *, timeout, max_tokens=None, temperature=0.0) -> AsyncIterator[str | Usage]:
         text = self._text(messages)
-        self.calls.append({"model": model, "stream": True, "kind": prompts.kind_of(messages)})
+        self.calls.append({"model": model, "stream": True, "kind": kind_of(messages)})
         for i in range(0, len(text), CHUNK):
             yield text[i : i + CHUNK]
             await asyncio.sleep(0)

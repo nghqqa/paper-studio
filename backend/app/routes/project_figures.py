@@ -20,7 +20,7 @@ import json
 import os
 import re
 import time
-from typing import Annotated, Literal, Union
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from PIL import Image
@@ -203,7 +203,7 @@ def _read_locked_png(pid: str, fid: str) -> tuple[dict, bytes]:
 
 
 @router.post("")
-async def create_figure(pid: str, body: Union[FigureCreate, DiagramCreate],
+async def create_figure(pid: str, body: FigureCreate | DiagramCreate,
                         request: Request, user: CurrentUser) -> dict:
     project_dir = _require_project(request, pid)
     fid = f"fig-{int(time.time())}-{os.urandom(3).hex()}"
