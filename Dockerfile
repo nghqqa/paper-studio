@@ -31,7 +31,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
         texlive-xetex texlive-luatex texlive-latex-recommended texlive-latex-extra \
         texlive-fonts-recommended texlive-lang-chinese texlive-bibtex-extra \
         texlive-science texlive-pictures biber lmodern \
-        latexmk pandoc git poppler-utils curl fontconfig \
+        latexdiff latexmk pandoc git poppler-utils curl fontconfig \
     && rm -rf /var/lib/apt/lists/*
 
 # Map common CJK font names (SimSun/SimHei/FangSong/KaiTi) to bundled open-source Fandol fonts

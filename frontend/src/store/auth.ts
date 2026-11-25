@@ -50,7 +50,7 @@ export interface AuthSlice {
   loadMe(): Promise<void>
   login(email: string, password: string): Promise<boolean>
   demoLogin(): Promise<boolean>
-  register(email: string, password: string, displayName?: string): Promise<boolean>
+  register(email: string, password: string, displayName?: string, inviteCode?: string): Promise<boolean>
   logout(): Promise<void>
   /** 会话中任何请求吃到 401 ⇒ 服务端会话已失效：翻回登录墙（仅 authed 态触发，登录页自身的 401 不管） */
   expireSession(): void
@@ -125,9 +125,9 @@ export const authSlice: Slice<AuthSlice> = (set, get) => ({
     }
   },
 
-  register: async (email, password, displayName = '') => {
+  register: async (email, password, displayName = '', inviteCode = '') => {
     try {
-      await api.register(email, password, displayName)
+      await api.register(email, password, displayName, inviteCode)
       return get().login(email, password)
     } catch (e) {
       set({ authError: msg(e) })

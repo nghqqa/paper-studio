@@ -1,11 +1,12 @@
-import type { RefObject } from 'react'
+import { useState, type RefObject } from 'react'
 import { openSearchPanel } from '@codemirror/search'
 import type { EditorState } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import katex from 'katex'
-import { Crosshair, Search, Sigma } from 'lucide-react'
+import { Crosshair, Search, Sigma, Table2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { SymbolPanel } from '../SymbolPanel'
+import { TableGeneratorDialog } from '../TableGeneratorDialog'
 import { CodeMirrorHost } from './CodeMirrorHost'
 
 export function LatexEditorPane({
@@ -49,6 +50,7 @@ export function LatexEditorPane({
   onInsertSymbol: (text: string) => void
   onLocateInPdf: () => void
 }) {
+  const [tableOpen, setTableOpen] = useState(false)
   return (
     <section aria-label="源码编辑" className="flex h-full min-h-0 min-w-0 flex-col" data-testid="latex-editor">
       <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-2 border-b border-line px-2 py-1 text-xs text-fg-muted">
@@ -112,6 +114,17 @@ export function LatexEditorPane({
         <button
           type="button"
           className="shrink-0 rounded px-1.5 py-0.5 text-xs text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-50"
+          disabled={!canEdit || !active}
+          title="CSV / Excel 转 LaTeX booktabs 三线表"
+          onClick={() => setTableOpen(true)}
+          data-testid="latex-table-gen-toggle"
+        >
+          <Table2 aria-hidden className="mr-0.5 inline size-3.5" />
+          三线表
+        </button>
+        <button
+          type="button"
+          className="shrink-0 rounded px-1.5 py-0.5 text-xs text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-50"
           disabled={!hasPreviewBuild || building || !active}
           title="在 PDF 中定位当前行（SyncTeX 正向）"
           onClick={onLocateInPdf}
@@ -121,6 +134,13 @@ export function LatexEditorPane({
           在 PDF 定位
         </button>
       </div>
+      {tableOpen && (
+        <TableGeneratorDialog
+          open={tableOpen}
+          onOpenChange={setTableOpen}
+          onInsert={onInsertSymbol}
+        />
+      )}
       {symbolsOpen && (
         <div className="shrink-0 border-b border-line bg-panel">
           <SymbolPanel onInsert={onInsertSymbol} onClose={onToggleSymbols} />

@@ -21,3 +21,14 @@ class UserRead(schemas.BaseUser[uuid.UUID]):
 
 class UserCreate(schemas.BaseUserCreate):
     display_name: str = ""
+    invite_code: str = Field(default="", max_length=128)
+
+    def create_update_dict(self):
+        d = super().create_update_dict()
+        d.pop("invite_code", None)
+        return d
+
+    def create_update_dict_superuser(self):
+        d = super().create_update_dict_superuser()
+        d.pop("invite_code", None)
+        return d

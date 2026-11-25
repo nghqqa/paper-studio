@@ -17,9 +17,13 @@ LaTeX 线黑名单（只排除平台内部区，跟踪文件面板可见的全�
 git 缺失 ⇒ 提交静默跳过（保存不受影响，与专利线同口径）；读操作抛 GitUnavailable。
 """
 
+import json
 import os
+import re
+import shutil
 import time
 
+from app import atomic
 from app.domain.history import (  # noqa: F401  (_SHA_RE 随 resolve 间接复用)
     DEFAULT_AUTHOR,
     WORK,
@@ -34,6 +38,8 @@ from app.domain.history import (  # noqa: F401  (_SHA_RE 随 resolve 间接复�
 )
 
 COALESCE_S = 90
+MILESTONES_FILE = os.path.join(".studio", "milestones.json")
+_MILESTONE_RE = re.compile(r"^[^\x00-\x1f/\\]{1,48}$")
 
 LATEX_EXCLUDE = (
     "# 研稿 LaTeX 工程：跟踪源可见全量（文件面板范围），仅排除平台内部区\n"
@@ -112,11 +118,86 @@ def head(project_dir: str) -> str | None:
     return r.stdout.strip() or None
 
 
+def list_milestones(project_dir: str) -> list[dict]:
+    """读取命名里程碑列表（新→旧）。"""
+    path = os.path.join(project_dir, MILESTONES_FILE)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    rows = [
+        {
+            "name": str(m.get("name") or ""),
+            "sha": str(m.get("sha") or ""),
+            "at": int(m.get("at") or 0),
+            "author": str(m.get("author") or DEFAULT_AUTHOR),
+        }
+        for m in raw
+        if isinstance(m, dict) and m.get("name") and m.get("sha")
+    ]
+    return sorted(rows, key=lambda m: m["at"], reverse=True)
+
+
+def create_milestone(project_dir: str, name: str, sha: str | None = None, author: str | None = None) -> dict:
+    """标记命名里程碑；未传 sha 时若工作区有未提交改动先快照再标记当前 HEAD。"""
+    clean_name = (name or "").strip()
+    if not _MILESTONE_RE.match(clean_name):
+        raise HistoryError("里程碑名称须为 1–48 个字符，且不能包含斜杠或换行", 422)
+    if _git_bin() is None:
+        raise GitUnavailable()
+    with repo_lock(project_dir):
+        _ensure_repo(project_dir)
+        rows = list_milestones(project_dir)
+        if any(m["name"] == clean_name for m in rows):
+            raise HistoryError(f"里程碑「{clean_name}」已存在", 409)
+        if sha:
+            target_sha = resolve(project_dir, sha)
+        else:
+            _run(project_dir, "add", "-A")
+            if _run(project_dir, "diff", "--cached", "--quiet", check=False).returncode != 0:
+                _run(project_dir, "commit", "-q", "-m", f"milestone {clean_name}", author=author)
+                _last_commit_at[os.path.realpath(project_dir)] = time.time()
+            target_sha = head(project_dir)
+            if target_sha is None:
+                raise HistoryError("当前工程暂无可标记的版本，请先保存或编译一次", 422)
+        entry = {
+            "name": clean_name,
+            "sha": target_sha,
+            "at": int(time.time()),
+            "author": (author or DEFAULT_AUTHOR).strip() or DEFAULT_AUTHOR,
+        }
+        rows = [entry, *rows][:50]
+        atomic.write_json(os.path.join(project_dir, MILESTONES_FILE), rows)
+        return entry
+
+
+def delete_milestone(project_dir: str, name: str) -> bool:
+    """删除指定名称的里程碑标签（不删 git 提交本身）。"""
+    clean_name = (name or "").strip()
+    if not clean_name:
+        return False
+    with repo_lock(project_dir):
+        rows = list_milestones(project_dir)
+        kept = [m for m in rows if m["name"] != clean_name]
+        if len(kept) == len(rows):
+            return False
+        atomic.write_json(os.path.join(project_dir, MILESTONES_FILE), kept)
+        return True
+
+
 def log(project_dir: str, limit: int = 200) -> list[dict]:
-    """[{sha, at, message, author, added, deleted, files}] 新→旧（上限 limit）。
+    """[{sha, at, message, author, added, deleted, files, milestones}] 新→旧（上限 limit）。
     行数统计跨全部文件求和（二进制文件的 numstat 为「-」，只计入 files 数）。"""
     if _git_bin() is None or head(project_dir) is None:
         return []
+    by_sha: dict[str, list[str]] = {}
+    for m in list_milestones(project_dir):
+        by_sha.setdefault(m["sha"], []).append(m["name"])
     out = _run(
         project_dir,
         "log",
@@ -147,6 +228,7 @@ def log(project_dir: str, limit: int = 200) -> list[dict]:
                 "added": added,
                 "deleted": deleted,
                 "files": files,
+                "milestones": by_sha.get(sha, []),
             }
         )
     return versions
@@ -157,6 +239,40 @@ def diff(project_dir: str, a: str, b: str = WORK) -> str:
     a = resolve(project_dir, a)
     refs = [a] if b == WORK else [a, resolve(project_dir, b)]
     return _run(project_dir, "diff", "--no-color", *refs).stdout
+
+
+def export_tree(project_dir: str, ref: str, dst_dir: str) -> None:
+    """将指定提交或当前工作区（ref='work'）的源可见文件完整导出到 dst_dir。"""
+    from app.domain.latex_build import LATEX_SOURCE_EXCLUDE_DIRS, _is_source_rel
+
+    os.makedirs(dst_dir, exist_ok=True)
+    dst_real = os.path.realpath(dst_dir)
+    if ref == WORK:
+        root = os.path.realpath(project_dir)
+        for base, dirs, files in os.walk(root):
+            rel_base = os.path.relpath(base, root).replace(os.sep, "/")
+            dirs[:] = [d for d in dirs if d not in LATEX_SOURCE_EXCLUDE_DIRS]
+            for fn in files:
+                rel = fn if rel_base == "." else f"{rel_base}/{fn}"
+                if not _is_source_rel(rel):
+                    continue
+                target = os.path.realpath(os.path.join(dst_real, *rel.split("/")))
+                if target != dst_real and not target.startswith(dst_real + os.sep):
+                    continue
+                os.makedirs(os.path.dirname(target), exist_ok=True)
+                shutil.copy2(os.path.join(base, fn), target)
+        return
+
+    full = resolve(project_dir, ref)
+    ls = _run(project_dir, "ls-tree", "-r", "--name-only", "-z", full).stdout
+    for rel in (p for p in ls.split("\0") if p):
+        target = os.path.realpath(os.path.join(dst_real, *rel.split("/")))
+        if target != dst_real and not target.startswith(dst_real + os.sep):
+            continue
+        data = _run(project_dir, "cat-file", "blob", f"{full}:{rel}", binary=True).stdout
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as f:
+            f.write(data)
 
 
 def restore(project_dir: str, sha: str, author: str | None = None) -> dict:

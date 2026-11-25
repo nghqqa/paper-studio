@@ -10,6 +10,7 @@ import hashlib
 import io
 import os
 from pathlib import Path
+from typing import Literal
 
 import matplotlib
 
@@ -27,6 +28,14 @@ CHART_TYPES = ("line", "bar", "scatter", "pie")
 MAX_CATEGORIES = 50
 MAX_SERIES = 6
 MAX_POINTS = 200
+PALETTES: dict[str, tuple[str, ...]] = {
+    "academic": ("#1f4e79", "#c0392b", "#1e8449", "#d68910", "#6c3483", "#566573"),
+    "colorblind": ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9"),
+    "grayscale": ("#111111", "#4d4d4d", "#7f7f7f", "#a6a6a6", "#595959", "#969696"),
+}
+PaletteName = Literal["default", "academic", "colorblind", "grayscale"]
+_GRAY_LINESTYLES = ("-", "--", "-.", ":")
+_GRAY_MARKERS = ("o", "s", "^", "D", "v", "P")
 
 
 def _cjk_font():
@@ -58,6 +67,8 @@ class ChartIn(BaseModel):
     y_label: str = Field(default="", max_length=80)
     categories: list[str] = Field(min_length=1, max_length=MAX_CATEGORIES)
     series: list[SeriesIn] = Field(min_length=1, max_length=MAX_SERIES)
+    palette: PaletteName = "default"
+    dpi: int = Field(default=140, ge=72, le=600)
 
     @field_validator("type")
     @classmethod
@@ -95,7 +106,8 @@ class ChartIn(BaseModel):
         return self
 
 
-def render_png(body: ChartIn) -> bytes:
+def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dpi: int | None = None) -> bytes:
+    """渲染科研数据图为 PNG（含高 DPI）或 TrueType 嵌入矢量 PDF / SVG。"""
     from matplotlib import font_manager
 
     font_path = _cjk_font()
@@ -104,30 +116,44 @@ def render_png(body: ChartIn) -> bytes:
         family = font_manager.FontProperties(fname=font_path).get_name()
         plt.rcParams["font.sans-serif"] = [family, "DejaVu Sans"]
     plt.rcParams["axes.unicode_minus"] = False
+    plt.rcParams["pdf.fonttype"] = 42
+    plt.rcParams["ps.fonttype"] = 42
 
-    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=140)
+    effective_dpi = dpi if dpi is not None else body.dpi
+    colors = PALETTES.get(body.palette)
+    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=effective_dpi)
     cats = body.categories
     xs = list(range(len(cats)))
     if body.type == "pie":
-        ax.pie(body.series[0].values, labels=cats, autopct="%1.1f%%", startangle=90)
+        pie_colors = list(colors[: len(cats)]) if colors else None
+        ax.pie(body.series[0].values, labels=cats, autopct="%1.1f%%", startangle=90, colors=pie_colors)
         ax.axis("equal")
     elif body.type == "bar":
         width = 0.8 / len(body.series)
         for i, s in enumerate(body.series):
-            ax.bar([x + i * width for x in xs], s.values, width=width, label=s.name)
+            color = colors[i % len(colors)] if colors else None
+            ax.bar([x + i * width for x in xs], s.values, width=width, label=s.name, color=color)
         ax.set_xticks([x + 0.4 - width / 2 for x in xs] if len(body.series) > 1 else xs)
         ax.set_xticklabels(cats)
     elif body.type == "scatter":
-        for s in body.series:
-            ax.scatter(xs, s.values, label=s.name)
+        for i, s in enumerate(body.series):
+            color = colors[i % len(colors)] if colors else None
+            marker = _GRAY_MARKERS[i % len(_GRAY_MARKERS)] if body.palette == "grayscale" else "o"
+            ax.scatter(xs, s.values, label=s.name, color=color, marker=marker)
         ax.set_xticks(xs)
         ax.set_xticklabels(cats)
     else:  # line
-        for s in body.series:
-            ax.plot(xs, s.values, marker="o", linewidth=1.6, label=s.name)
+        for i, s in enumerate(body.series):
+            color = colors[i % len(colors)] if colors else None
+            ls = _GRAY_LINESTYLES[i % len(_GRAY_LINESTYLES)] if body.palette == "grayscale" else "-"
+            marker = _GRAY_MARKERS[i % len(_GRAY_MARKERS)] if body.palette == "grayscale" else "o"
+            ax.plot(xs, s.values, marker=marker, linestyle=ls, linewidth=1.6, label=s.name, color=color)
         ax.set_xticks(xs)
         ax.set_xticklabels(cats)
 
+    if body.type != "pie":
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
     if body.title:
         ax.set_title(body.title)
     if body.x_label:
@@ -135,14 +161,18 @@ def render_png(body: ChartIn) -> bytes:
     if body.y_label:
         ax.set_ylabel(body.y_label)
     if body.type != "pie" and len(body.series) > 1:
-        ax.legend(fontsize=9)
+        ax.legend(fontsize=9, frameon=False)
     ax.grid(axis="y", linestyle="--", alpha=0.35)
 
     buf = io.BytesIO()
     fig.tight_layout()
-    fig.savefig(buf, format="png")
+    fig.savefig(buf, format=fmt, dpi=effective_dpi)
     plt.close(fig)
     return buf.getvalue()
+
+
+def render_png(body: ChartIn) -> bytes:
+    return render_chart(body, fmt="png", dpi=body.dpi)
 
 
 def _png_ihdr_size(png: bytes) -> tuple[int, int]:

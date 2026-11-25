@@ -21,6 +21,7 @@ import os
 import re
 import time
 from typing import Annotated, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Path, Query, Request, Response
 from PIL import Image
@@ -29,7 +30,7 @@ from pydantic import BaseModel, Field
 from app import atomic, auth, config
 from app.auth import CurrentUser
 from app.domain import cases, latex_files, latex_history, word_documents
-from app.routes.charts import ChartIn, render_png
+from app.routes.charts import ChartIn, render_chart, render_png
 
 # 独立前缀：/api/projects/{pid}/figures 已被旧版论文插图路由（routes/figures.py）占用，
 # 先注册先匹配会把本路由整个遮蔽（图表页拿到旧数据 shape → id/created_at 全丢）。
@@ -225,7 +226,7 @@ async def create_figure(pid: str, body: FigureCreate | DiagramCreate,
                 os.remove(png_path)
                 raise
         return {"figure": row}
-    # 数据图（chart）分支：行为与行字段保持 v0.3 原样。
+    # 数据图（chart）分支：行为与行字段保持 v0.3 原样（仅当显式选非 default 配色时追加 palette 键）。
     png = _render_png(body)
     row = {
         "id": fid, "name": body.name, "type": body.type,
@@ -234,6 +235,8 @@ async def create_figure(pid: str, body: FigureCreate | DiagramCreate,
         "series": [s.model_dump() for s in body.series],
         "created_at": time.time(), "bytes": len(png),
     }
+    if body.palette != "default":
+        row["palette"] = body.palette
     # PNG 与索引按同一项目串行发布，避免并发创建相互覆盖索引。
     with atomic.studio_lock(project_dir, "project-figures"):
         rows = _load_meta(pid)
@@ -268,6 +271,53 @@ async def figure_png(pid: str, fid: FigureId, request: Request, user: CurrentUse
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
     return Response(content=data, media_type="image/png",
                     headers={"ETag": etag, "Cache-Control": "no-cache"})
+
+
+_EXPORT_MIME = {
+    "png": "image/png",
+    "pdf": "application/pdf",
+    "svg": "image/svg+xml",
+}
+
+
+@router.get("/{fid}/export")
+async def export_figure(
+    pid: str,
+    fid: FigureId,
+    request: Request,
+    user: CurrentUser,
+    format: Literal["png", "pdf", "svg"] = "png",
+    dpi: int = Query(300, ge=72, le=600),
+):
+    """出版级科研图表导出：支持 300/600 DPI 高清 PNG 与嵌入字体的矢量 PDF/SVG。"""
+    _require_project(request, pid)
+    figure = next((row for row in _load_meta(pid) if row.get("id") == fid), None)
+    if figure is None:
+        raise HTTPException(404, "图表不存在")
+    safe_base = re.sub(r"[^a-zA-Z0-9._-]+", "_", figure.get("name") or fid).strip("_") or fid
+    disp = f"attachment; filename=\"{safe_base}.{format}\"; filename*=UTF-8''{quote(figure.get('name') or fid)}.{format}"
+    if figure.get("kind") == "diagram":
+        if format != "png":
+            raise HTTPException(422, "方法图请在画布编辑器内导出矢量文件")
+        png_path = os.path.join(_fig_dir(pid), fid + ".png")
+        if not os.path.isfile(png_path):
+            raise HTTPException(404, "图表文件不存在")
+        with open(png_path, "rb") as f:
+            data = f.read()
+        return Response(content=data, media_type="image/png", headers={"Content-Disposition": disp})
+
+    chart_in = ChartIn(
+        type=figure.get("type") or "line",
+        title=figure.get("title") or "",
+        x_label=figure.get("x_label") or "",
+        y_label=figure.get("y_label") or "",
+        categories=figure.get("categories") or [],
+        series=figure.get("series") or [],
+        palette=figure.get("palette") or "default",
+        dpi=dpi,
+    )
+    data = await asyncio.to_thread(render_chart, chart_in, fmt=format, dpi=dpi)
+    return Response(content=data, media_type=_EXPORT_MIME[format], headers={"Content-Disposition": disp})
 
 
 @router.delete("/{fid}")

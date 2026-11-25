@@ -6,21 +6,23 @@ main.py 若有 lifespan 也可直接 `await init_db()`。
 """
 
 import asyncio
+import hmac
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, Request, Response
-from fastapi_users import BaseUserManager, UUIDIDMixin
+from fastapi import Depends, HTTPException, Request, Response
+from fastapi_users import BaseUserManager, UUIDIDMixin, schemas
 from fastapi_users.db import SQLAlchemyUserDatabase
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app import config
-from app.auth.models import PUBLIC_LINK_ADDED_COLUMNS, USER_ADDED_COLUMNS, Base, User
-from app.domain import events
+from app.auth.models import PUBLIC_LINK_ADDED_COLUMNS, USER_ADDED_COLUMNS, Base, PendingInvite, User
+from app.domain import events, org
+from app.errors import error_detail
 
 # NullPool：TestClient 每个请求换事件循环、aiosqlite 连接不能跨循环复用；生产单循环下开文件极便宜
 engine = create_async_engine(f"sqlite+aiosqlite:///{config.DB_PATH}", poolclass=NullPool, connect_args={"timeout": 15})
@@ -67,6 +69,52 @@ async def get_user_db(session: Annotated[AsyncSession, Depends(get_async_session
 class UserManager(UUIDIDMixin, BaseUserManager[User, uuid.UUID]):
     reset_password_token_secret = config.AUTH_SECRET
     verification_token_secret = config.AUTH_SECRET
+
+    async def create(
+        self,
+        user_create: schemas.BaseUserCreate,
+        safe: bool = False,
+        request: Request | None = None,
+    ) -> User:
+        if request is not None:
+            policy = org.load_org().registration
+            if policy.mode == "closed":
+                raise HTTPException(
+                    403,
+                    error_detail("forbidden", "当前站点已关闭自助注册，请联系管理员开通账号", detail="registration_closed"),
+                )
+            email_norm = user_create.email.strip().lower()
+            has_pending = bool(
+                await self.user_db.session.scalar(
+                    select(PendingInvite.project_id).where(PendingInvite.email == email_norm).limit(1)
+                )
+            )
+            if policy.mode == "invite_only" and not has_pending:
+                if not policy.invite_code:
+                    raise HTTPException(
+                        403,
+                        error_detail(
+                            "forbidden",
+                            "当前站点仅限受邀成员注册，请联系管理员获取邀请",
+                            detail="registration_invite_required",
+                        ),
+                    )
+                provided = (getattr(user_create, "invite_code", "") or "").strip()
+                if not hmac.compare_digest(provided.encode("utf-8"), policy.invite_code.encode("utf-8")):
+                    raise HTTPException(
+                        403,
+                        error_detail("forbidden", "邀请码不正确", detail="registration_invite_invalid"),
+                    )
+            if policy.allowed_domains and not has_pending and not org.domain_allowed(email_norm, policy.allowed_domains):
+                raise HTTPException(
+                    403,
+                    error_detail(
+                        "forbidden",
+                        f"仅允许使用以下域名邮箱注册：{', '.join(policy.allowed_domains)}",
+                        detail="registration_domain_not_allowed",
+                    ),
+                )
+        return await super().create(user_create, safe=safe, request=request)
 
     async def on_after_register(self, user: User, request: Request | None = None) -> None:
         """第一个注册用户自动 superuser（07 §1 注册策略）。count→update 在锁内，防并发首注册双双超管。"""

@@ -56,9 +56,10 @@ describe('ChangelogPage（#/changelog）与官网入口', () => {
     expect(el.querySelector('[data-testid="changelog-page"]')).not.toBeNull()
     expect(document.title).toContain('更新日志')
     expect(el.textContent).toContain(LATEST_RELEASE_VERSION)
+    expect(el.querySelector('[data-testid="release-v1.2.0"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="release-v1.1.1"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="release-v1.1.0"]')).not.toBeNull()
-    expect(el.querySelector('nav[aria-label="版本目录"]')?.textContent).toContain('v1.1.1')
+    expect(el.querySelector('nav[aria-label="版本目录"]')?.textContent).toContain('v1.2.0')
     expect(await violations(el)).toEqual([])
   })
 
@@ -69,12 +70,14 @@ describe('ChangelogPage（#/changelog）与官网入口', () => {
 
     await act(async () => fixBtn.click())
     expect(fixBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(el.querySelector('[data-testid="release-v1.2.0"]')).toBeNull()
     expect(el.querySelector('[data-testid="release-v1.1.1"]')).toBeNull()
     expect(el.querySelector('[data-testid="release-v1.0.8-9"]')).toBeNull()
     expect(el.querySelector('[data-testid="release-v1.1.0"]')).not.toBeNull()
 
     await act(async () => allBtn.click())
     expect(allBtn.getAttribute('aria-pressed')).toBe('true')
+    expect(el.querySelector('[data-testid="release-v1.2.0"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="release-v1.1.1"]')).not.toBeNull()
     expect(el.querySelector('[data-testid="release-v1.0.8-9"]')).not.toBeNull()
   })

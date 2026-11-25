@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { UserMenu } from '@/components/auth/UserMenu'
+import { NotificationBell } from '@/components/shell/NotificationBell'
 import { Toasts } from '@/components/shell/Toasts'
 import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/ui/page-header'
@@ -104,6 +105,7 @@ export function PageChrome({
         </a>
         <div className="ml-auto flex items-center gap-1">
           {topbarActions}
+          {!anonymous && <NotificationBell />}
           {!anonymous && <UserMenu />}
         </div>
       </header>

@@ -22,6 +22,7 @@ from app.auth.routes_access import router as access_router
 from app.auth.routes_admin import router as admin_router
 from app.auth.users_me import router as users_me_router
 from app.domain import cases, events, org, org_audit, word_documents
+from app.domain import notifications as notifications_domain
 from app.domain.projects import ProjectError, ProjectStore
 from app.errors import error_detail
 from app.routes.ai import router as ai_router
@@ -30,9 +31,11 @@ from app.routes.charts import router as charts_router
 from app.routes.comments import router as comments_router
 from app.routes.latex import demo_router as latex_demo_router
 from app.routes.latex import router as latex_router
+from app.routes.latex_history import diff_router as latex_diff_router
 from app.routes.latex_history import router as latex_history_router
 from app.routes.latex_preflight import router as latex_preflight_router
 from app.routes.library import router as library_router
+from app.routes.notifications import router as notifications_router
 from app.routes.office_refs import router as office_refs_router
 from app.routes.paper_proposals import router as paper_proposals_router
 from app.routes.paper_templates import author_router as paper_templates_author_router
@@ -65,8 +68,9 @@ store = ProjectStore(config.PROJECTS_DIR)
 app.state.store = store
 app.state.ai = ai_client.from_env()
 
-# 事件订阅：机构审计 + 新建项目继承机构默认协作设置
+# 事件订阅：机构审计 + 站内通知 + 新建项目继承机构默认协作设置
 org_audit.install()
+notifications_domain.install()
 
 
 def _on_case_created(ev: events.Event) -> None:
@@ -82,6 +86,7 @@ app.include_router(access_router)
 app.include_router(invites_router)
 app.include_router(users_me_router)
 app.include_router(admin_router)
+app.include_router(notifications_router)
 # 批注 / 公开审阅 / 项目台账 / AI
 app.include_router(comments_router)
 app.include_router(ai_router)
@@ -90,6 +95,7 @@ app.include_router(public_router)
 # 论文主线（LaTeX / Word / 结构化迁移壳 / 文献 / 提案 / 审稿回复 / 图表 / 模板）
 app.include_router(latex_router)
 app.include_router(latex_history_router)
+app.include_router(latex_diff_router)
 app.include_router(latex_demo_router)
 app.include_router(latex_preflight_router)
 app.include_router(struct_writer_router)
@@ -311,6 +317,7 @@ async def meta():
         "word_editor": config.WORD_EDITOR_ON,
         "word_editor_ready": word_documents.ready(),
         "demo_mode": config.DEMO_MODE,
+        "registration": org.registration_public_info(),
         "contact": {
             "email": config.CONTACT_EMAIL,
             "wechat": config.CONTACT_WECHAT,

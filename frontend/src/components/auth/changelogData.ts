@@ -23,19 +23,35 @@ export const CHANGE_CATEGORY_META: Record<ChangeCategory, { label: string; tone:
   fix: { label: '问题修复', tone: 'ok' },
 }
 
-export const LATEST_RELEASE_VERSION = 'v1.1.1'
+export const LATEST_RELEASE_VERSION = 'v1.2.0'
 
 /**
  * 面向科研用户的版本演进记录（按发布时间倒序）。
  */
 export const CHANGELOG_RELEASES: ReleaseEntry[] = [
   {
+    id: 'v1.2.0',
+    version: 'v1.2.0',
+    date: '2026-11-25',
+    title: '科研写作效率套件、返修差异 PDF 与自托管治理升级',
+    summary: '围绕科研投稿全链路新增三线表生成、命名里程碑与 latexdiff 返修高亮 PDF、300/600 DPI 与矢量科研图表导出、arXiv 预印本一键升级，以及公网注册管控与站内通知铃铛。',
+    badge: '最新',
+    changes: [
+      { category: 'feature', text: '新增公网自托管注册管控（支持开放注册 / 邀请码 / 关闭注册与高校邮箱域名白名单，支持环境变量预设与平台后台实时调整）。' },
+      { category: 'feature', text: '工作空间顶栏上线轻量站内通知铃铛，实时提醒成员邀请、角色变更、批注 @ 提及与外部审阅确认定稿。' },
+      { category: 'feature', text: 'LaTeX 历史面板支持命名版本里程碑（如「初稿投稿」「一审返修」）与 latexdiff 返修高亮 PDF 一键生成（红删蓝增对比当前工作区）。' },
+      { category: 'feature', text: 'LaTeX 工具栏内置 CSV/TSV 三线表（booktabs）生成器，支持粘贴/上传数据及列最大/最小值自动加粗与下划线标注。' },
+      { category: 'feature', text: '科研图表升级投稿级导出，支持 300/600 DPI 高清 PNG、矢量 PDF/SVG、学术/色盲友好/灰度配色方案及 CSV/TSV 数据粘贴导入。' },
+      { category: 'feature', text: '文献库新增 arXiv 预印本「升级正式版」入口，自动检索正式发表 DOI 元数据并预览合并差异。' },
+      { category: 'improvement', text: '同步更新在线用户手册（#/manual）至 v1.2.0，补齐各项新功能操作说明。' },
+    ],
+  },
+  {
     id: 'v1.1.1',
     version: 'v1.1.1',
     date: '2026-11-25',
     title: '官网上线公开更新日志页面',
     summary: '官网新增公开可访问的更新日志页（#/changelog），支持按变更类型筛选与版本目录快速跳转，便于科研用户持续追踪功能迭代。',
-    badge: '最新',
     changes: [
       { category: 'feature', text: '新增公开更新日志页（#/changelog），匿名访客与已登录用户均可按时间倒序浏览版本演进与详情。' },
       { category: 'feature', text: '支持按「新功能 / 体验优化 / 问题修复」分类筛选条目，并提供版本目录快速定位锚点。' },

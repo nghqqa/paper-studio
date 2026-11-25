@@ -28,7 +28,16 @@ const me: User = { id: 'u1', email: 'a@b.c', display_name: '', is_superuser: fal
 
 beforeEach(() => {
   window.location.hash = ''
-  useStudio.setState({ pid: null, projects: [], authStatus: 'anon', user: null, authError: null, dialog: null, toasts: [] })
+  useStudio.setState({
+    pid: null,
+    projects: [],
+    authStatus: 'anon',
+    user: null,
+    authError: null,
+    dialog: null,
+    toasts: [],
+    registrationPolicy: { mode: 'open', inviteCodeRequired: false, allowedDomains: [] },
+  })
 })
 
 afterEach(async () => {
@@ -227,6 +236,33 @@ describe('LoginPage（07 §7.1）', () => {
     expect(q('form', el)).toBeNull()
     expect(q('[data-testid="login-switch"]', el)).not.toBeNull()
     expect(await violations(el)).toEqual([])
+  })
+
+  it('注册管控：closed 禁用注册；invite_only 展示邀请码并透传；allowedDomains 显示提示', async () => {
+    useStudio.setState({
+      registrationPolicy: { mode: 'closed', inviteCodeRequired: false, allowedDomains: [] },
+    })
+    let el = await mount(<LoginPage />)
+    await act(async () => q<HTMLButtonElement>('[data-testid="login-tab-register"]', el)!.click())
+    expect(q('[data-testid="login-registration-closed"]', el)).not.toBeNull()
+    expect(q<HTMLButtonElement>('[data-testid="login-submit"]', el)?.disabled).toBe(true)
+
+    await act(async () => root?.unmount())
+    host.remove()
+
+    const regMock = vi.fn(async () => true)
+    useStudio.setState({
+      registrationPolicy: { mode: 'invite_only', inviteCodeRequired: true, allowedDomains: ['edu.cn'] },
+      register: regMock,
+    })
+    el = await mount(<LoginPage />)
+    await act(async () => q<HTMLButtonElement>('[data-testid="login-tab-register"]', el)!.click())
+    expect(q('[data-testid="login-allowed-domains"]', el)?.textContent).toContain('edu.cn')
+    setValue(q<HTMLInputElement>('[data-testid="login-invite-code"]', el)!, 'LAB-2026')
+    setValue(q<HTMLInputElement>('[data-testid="login-email"]', el)!, 's@univ.edu.cn')
+    setValue(q<HTMLInputElement>('[data-testid="login-password"]', el)!, 'secret1234')
+    await submit(q<HTMLFormElement>('form', el)!)
+    expect(regMock).toHaveBeenCalledWith('s@univ.edu.cn', 'secret1234', '', 'LAB-2026')
   })
 })
 

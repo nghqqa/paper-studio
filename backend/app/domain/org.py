@@ -11,16 +11,44 @@ SMTP 不落文件：只从环境变量 PATENT_STUDIO_SMTP_URL 读出「是否配
 
 import json
 import os
+import re
 
 from pydantic import BaseModel, Field
 
 from app import atomic, config
 from app.domain import mail
 from app.errors import kind_error
-from app.schemas import DefaultCollab, OrgSettings, OrgSettingsPatch
+from app.schemas import DefaultCollab, OrgSettings, OrgSettingsPatch, RegistrationMode, RegistrationSettingsInfo
 
 ORG_FILE = os.path.join(".studio", "org.json")
 ORG_NAME_MAX = 64
+_DOMAIN_SEP_RE = re.compile(r"[,;\s]+")
+
+
+def normalize_domains(raw: list[str]) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        for part in _DOMAIN_SEP_RE.split(item or ""):
+            d = part.strip().lstrip("@.").lower()
+            if not d or d in seen:
+                continue
+            seen.add(d)
+            out.append(d)
+            if len(out) >= 50:
+                return out
+    return out
+
+
+def domain_allowed(email: str, allowed_domains: list[str]) -> bool:
+    if not allowed_domains:
+        return True
+    if "@" not in email:
+        return False
+    host = email.rsplit("@", 1)[1].strip().lower()
+    if not host:
+        return False
+    return any(host == d or host.endswith(f".{d}") for d in allowed_domains)
 
 
 class AiProvider(BaseModel):
@@ -40,6 +68,24 @@ class AiProvider(BaseModel):
                 "has_api_key": bool(key), "api_key_hint": hint}
 
 
+class RegistrationPolicy(BaseModel):
+    """注册访问控制策略（mode / 邀请码 / 邮箱域名白名单）；invite_code 存 org.json，不向非超管回传明文。"""
+
+    mode: RegistrationMode = Field(default=config.REGISTRATION_MODE)
+    invite_code: str = Field(default=config.REGISTRATION_INVITE_CODE, max_length=128)
+    allowed_domains: list[str] = Field(default_factory=lambda: list(config.REGISTRATION_ALLOWED_DOMAINS))
+
+    def masked(self) -> RegistrationSettingsInfo:
+        code = self.invite_code or ""
+        hint = ("•••" + code[-4:]) if len(code) >= 4 else ("•••" if code else "")
+        return RegistrationSettingsInfo(
+            mode=self.mode,
+            has_invite_code=bool(code),
+            invite_code_hint=hint,
+            allowed_domains=list(self.allowed_domains),
+        )
+
+
 class Org(BaseModel):
     name: str = Field(default="", max_length=ORG_NAME_MAX)
     ai_enabled: bool = True
@@ -48,6 +94,7 @@ class Org(BaseModel):
     # per-user 每日 token 上限（v0.6.7，护机构 key：多账号共用时按人封顶）；0=不限（缺省关）
     ai_user_daily_tokens: int = Field(default=0, ge=0)
     ai_provider: AiProvider | None = None
+    registration: RegistrationPolicy = Field(default_factory=RegistrationPolicy)
 
 
 def org_path(projects_dir: str | None = None) -> str:
@@ -79,13 +126,32 @@ def settings_out(org: Org) -> OrgSettings:
         ai_daily_tokens=org.ai_daily_tokens,
         ai_user_daily_tokens=org.ai_user_daily_tokens,
         ai_provider=org.ai_provider.masked() if org.ai_provider else None,
+        registration=org.registration.masked(),
     )
+
+
+def registration_public_info(projects_dir: str | None = None) -> dict:
+    policy = load_org(projects_dir).registration
+    return {
+        "mode": policy.mode,
+        "invite_code_required": policy.mode == "invite_only",
+        "allowed_domains": list(policy.allowed_domains),
+    }
 
 
 def apply_settings(patch: OrgSettingsPatch, projects_dir: str | None = None) -> OrgSettings:
     """只改给出的字段；patch.smtp 忽略（配置在环境变量里，接口只读）。"""
     org = load_org(projects_dir)
-    changes = patch.model_dump(exclude_none=True, exclude={"smtp"})
+    changes = patch.model_dump(exclude_none=True, exclude={"smtp", "registration"})
+    if patch.registration is not None:
+        reg_data = org.registration.model_dump()
+        if patch.registration.mode is not None:
+            reg_data["mode"] = patch.registration.mode
+        if patch.registration.invite_code is not None:
+            reg_data["invite_code"] = patch.registration.invite_code.strip()
+        if patch.registration.allowed_domains is not None:
+            reg_data["allowed_domains"] = normalize_domains(patch.registration.allowed_domains)
+        changes["registration"] = reg_data
     if changes:
         org = save_org(Org.model_validate({**org.model_dump(), **changes}), projects_dir)
     return settings_out(org)

@@ -234,3 +234,20 @@ it('shows copy failure for read-only users without exposing write actions', asyn
   expect(host.querySelector('[title="删除"]')).toBeNull()
   expect(host.querySelector('[data-testid="figures-new"]')).toBeNull()
 })
+
+it('supports CSV/TSV paste conversion to chart JSON and exposes 300/600 DPI & PDF/SVG export links', async () => {
+  vi.mocked(figuresApi.list).mockResolvedValue({ figures: [figure('f1', '消融实验')] })
+  await mount('latex-b')
+  expect(q<HTMLAnchorElement>('[data-testid="figure-export-300"]').getAttribute('href')).toContain('/export?format=png&dpi=300')
+  expect(q<HTMLAnchorElement>('[data-testid="figure-export-600"]').getAttribute('href')).toContain('/export?format=png&dpi=600')
+  expect(q<HTMLAnchorElement>('[data-testid="figure-export-pdf"]').getAttribute('href')).toContain('/export?format=pdf&dpi=300')
+  expect(q<HTMLAnchorElement>('[data-testid="figure-export-svg"]').getAttribute('href')).toContain('/export?format=svg&dpi=300')
+
+  await click(q('[data-testid="figures-new"]'))
+  await click(q('[data-testid="fig-csv-toggle"]'))
+  await input('[data-testid="fig-csv-input"]', 'Method\tAcc\nBaseline\t80.5%\nOurs\t91.2%')
+  await click(q('[data-testid="fig-csv-apply"]'))
+  const jsonVal = JSON.parse(q<HTMLTextAreaElement>('#fig-data').value)
+  expect(jsonVal.categories).toEqual(['Baseline', 'Ours'])
+  expect(jsonVal.series).toEqual([{ name: 'Acc', values: [80.5, 91.2] }])
+})

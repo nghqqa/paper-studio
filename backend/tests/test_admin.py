@@ -160,7 +160,7 @@ def test_org_roundtrip_off_mode_writes_studio_org_json(client):
     with open(p, encoding="utf-8") as f:
         saved = json.load(f)
     assert saved["name"] == "某某知识产权代理事务所"
-    assert set(saved) == {"name", "ai_enabled", "default_collab", "ai_daily_tokens", "ai_user_daily_tokens", "ai_provider"}  # 机构设置同文件（默认值；v0.3 起 ai_provider 随默认值落盘；v0.6.7 起 per-user 限额同文件）
+    assert set(saved) == {"name", "ai_enabled", "default_collab", "ai_daily_tokens", "ai_user_daily_tokens", "ai_provider", "registration"}  # 机构设置同文件（默认值；v0.3 起 ai_provider 随默认值落盘；v0.6.7 起 per-user 限额同文件；v1.2 起 registration 同文件）
     assert c.get("/api/admin/org").json() == {"name": "某某知识产权代理事务所"}
     d = _err(c.put("/api/admin/org", json={"name": "机" * 65}), 422, "validation")
     assert "过长" in d["message"]
@@ -186,6 +186,12 @@ DEFAULT_SETTINGS = {
     "ai_daily_tokens": 200_000,
     "ai_user_daily_tokens": 0,  # v0.6.7 per-user 每日限额（0=不限）
     "ai_provider": None,  # v0.3 起机构 AI 接入随默认值暴露（未配置为 None）
+    "registration": {
+        "mode": "open",
+        "has_invite_code": False,
+        "invite_code_hint": "",
+        "allowed_domains": [],
+    },
 }
 
 
@@ -210,6 +216,7 @@ def test_settings_defaults_and_patch_persist_alongside_name(client, monkeypatch)
             "ai_user_daily_tokens": 0,
             "default_collab": {"editor_mode": "review", "allow_viewer_comment": False},
             "ai_provider": None,  # v0.3 起机构 AI 接入字段随写盘序列化（未配置为 None）
+            "registration": {"mode": "open", "invite_code": "", "allowed_domains": []},
         }
 
     # smtp 只读：PUT 里给了也忽略；状态来自环境变量且不含密码

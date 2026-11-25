@@ -146,7 +146,7 @@ def emit_mentions_for(pid: str, user, data: dict) -> None:
     events.emit("comment.mention", pid=pid, actor=events.actor_of(user), data=data)
 
 
-async def emit_mentions(pid: str, user, c: Comment, body_mentions: list[str], reply_id: str | None = None) -> None:
+async def emit_mentions(pid: str, user, c: Comment, body_mentions: list[str], reply_id: str | None = None) -> list[str]:
     ids = await mentioned_user_ids(pid, body_mentions)
     if ids:
         # cid 是 notify 契约键（notify docstring comment.mention {cid,...}）；comment_id 保留做台账/调试可读
@@ -163,6 +163,7 @@ async def emit_mentions(pid: str, user, c: Comment, body_mentions: list[str], re
                 "file": c.anchor.file,
             },
         )
+    return ids
 
 
 def load_reanchored(store, pid: str) -> list[Comment]:
@@ -202,7 +203,13 @@ async def create_comment(pid: str, body: CommentIn, request: Request, user: Curr
             c = store_mod.create(body.anchor.to_anchor(), body.body, _author(user), source=body.source)
             comments.append(c)
             store_mod.save(d, comments)
-    await emit_mentions(pid, user, c, c.mentions)
+    mentioned = await emit_mentions(pid, user, c, c.mentions)
+    events.emit(
+        "comment.created",
+        pid=pid,
+        actor=events.actor_of(user),
+        data={"cid": c.id, "reply_id": None, "is_reply": False, "snippet": body.body[:120], "mentioned_ids": mentioned},
+    )
     return c.to_dict()
 
 
@@ -246,7 +253,13 @@ async def reply_comment(pid: str, cid: str, body: ReplyIn, request: Request, use
             c = store_mod.reply(_get(comments, cid), body.body, _author(user), source=body.source)
             store_mod.save(d, comments)
     r = c.replies[-1]
-    await emit_mentions(pid, user, c, r.mentions, reply_id=r.id)
+    mentioned = await emit_mentions(pid, user, c, r.mentions, reply_id=r.id)
+    events.emit(
+        "comment.created",
+        pid=pid,
+        actor=events.actor_of(user),
+        data={"cid": c.id, "reply_id": r.id, "is_reply": True, "snippet": body.body[:120], "mentioned_ids": mentioned},
+    )
     return c.to_dict()
 
 

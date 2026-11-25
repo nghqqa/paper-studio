@@ -3,6 +3,7 @@ import { Archive, ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Colum
 import { UserMenu } from '@/components/auth/UserMenu'
 import { ScientificFigures } from '@/components/figures/ScientificFigures'
 import { NewPaperProjectDialog } from '@/components/shell/NewPaperProjectDialog'
+import { NotificationBell } from '@/components/shell/NotificationBell'
 import { Toasts } from '@/components/shell/Toasts'
 import { ImportDialog } from '@/components/latex/ImportDialog'
 import { Button } from '@/components/ui/button'
@@ -248,7 +249,7 @@ export function PaperDashboard() {
         <button aria-current={area === 'figures' ? 'page' : undefined} onClick={() => showArea('figures')}><Image aria-hidden />科研图表</button>
         {user?.is_superuser && <a href="#/admin?tab=templates" data-testid="paper-manage-templates"><LayoutTemplate aria-hidden />模板管理</a>}
       </nav>
-      <div className="paper-topbar-end"><div className="paper-search"><Search aria-hidden /><input ref={search} aria-label="搜索项目" type="search" placeholder="搜索论文、投稿目标或标签…" value={query} onChange={(e) => { setQuery(e.target.value); if (area === 'figures') setArea('projects') }} /><kbd>/</kbd></div><div className="paper-user">{authOff ? <span className="paper-local-user" title="本地工作区"><UserRound aria-hidden /></span> : <UserMenu />}</div></div>
+      <div className="paper-topbar-end"><div className="paper-search"><Search aria-hidden /><input ref={search} aria-label="搜索项目" type="search" placeholder="搜索论文、投稿目标或标签…" value={query} onChange={(e) => { setQuery(e.target.value); if (area === 'figures') setArea('projects') }} /><kbd>/</kbd></div><div className="paper-user flex items-center gap-1">{authOff ? <span className="paper-local-user" title="本地工作区"><UserRound aria-hidden /></span> : <><NotificationBell /><UserMenu /></>}</div></div>
     </header>
     <div className="paper-body">
       <aside className="paper-sidebar" aria-label="项目范围与筛选">

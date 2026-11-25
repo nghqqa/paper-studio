@@ -2,6 +2,8 @@ import { req } from './net'
 
 /** 科研图表行。chart（数据图）行保持 v0.3 原字段；diagram（方法图）行多出 kind/version 等键，
  *  旧数据（无 kind）一律视为 chart —— 与后端读端缺省口径一致。 */
+export type FigurePalette = 'default' | 'academic' | 'colorblind' | 'grayscale'
+
 export interface ProjectFigure {
   id: string
   name: string
@@ -11,6 +13,7 @@ export interface ProjectFigure {
   y_label?: string
   categories?: string[]
   series?: { name: string; values: number[] }[]
+  palette?: FigurePalette
   kind?: 'chart' | 'diagram'
   version?: number
   updated_at?: number
@@ -29,7 +32,7 @@ const P = (pid: string) => `/api/project-figures/${encodeURIComponent(pid)}`
 
 export const figuresApi = {
   list: (pid: string) => req<{ figures: ProjectFigure[] }>(P(pid)),
-  create: (pid: string, body: { name: string; type: string; title: string; x_label: string; y_label: string; categories: string[]; series: { name: string; values: number[] }[] }) =>
+  create: (pid: string, body: { name: string; type: string; title: string; x_label: string; y_label: string; categories: string[]; series: { name: string; values: number[] }[]; palette?: FigurePalette }) =>
     req<{ figure: ProjectFigure }>(P(pid), { method: 'POST', body: JSON.stringify(body) }),
   createDiagram: (pid: string, body: { name: string } & DiagramPayload) =>
     req<{ figure: ProjectFigure }>(P(pid), { method: 'POST', body: JSON.stringify({ kind: 'diagram', ...body }) }),
@@ -44,4 +47,6 @@ export const figuresApi = {
   /** v 参数 = 版本号缓存破：原地更新后浏览器不得复用旧 PNG。 */
   pngUrl: (pid: string, fid: string, version?: number) =>
     `${P(pid)}/${encodeURIComponent(fid)}/png${version ? `?v=${version}` : ''}`,
+  exportUrl: (pid: string, fid: string, format: 'png' | 'pdf' | 'svg', dpi = 300) =>
+    `${P(pid)}/${encodeURIComponent(fid)}/export?format=${format}&dpi=${dpi}`,
 }

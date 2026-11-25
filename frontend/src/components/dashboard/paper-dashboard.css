@@ -276,8 +276,9 @@
 .paper-figures-card > img { width: 100%; border-radius: 5px; border: 1px solid var(--border); background: var(--paper); }
 .paper-figures-card > strong { font-size: 12px; font-weight: 600; color: var(--fg-strong); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .paper-figures-meta { font-size: 10px; color: var(--fg-muted); }
-.paper-figures-actions { margin-top: auto; padding-top: 3px; display: flex; align-items: center; gap: 2px; }
-.paper-figures-actions > :is(a, button) { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 28px; border-radius: 4px; color: var(--fg-muted); }
+.paper-figures-actions { margin-top: auto; padding-top: 3px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.paper-figures-actions > :is(a, button) { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 28px; padding: 0 4px; border-radius: 4px; color: var(--fg-muted); text-decoration: none; white-space: nowrap; }
+.paper-figures-actions > a.paper-figures-export-chip { height: 24px; padding: 0 6px; border: 1px solid var(--border); font-size: 11px; line-height: 1; }
 .paper-figures-actions > :is(a, button):hover { background: var(--bg-sunken); color: var(--pd-accent); }
 .paper-figures-actions svg { width: 14px; height: 14px; }
 .paper-figures-form { border: 1px solid var(--border); border-radius: 9px; background: var(--bg-sunken); padding: 14px; display: grid; gap: 10px; }

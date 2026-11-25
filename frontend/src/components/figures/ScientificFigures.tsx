@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, Trash2, Download, Copy, FileText, PencilLine, SendToBack } from 'lucide-react'
-import { figuresApi, type ProjectFigure } from '@/lib/api/projectFigures'
+import { figuresApi, type FigurePalette, type ProjectFigure } from '@/lib/api/projectFigures'
 import { req } from '@/lib/api/net'
+import { extractNumericValue, parseDelimitedTable } from '@/lib/latexTable'
 import type { ProjectSummary } from '@/lib/types'
 import { useStudio } from '@/store'
 import { PublishLatexDialog } from './PublishLatexDialog'
@@ -41,10 +42,13 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
   const [showForm, setShowForm] = useState(false)
   const [name, setName] = useState('')
   const [type, setType] = useState('line')
+  const [palette, setPalette] = useState<FigurePalette>('academic')
   const [title, setTitle] = useState('')
   const [xLabel, setXLabel] = useState('')
   const [yLabel, setYLabel] = useState('')
   const [dataJson, setDataJson] = useState(initialData)
+  const [csvImportOpen, setCsvImportOpen] = useState(false)
+  const [csvText, setCsvText] = useState('')
   const [preview, setPreview] = useState<{ key: string; url: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -53,7 +57,7 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
   const [editorFig, setEditorFig] = useState<ProjectFigure | null | undefined>(undefined)
   const [publishFig, setPublishFig] = useState<ProjectFigure | null>(null)
   const alive = useRef(false)
-  const formKey = JSON.stringify([name, type, title, xLabel, yLabel, dataJson])
+  const formKey = JSON.stringify([name, type, palette, title, xLabel, yLabel, dataJson])
   const previewUrl = preview?.key === formKey ? preview.url : ''
   const available = !!project
 
@@ -80,7 +84,25 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
 
   function chartData() {
     const parsed = JSON.parse(dataJson)
-    return { type, title, x_label: xLabel, y_label: yLabel, categories: parsed.categories, series: parsed.series }
+    return { type, palette, title, x_label: xLabel, y_label: yLabel, categories: parsed.categories, series: parsed.series }
+  }
+
+  function applyCsvToJson() {
+    const { headers, rows } = parseDelimitedTable(csvText)
+    if (headers.length < 2 || rows.length === 0) {
+      setErr('请至少粘贴表头与一行两列数据（首列为横轴类别，其余列为数值系列）')
+      return
+    }
+    const categories = rows.map((r, i) => r[0] || `项${i + 1}`)
+    const series = headers.slice(1).map((sname, sIdx) => ({
+      name: sname || `系列${sIdx + 1}`,
+      values: rows.map((r) => extractNumericValue(r[sIdx + 1] ?? '') ?? 0),
+    }))
+    setErr('')
+    if (!xLabel && headers[0]) setXLabel(headers[0])
+    setDataJson(JSON.stringify({ categories, series }))
+    setCsvImportOpen(false)
+    setNotice('已将 CSV/TSV 转换为图表数据，点击「预览」查看效果')
   }
 
   async function renderPreview() {
@@ -180,6 +202,14 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
                     <option value="scatter">散点图</option><option value="pie">饼图</option>
                   </select>
                 </div>
+                <div><label htmlFor="fig-palette">配色风格</label>
+                  <select id="fig-palette" value={palette} onChange={(e) => setPalette(e.target.value as FigurePalette)} data-testid="fig-palette">
+                    <option value="academic">学术期刊</option>
+                    <option value="colorblind">色盲友好 (Okabe-Ito)</option>
+                    <option value="grayscale">黑白印刷 (含线型区分)</option>
+                    <option value="default">经典默认</option>
+                  </select>
+                </div>
               </div>
               <div><label htmlFor="fig-title">标题（可选，显示在图表上方）</label><input id="fig-title" value={title} onChange={(e) => setTitle(e.target.value)} /></div>
               <div className="paper-figures-row">
@@ -187,7 +217,35 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
                 <div><label htmlFor="fig-y">Y 轴说明</label><input id="fig-y" value={yLabel} onChange={(e) => setYLabel(e.target.value)} /></div>
               </div>
               <div>
-                <label htmlFor="fig-data">数据 JSON（categories 为横轴取值，series 每项一条曲线）</label>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="fig-data">数据 JSON（categories 为横轴取值，series 每项一条曲线）</label>
+                  <button
+                    type="button"
+                    className="text-xs text-link hover:underline"
+                    onClick={() => setCsvImportOpen((v) => !v)}
+                    data-testid="fig-csv-toggle"
+                  >
+                    {csvImportOpen ? '收起 CSV 导入' : '从 CSV/TSV 粘贴数据'}
+                  </button>
+                </div>
+                {csvImportOpen && (
+                  <div className="my-2 grid gap-1.5 rounded border border-border bg-app p-2">
+                    <textarea
+                      rows={3}
+                      value={csvText}
+                      onChange={(e) => setCsvText(e.target.value)}
+                      placeholder={'模型\tAcc\tF1\nBaseline\t84.2\t82.9\nOurs\t91.4\t90.8'}
+                      aria-label="粘贴 CSV 或 TSV 表格数据"
+                      data-testid="fig-csv-input"
+                      className="paper-figures-json"
+                    />
+                    <div>
+                      <button type="button" className="paper-secondary" onClick={applyCsvToJson} data-testid="fig-csv-apply">
+                        转为图表 JSON
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <textarea id="fig-data" rows={4} value={dataJson} onChange={(e) => setDataJson(e.target.value)} className="paper-figures-json" />
               </div>
               <div className="paper-figures-form-actions">
@@ -221,6 +279,14 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
                       <button type="button" title="编辑方法图" aria-label={`编辑 ${f.name}`} onClick={() => setEditorFig(f)}><PencilLine aria-hidden /></button>
                     )}
                     <a href={figuresApi.pngUrl(pid, f.id, f.kind === 'diagram' ? f.version : undefined)} download={`${f.name}.png`} title="下载 PNG" aria-label={`下载 ${f.name}`}><Download aria-hidden /></a>
+                    {f.kind !== 'diagram' && (
+                      <>
+                        <a href={figuresApi.exportUrl(pid, f.id, 'png', 300)} download={`${f.name}-300dpi.png`} title="下载 300 DPI 投稿高清 PNG" data-testid="figure-export-300" className="paper-figures-export-chip font-mono">300dpi</a>
+                        <a href={figuresApi.exportUrl(pid, f.id, 'png', 600)} download={`${f.name}-600dpi.png`} title="下载 600 DPI 印刷超清 PNG" data-testid="figure-export-600" className="paper-figures-export-chip font-mono">600dpi</a>
+                        <a href={figuresApi.exportUrl(pid, f.id, 'pdf', 300)} download={`${f.name}.pdf`} title="下载矢量 PDF" data-testid="figure-export-pdf" className="paper-figures-export-chip font-mono">PDF</a>
+                        <a href={figuresApi.exportUrl(pid, f.id, 'svg', 300)} download={`${f.name}.svg`} title="下载矢量 SVG" data-testid="figure-export-svg" className="paper-figures-export-chip font-mono">SVG</a>
+                      </>
+                    )}
                     <button type="button" title="复制 LaTeX 引用" aria-label={`复制 ${f.name} 的 LaTeX 引用`} onClick={() => void copyLatex(f.id)}><Copy aria-hidden /></button>
                     {canEdit && project?.source_format === 'latex' && (
                       <button type="button" title="发布到 LaTeX" aria-label={`发布 ${f.name} 到 LaTeX`} onClick={() => setPublishFig(f)}><SendToBack aria-hidden /></button>

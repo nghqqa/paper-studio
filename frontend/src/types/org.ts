@@ -31,6 +31,21 @@ export interface OrgAuditResponse {
   total: number
 }
 
+export type RegistrationMode = 'open' | 'invite_only' | 'closed'
+
+export interface RegistrationSettingsInfo {
+  mode: RegistrationMode
+  has_invite_code: boolean
+  invite_code_hint: string
+  allowed_domains: string[]
+}
+
+export interface RegistrationSettingsPatch {
+  mode?: RegistrationMode
+  invite_code?: string
+  allowed_domains?: string[]
+}
+
 /** 机构级设置（org.json 扩展）；`ai_enabled=false` → 所有 /ai /agent 403 ai_disabled_by_org */
 export interface OrgSettings {
   ai_enabled: boolean
@@ -43,6 +58,12 @@ export interface OrgSettings {
   ai_user_daily_tokens: number
   /** 管理员配置的自定义模型接入（api_key 只写不读） */
   ai_provider: AiProviderInfo | null
+  /** 注册访问控制（邀请码明文不回传） */
+  registration?: RegistrationSettingsInfo
+}
+
+export type OrgSettingsUpdatePatch = Partial<Omit<OrgSettings, 'registration'>> & {
+  registration?: RegistrationSettingsPatch
 }
 
 /** 脱敏后的模型接入信息：api_key 永不回传 */

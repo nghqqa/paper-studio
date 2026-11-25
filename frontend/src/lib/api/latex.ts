@@ -115,6 +115,34 @@ export interface LatexVersion {
   added: number
   deleted: number
   files: number
+  milestones?: string[]
+}
+
+export interface LatexMilestone {
+  name: string
+  sha: string
+  at: number
+  author: string
+}
+
+export interface LatexDiffItem {
+  diff_id: string
+  pid: string
+  engine: string
+  base_sha: string
+  target_sha: string
+  base_label: string
+  target_label: string
+  status: 'ok' | 'error'
+  error: string | null
+  elapsed_ms: number
+  created_at: number
+  pdf_url: string | null
+}
+
+export interface LatexDiffListResponse {
+  available: boolean
+  items: LatexDiffItem[]
 }
 
 /** 投稿前检查（只读体检，backend/app/domain/latex_preflight.py）：条目结构与 Word 侧同构 */
@@ -193,6 +221,23 @@ export const latexApi = {
       `/api/projects/${enc(pid)}/latex/history/${encodeURIComponent(sha)}/restore`,
       { method: 'POST', body: JSON.stringify({}) },
     ),
+  createMilestone: (pid: string, name: string, sha?: string) =>
+    req<LatexMilestone>(`/api/projects/${enc(pid)}/latex/history/milestones`, {
+      method: 'POST',
+      body: JSON.stringify(sha ? { name, sha } : { name }),
+    }),
+  deleteMilestone: (pid: string, name: string) =>
+    req<{ ok: boolean }>(`/api/projects/${enc(pid)}/latex/history/milestones/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
+  listDiffs: (pid: string) => req<LatexDiffListResponse>(`/api/projects/${enc(pid)}/latex/diffs`),
+  generateDiffPdf: (pid: string, baseSha: string, targetSha = 'work') =>
+    req<LatexDiffItem>(`/api/projects/${enc(pid)}/latex/diffs`, {
+      method: 'POST',
+      body: JSON.stringify({ base_sha: baseSha, target_sha: targetSha }),
+    }),
+  diffPdfUrl: (pid: string, diffId: string, download = false) =>
+    `/api/projects/${enc(pid)}/latex/diffs/${encodeURIComponent(diffId)}/pdf${download ? '?download=1' : ''}`,
   /** DOCX 实验性导出：同步执行（jcip 管线，docker），blocked 时也有 manifest */
   exportDocx: (pid: string) =>
     req<DocxExportManifest>(`/api/projects/${enc(pid)}/latex/export-docx`, {

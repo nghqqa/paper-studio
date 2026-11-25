@@ -39,11 +39,13 @@ export function LoginPage() {
   const register = useStudio((s) => s.register)
   const error = useStudio((s) => s.authError)
   const demoMode = useStudio((s) => s.demoMode)
+  const registrationPolicy = useStudio((s) => s.registrationPolicy)
   const [demoBusy, setDemoBusy] = useState(false)
   const [mode, setMode] = useState<Mode>('login')
   const isDesktop = useIsDesktop()
   const [email, setEmail] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [inviteCode, setInviteCode] = useState('')
   const [password, setPassword] = useState('')
   const [showPwd, setShowPwd] = useState(false)
   const [emailHint, setEmailHint] = useState<string | null>(null)
@@ -84,12 +86,17 @@ export function LoginPage() {
     setPwdHint(null)
     setBusy(true)
     try {
-      const ok = mode === 'login' ? await login(trimmed, password) : await register(trimmed, password, displayName.trim())
+      const code = inviteCode.trim()
+      const ok =
+        mode === 'login'
+          ? await login(trimmed, password)
+          : await register(trimmed, password, displayName.trim(), ...(code ? [code] : []))
       if (ok) await enterWorkspace(returnPid)
     } finally {
       setBusy(false)
     }
   }
+  const registrationClosed = mode === 'register' && registrationPolicy.mode === 'closed'
 
   const authedUser = status === 'authed' ? user : null
   const errorId = `${uid}-error`
@@ -146,6 +153,30 @@ export function LoginPage() {
           )}
 
           <form onSubmit={onSubmit} noValidate className="mt-5 grid gap-4" aria-labelledby={titleId} aria-describedby={error ? errorId : undefined}>
+            {mode === 'register' && registrationClosed && (
+              <Alert variant="info" data-testid="login-registration-closed">
+                <Info aria-hidden />
+                <span>当前站点已关闭自助注册，请联系管理员开通账号。</span>
+              </Alert>
+            )}
+
+            {mode === 'register' && registrationPolicy.mode === 'invite_only' && (
+              <Field id={`${uid}-invite-code`} className={fieldGap}>
+                <FieldLabel>邀请码</FieldLabel>
+                <Input
+                  id={`${uid}-invite-code`}
+                  size={inputSize}
+                  autoComplete="off"
+                  maxLength={128}
+                  placeholder="请输入站点邀请码"
+                  value={inviteCode}
+                  onChange={(e) => setInviteCode(e.target.value)}
+                  data-testid="login-invite-code"
+                />
+                <FieldDescription>若已收到项目成员邮箱邀请，可直接使用同一受邀邮箱注册。</FieldDescription>
+              </Field>
+            )}
+
             {mode === 'register' && (
               <Field id={`${uid}-name`} className={fieldGap}>
                 <FieldLabel>显示名（可选）</FieldLabel>
@@ -189,6 +220,11 @@ export function LoginPage() {
                   </>
                 )}
               </FieldError>
+              {mode === 'register' && registrationPolicy.allowedDomains.length > 0 && !emailHint && (
+                <FieldDescription data-testid="login-allowed-domains">
+                  仅限以下域名邮箱注册：{registrationPolicy.allowedDomains.join(', ')}
+                </FieldDescription>
+              )}
             </Field>
 
             <Field id={pwdId} error={pwdHint ?? undefined} className={fieldGap}>
@@ -239,7 +275,7 @@ export function LoginPage() {
               </Alert>
             )}
 
-            <Button type="submit" size="xl" className="w-full" loading={busy} loadingLabel="请稍候…" data-testid="login-submit">
+            <Button type="submit" size="xl" className="w-full" disabled={registrationClosed} loading={busy} loadingLabel="请稍候…" data-testid="login-submit">
               {mode === 'login' ? '登录' : '注册并登录'}
             </Button>
             {demoMode && (

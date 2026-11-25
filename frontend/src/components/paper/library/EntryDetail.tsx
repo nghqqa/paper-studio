@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { CheckCircle2, Loader2, Search, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowUpCircle, CheckCircle2, Loader2, Search, Sparkles, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { libraryApi, type LibraryEntry, type SourceCandidate } from '@/lib/api/library'
 import { cn } from '@/lib/utils'
@@ -25,7 +26,7 @@ export function EntryDetail({
   entries: LibraryEntry[]
 }) {
   const [busy, setBusy] = useState(false)
-  const [lookupResult, setLookupResult] = useState<{ candidates: SourceCandidate[] } | null>(null)
+  const [lookupResult, setLookupResult] = useState<{ candidates: SourceCandidate[]; upgradeMode?: boolean } | null>(null)
   const [lookupBusy, setLookupBusy] = useState(false)
   const [lookupErr, setLookupErr] = useState('')
   const [mergeWith, setMergeWith] = useState('')
@@ -67,6 +68,37 @@ export function EntryDetail({
         setLookupBusy(false)
       }
     })
+
+  const isFormalCandidate = (c: SourceCandidate) => {
+    const src = String(c.candidate.source || '').toLowerCase()
+    const doi = String(c.candidate.fields.doi || '').trim()
+    const venue = String(c.candidate.fields.venue || '').trim()
+    const isArxivDoi = /^10\.48550\/arxiv\./i.test(doi)
+    const isArxivVenue = /^arxiv\b/i.test(venue)
+    return (src === 'crossref' || src === 'openalex') && Boolean(venue) && !isArxivVenue && !isArxivDoi
+  }
+
+  const doUpgradePreprint = () =>
+    run(async () => {
+      setLookupBusy(true)
+      setLookupErr('')
+      try {
+        const r = await libraryApi.lookup(pid, { query: entry.title, reference_id: entry.reference_id })
+        const sorted = [...r.candidates].sort((a, b) => Number(isFormalCandidate(b)) - Number(isFormalCandidate(a)))
+        setLookupResult({ candidates: sorted, upgradeMode: true })
+      } catch (e) {
+        setLookupErr(errText(e))
+      } finally {
+        setLookupBusy(false)
+      }
+    })
+
+  const hasFormalDoi = Boolean(entry.doi && !/^10\.48550\/arxiv\./i.test(entry.doi.trim()))
+  const isPreprint =
+    !hasFormalDoi &&
+    (Boolean(entry.arxiv_id) ||
+      /\barxiv\b|\bcorr\b/i.test(entry.venue ?? '') ||
+      /^10\.48550\/arxiv\./i.test(entry.doi ?? ''))
 
   const diffSameCount = (c: SourceCandidate) => (c.diff ?? []).filter((d) => !d.same).length
 
@@ -179,6 +211,18 @@ export function EntryDetail({
         >
           搜索比对
         </Button>
+        {isPreprint && canEdit && (
+          <Button
+            variant="outline"
+            size="xs"
+            disabled={lookupBusy || !entry.title}
+            onClick={() => void doUpgradePreprint()}
+            title="检索该预印本是否已在期刊/会议正式发表"
+            data-testid={`library-upgrade-preprint-${entry.citation_key}`}
+          >
+            <ArrowUpCircle aria-hidden className="size-3" /> 升级正式版
+          </Button>
+        )}
         {canEdit && entry.verified !== 'verified' && (
           <Button
             size="xs"
@@ -240,11 +284,21 @@ export function EntryDetail({
       )}
       {lookupResult && (
         <div className="mt-1 rounded border border-line bg-app p-1.5" data-testid={`library-lookup-result-${entry.citation_key}`}>
+          {lookupResult.upgradeMode && (
+            <div className="mb-1 rounded bg-primary-soft px-1.5 py-1 text-2xs text-link" data-testid={`library-upgrade-banner-${entry.citation_key}`}>
+              {lookupResult.candidates.some(isFormalCandidate)
+                ? '检测到正式发表版本候选，核对差异后点击合并即可替换为期刊/会议正式引文。'
+                : '暂未检索到非预印本的正式发表记录（可能仍处于预印本阶段）。'}
+            </div>
+          )}
           <div className="mb-1 text-fg-muted">候选（{lookupResult.candidates.length}）——仅展示，确认后才落盘：</div>
           {lookupResult.candidates.length === 0 && <div className="text-fg-muted">无候选。</div>}
           {lookupResult.candidates.map((c, i) => (
             <div key={i} className="mb-1 border-b border-line pb-1 last:border-0">
-              <div className="font-medium">{String(c.candidate.fields.title ?? '（无标题）')}</div>
+              <div className="flex flex-wrap items-center gap-1 font-medium">
+                <span>{String(c.candidate.fields.title ?? '（无标题）')}</span>
+                {isFormalCandidate(c) && <Badge tone="ok">正式出版</Badge>}
+              </div>
               <div className="text-fg-muted">
                 {String(c.candidate.fields.authors ?? '')} · {String(c.candidate.fields.year ?? '')} ·{' '}
                 {String(c.candidate.fields.venue ?? '')} · 来源 {c.candidate.source}

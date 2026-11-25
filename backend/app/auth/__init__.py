@@ -30,6 +30,8 @@ ROUTE_ROLE = {
     "/api/projects/{pid}/word/save": "reviewer",
     "/api/projects/{pid}/word/export/pdf": "viewer",
     "/api/projects/{pid}/latex/build": "viewer",  # 编译只写 .studio/latex-builds，不改源码
+    "/api/projects/{pid}/latex/diffs": "viewer",
+    "/api/projects/{pid}/latex/diffs/{diff_id}/pdf": "viewer",
     "/api/projects/{pid}/latex/export-docx": "viewer",
     "/api/projects/{pid}/latex/docx-exports": "viewer",
     "/api/projects/{pid}/latex/docx-exports/{eid}/artifacts/{name}": "viewer",

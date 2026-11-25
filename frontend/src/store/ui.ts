@@ -1,3 +1,4 @@
+import type { RegistrationMode } from '@/types/org'
 import type { Slice } from './types'
 
 export type Theme = 'light' | 'dark' | 'system'
@@ -29,6 +30,11 @@ export interface UiSlice extends UiPersisted {
   wordEditorEnabled: boolean | null
   wordEditorReady: boolean | null
   demoMode: boolean
+  registrationPolicy: {
+    mode: RegistrationMode
+    inviteCodeRequired: boolean
+    allowedDomains: string[]
+  }
   siteContact: { email: string; wechat: string; note: string }
   dialog: DialogId | null
   toasts: Toast[]
@@ -55,6 +61,7 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
   wordEditorEnabled: null,
   wordEditorReady: null,
   demoMode: false,
+  registrationPolicy: { mode: 'open', inviteCodeRequired: false, allowedDomains: [] },
   siteContact: { email: '', wechat: '', note: '' },
   theme: 'system',
   density: 'comfortable',
@@ -74,9 +81,15 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
         word_editor?: boolean
         word_editor_ready?: boolean
         demo_mode?: boolean
+        registration?: {
+          mode?: RegistrationMode
+          invite_code_required?: boolean
+          allowed_domains?: string[]
+        }
         contact?: { email?: string; wechat?: string; note?: string }
       }
       if (m.product !== 'paper') throw new Error('工作区配置不完整')
+      const regMode = m.registration?.mode
       set({
         product: 'paper',
         docxExportEnabled: Boolean(m.docx_export),
@@ -84,6 +97,11 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
         wordEditorEnabled: Boolean(m.word_editor),
         wordEditorReady: Boolean(m.word_editor_ready),
         demoMode: Boolean(m.demo_mode),
+        registrationPolicy: {
+          mode: regMode === 'invite_only' || regMode === 'closed' ? regMode : 'open',
+          inviteCodeRequired: Boolean(m.registration?.invite_code_required),
+          allowedDomains: Array.isArray(m.registration?.allowed_domains) ? m.registration.allowed_domains : [],
+        },
         siteContact: {
           email: (m.contact?.email || '').trim(),
           wechat: (m.contact?.wechat || '').trim(),

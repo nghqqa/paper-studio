@@ -174,6 +174,24 @@ class AiProviderInfo(BaseModel):
     api_key_hint: str = ""
 
 
+RegistrationMode = Literal["open", "invite_only", "closed"]
+
+
+class RegistrationSettingsInfo(BaseModel):
+    """对外/登录用户可读的注册策略状态（invite_code 永不回传明文，仅提示是否已设置与尾号）。"""
+
+    mode: RegistrationMode = "open"
+    has_invite_code: bool = False
+    invite_code_hint: str = ""
+    allowed_domains: list[str] = Field(default_factory=list)
+
+
+class RegistrationSettingsPatch(BaseModel):
+    mode: RegistrationMode | None = None
+    invite_code: str | None = Field(default=None, max_length=128)
+    allowed_domains: list[str] | None = None
+
+
 class OrgSettings(BaseModel):
     ai_enabled: bool = True
     default_collab: DefaultCollab = Field(default_factory=DefaultCollab)
@@ -181,6 +199,7 @@ class OrgSettings(BaseModel):
     ai_daily_tokens: int = Field(default=200_000, ge=0)
     ai_user_daily_tokens: int = Field(default=0, ge=0)
     ai_provider: AiProviderInfo | None = None
+    registration: RegistrationSettingsInfo = Field(default_factory=RegistrationSettingsInfo)
 
 
 class OrgSettingsPatch(BaseModel):
@@ -190,6 +209,7 @@ class OrgSettingsPatch(BaseModel):
     ai_daily_tokens: int | None = Field(default=None, ge=0)
     ai_user_daily_tokens: int | None = Field(default=None, ge=0)
     ai_provider: AiProviderIn | None = None
+    registration: RegistrationSettingsPatch | None = None
 
 
 class AiUsageByProject(BaseModel):

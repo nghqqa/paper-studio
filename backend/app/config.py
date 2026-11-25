@@ -154,3 +154,16 @@ CONTACT_NOTE = _env("PAPER_STUDIO_CONTACT_NOTE", "PATENT_STUDIO_CONTACT_NOTE", "
 # 免注册一键体验模式（默认关闭；开启后开放 POST /api/auth/demo-login 隔离非超管访客账号）
 DEMO_MODE = _env("PAPER_STUDIO_DEMO_MODE", "PATENT_STUDIO_DEMO_MODE", "off").strip().lower() == "on"
 DEMO_USER_EMAIL = "demo@demo.paperstudio.org"
+
+# 注册访问控制（默认开放注册，可通过环境变量预设或由管理员在平台设置中实时调整）
+_RAW_REG_MODE = _env("PAPER_STUDIO_REGISTRATION_MODE", "PATENT_STUDIO_REGISTRATION_MODE", "open").strip().lower()
+REGISTRATION_MODE = _RAW_REG_MODE if _RAW_REG_MODE in ("open", "invite_only", "closed") else "open"
+REGISTRATION_INVITE_CODE = _env("PAPER_STUDIO_REGISTRATION_INVITE_CODE", "PATENT_STUDIO_REGISTRATION_INVITE_CODE", "").strip()
+_RAW_REG_DOMAINS = _env("PAPER_STUDIO_REGISTRATION_ALLOWED_DOMAINS", "PATENT_STUDIO_REGISTRATION_ALLOWED_DOMAINS", "")
+REGISTRATION_ALLOWED_DOMAINS: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        part.strip().lstrip("@.").lower()
+        for part in _RAW_REG_DOMAINS.replace(";", ",").replace(" ", ",").split(",")
+        if part.strip().lstrip("@.")
+    )
+)

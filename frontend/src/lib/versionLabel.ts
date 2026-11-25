@@ -6,6 +6,8 @@ export function versionLabel(message: string): string {
   if (message === 'save') return '保存'
   if (message === 'figures') return '附图更新'
   if (message === 'build') return '编译快照'
+  const ms = /^milestone (.+)$/.exec(message)
+  if (ms) return `里程碑 · ${ms[1]}`
   const sv = /^save (.+)$/.exec(message)
   if (sv) return `保存 · ${sv[1]}`
   const cr = /^create (.+)$/.exec(message)

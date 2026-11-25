@@ -1,5 +1,5 @@
 import { api, isNotImplemented } from '@/lib/api'
-import type { AiUsageSummary, OrgAuditQuery, OrgSettings } from '@/types/org'
+import type { AiUsageSummary, OrgAuditQuery, OrgSettings, OrgSettingsUpdatePatch } from '@/types/org'
 import type { Slice } from './types'
 
 /** 机构审计每页窗口（「加载更多」逐次 +PAGE 扩容，CSV 不受限） */
@@ -21,7 +21,7 @@ export interface AdminSlice {
   orgAiUsageUnavailable: boolean
 
   loadOrgSettings(): Promise<void>
-  saveOrgSettings(patch: Partial<OrgSettings>): Promise<boolean>
+  saveOrgSettings(patch: OrgSettingsUpdatePatch): Promise<boolean>
   loadOrgAiUsage(): Promise<void>
   /** 会话边界（logout/expireSession）清平台管理数据，防跨账号残留 */
   resetOrg(): void
@@ -64,6 +64,9 @@ export const adminSlice: Slice<AdminSlice> = (set, get) => {
           orgSettings,
           aiDisabledByOrg: orgSettings.ai_enabled === false,
         })
+        if (patch.registration) {
+          void get().fetchMeta?.()
+        }
         get().toast('设置已保存', 'success')
         return true
       } catch (e) {

@@ -33,6 +33,7 @@ class RegisterIn(BaseModel):
     email: str
     password: str
     display_name: str = ""
+    invite_code: str = Field(default="", max_length=128)
 
 
 class MemberIn(BaseModel):

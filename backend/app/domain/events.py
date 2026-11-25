@@ -52,6 +52,7 @@ EventKind = Literal[
     "share.commented",
     "comment.mention",
     "comment.assign",
+    "comment.created",
     "deadline.due",
     "deadline.done",
     "deadline.undone",
