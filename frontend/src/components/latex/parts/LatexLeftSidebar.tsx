@@ -1,5 +1,5 @@
 import type { RefObject } from 'react'
-import { Download, FolderInput, History, ListTree, Plus, Upload } from 'lucide-react'
+import { Download, FolderInput, Plus, Upload } from 'lucide-react'
 import { latexApi, type LatexDiagnostic, type LatexFileInfo } from '@/lib/api/latex'
 import { cn } from '@/lib/utils'
 import { LatexFileTree } from '../LatexFileTree'
@@ -70,18 +70,18 @@ export function LatexLeftSidebar({
   onPulled: () => void
 }) {
   return (
-    <nav aria-label="工程文件" className="hidden w-56 shrink-0 flex-col border-r border-line bg-app md:flex" data-testid="latex-files">
-      <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-line px-2 py-1" role="tablist" aria-label="侧栏视图">
+    <nav aria-label="工程文件" className="hidden w-72 shrink-0 flex-col border-r border-line bg-app md:flex" data-testid="latex-files">
+      <div className="flex shrink-0 flex-wrap items-center gap-0.5 border-b border-line px-2 py-1" role="tablist" aria-label="侧栏视图">
         {(
           [
-            ['files', '文件', 'latex-tab-files', null],
-            ['outline', '大纲', 'latex-tab-outline', <ListTree key="o" aria-hidden className="mr-0.5 inline size-3" />],
-            ['issues', 'Issues', 'latex-tab-issues', null],
-            ['preflight', '检查', 'latex-tab-preflight', null],
-            ['history', '历史', 'latex-tab-history', <History key="h" aria-hidden className="mr-0.5 inline size-3" />],
-            ['git', '同步', 'latex-tab-git', null],
+            ['files', '文件', 'latex-tab-files'],
+            ['outline', '大纲', 'latex-tab-outline'],
+            ['issues', 'Issues', 'latex-tab-issues'],
+            ['preflight', '检查', 'latex-tab-preflight'],
+            ['history', '历史', 'latex-tab-history'],
+            ['git', '同步', 'latex-tab-git'],
           ] as const
-        ).map(([id, label, testid, icon]) => (
+        ).map(([id, label, testid]) => (
           <button
             key={id}
             type="button"
@@ -94,7 +94,6 @@ export function LatexLeftSidebar({
             onClick={() => onChangeSideView(id)}
             data-testid={testid}
           >
-            {icon}
             {label}
           </button>
         ))}

@@ -73,7 +73,7 @@ function WordSession({ pid }: { pid: string }) {
         const placeholder = document.createElement('div')
         placeholder.id = `word-editor-${++editorId}`
         mount.replaceChildren(placeholder)
-        readyTimer = window.setTimeout(() => fail(new Error('Word 文档打开超时，请检查文档服务后重试')), 45_000)
+        readyTimer = window.setTimeout(() => fail(new Error('Word 文档打开超时，请检查文档服务后重试')), 90_000)
         instance = new api.DocEditor(placeholder.id, {
           ...reply.config,
           events: {

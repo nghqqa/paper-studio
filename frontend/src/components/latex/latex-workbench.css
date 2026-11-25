@@ -70,14 +70,17 @@
 .latex-brand img { width: 28px; height: 28px; border-radius: 6px; }
 
 /* 工程文件侧栏（宽度与文件页签工具条/Issues 页签配合；内边距由各分区自持） */
-.latex-workspace [data-testid="latex-files"] { width: 240px; background: var(--bg-app); }
+.latex-workspace [data-testid="latex-files"] { width: 288px; background: var(--bg-app); }
 
 .latex-workspace [data-testid="latex-pdf-empty"] { padding: 40px 24px; text-align: center; line-height: 1.8; }
 .latex-workspace [data-testid="latex-build-status"] { min-height: 40px; background: var(--bg-app); }
 .latex-workspace .cm-editor { font-size: 13px; }
 .latex-workspace .cm-line { line-height: 1.8; }
+@media (max-width: 1200px) {
+  .latex-workspace [data-testid="latex-files"] { width: 256px; }
+}
 @media (max-width: 1000px) {
   .latex-brand { margin-right: 4px; font-size: 16px; }
-  .latex-workspace [data-testid="latex-files"] { width: 184px; }
+  .latex-workspace [data-testid="latex-files"] { width: 220px; }
   .latex-workspace [data-testid="latex-topbar"] { gap: 4px; }
 }
