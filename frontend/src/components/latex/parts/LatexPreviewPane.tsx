@@ -1,6 +1,7 @@
-import { lazy, Suspense } from 'react'
-import { FileDown, RefreshCw } from 'lucide-react'
+import { lazy, Suspense, useState } from 'react'
+import { FileDown, Package, RefreshCw } from 'lucide-react'
 import type { SyncTexTarget } from '@/components/pdf/LatexPdfViewer'
+import { SubmissionExportDialog } from '../SubmissionExportDialog'
 import {
   latexApi,
   type LatexBuildInfo,
@@ -66,6 +67,7 @@ export function LatexPreviewPane({
   onJumpDiag: (file: string, line: number | null) => void
   onInverseSync: (info: { page: number; xPt: number; yPt: number }) => void
 }) {
+  const [submissionOpen, setSubmissionOpen] = useState(false)
   return (
     <section aria-label="编译与预览" className="flex h-full min-h-0 min-w-0 flex-col" data-testid="latex-preview">
       <div
@@ -131,10 +133,24 @@ export function LatexPreviewPane({
                 <FileDown aria-hidden className="size-3.5" />
                 {wordExporting ? '导出中…' : '导出 Word'}
               </button>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-fg-muted hover:bg-hover hover:text-fg"
+                onClick={() => setSubmissionOpen(true)}
+                title="生成干净投稿 ZIP（自动去注释、附带 .bbl 并裁剪未引用图片）"
+                data-testid="latex-submission-export-btn"
+              >
+                <Package aria-hidden className="size-3.5" />
+                投稿打包
+              </button>
             </div>
           </>
         )}
       </div>
+
+      {submissionOpen && (
+        <SubmissionExportDialog pid={pid} open={submissionOpen} onOpenChange={setSubmissionOpen} />
+      )}
 
       {wordExportErr && (
         <div role="alert" className="shrink-0 border-b border-line px-2 py-1 text-xs text-danger" data-testid="latex-word-error">

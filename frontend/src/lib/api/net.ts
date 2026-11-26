@@ -159,3 +159,14 @@ export async function handle<T>(r: Response, opts?: { expireOn401?: boolean }): 
 
 export const P = (id: string) => `/api/projects/${encodeURIComponent(id)}`
 export const PUB = (token: string) => `/api/public/${encodeURIComponent(token)}`
+
+export function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}

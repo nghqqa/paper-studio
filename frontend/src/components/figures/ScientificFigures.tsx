@@ -10,7 +10,15 @@ import { PublishLatexDialog } from './PublishLatexDialog'
 /** 方法图编辑器整包 lazy——@excalidraw/* 重资产只随本 chunk 在打开编辑器时下载（不进工作台首包）。 */
 const DiagramEditor = lazy(() => import('./DiagramEditor').then((m) => ({ default: m.DiagramEditor })))
 
-const initialData = '{"categories":["基线","本文"],"series":[{"name":"精度","values":[0.82,0.91]}]}'
+const initialData = '{"categories":["基线","本文"],"series":[{"name":"精度","values":[0.82,0.91],"errors":[0.02,0.01]}]}'
+const SAMPLE_DATA_BY_TYPE: Record<string, string> = {
+  line: '{"categories":["10k","20k","40k","80k"],"series":[{"name":"Baseline","values":[72.1,76.4,79.2,81.0],"errors":[0.6,0.5,0.4,0.4]},{"name":"Ours","values":[74.5,80.1,84.6,87.2],"errors":[0.5,0.4,0.3,0.3]}]}',
+  bar: '{"categories":["C10","C100","TinyImg"],"series":[{"name":"Baseline","values":[88.0,71.2,62.4],"errors":[0.5,0.9,0.7]},{"name":"Ours","values":[92.5,76.1,67.8],"errors":[0.4,0.6,0.5]}]}',
+  scatter: '{"categories":["0.1M","0.5M","1M","2M"],"series":[{"name":"Base","values":[64.2,71.0,75.4,78.1]},{"name":"Ours","values":[69.8,76.5,81.2,84.0]}]}',
+  pie: '{"categories":["计算耗时","通信开销","访存等待"],"series":[{"name":"耗时占比","values":[54,28,18]}]}',
+  heatmap: '{"categories":["lr=1e-3","lr=1e-4","lr=1e-5"],"series":[{"name":"4层","values":[0.81,0.88,0.84]},{"name":"8层","values":[0.83,0.91,0.87]},{"name":"12层","values":[0.80,0.89,0.86]}]}',
+  boxplot: '{"categories":["Seed1","Seed2","Seed3","Seed4","Seed5"],"series":[{"name":"Baseline","values":[81.0,82.5,80.2,83.1,81.9]},{"name":"Ablation","values":[83.4,84.1,82.9,84.8,83.7]},{"name":"Ours","values":[86.0,87.2,85.9,88.1,86.5]}]}',
+}
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 /** 项目图表库；项目切换时重建局部状态，权限跟随选定项目。 */
@@ -47,6 +55,7 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
   const [xLabel, setXLabel] = useState('')
   const [yLabel, setYLabel] = useState('')
   const [dataJson, setDataJson] = useState(initialData)
+  const [showValues, setShowValues] = useState(false)
   const [csvImportOpen, setCsvImportOpen] = useState(false)
   const [csvText, setCsvText] = useState('')
   const [preview, setPreview] = useState<{ key: string; url: string } | null>(null)
@@ -57,7 +66,7 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
   const [editorFig, setEditorFig] = useState<ProjectFigure | null | undefined>(undefined)
   const [publishFig, setPublishFig] = useState<ProjectFigure | null>(null)
   const alive = useRef(false)
-  const formKey = JSON.stringify([name, type, palette, title, xLabel, yLabel, dataJson])
+  const formKey = JSON.stringify([name, type, palette, showValues, title, xLabel, yLabel, dataJson])
   const previewUrl = preview?.key === formKey ? preview.url : ''
   const available = !!project
 
@@ -84,7 +93,16 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
 
   function chartData() {
     const parsed = JSON.parse(dataJson)
-    return { type, palette, title, x_label: xLabel, y_label: yLabel, categories: parsed.categories, series: parsed.series }
+    return {
+      type,
+      palette,
+      show_values: showValues,
+      title,
+      x_label: xLabel,
+      y_label: yLabel,
+      categories: parsed.categories,
+      series: parsed.series,
+    }
   }
 
   function applyCsvToJson() {
@@ -200,6 +218,8 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
                   <select id="fig-type" value={type} onChange={(e) => setType(e.target.value)}>
                     <option value="line">折线图</option><option value="bar">柱状图</option>
                     <option value="scatter">散点图</option><option value="pie">饼图</option>
+                    <option value="heatmap">热力图 (Heatmap)</option>
+                    <option value="boxplot">箱线图 (Boxplot)</option>
                   </select>
                 </div>
                 <div><label htmlFor="fig-palette">配色风格</label>
@@ -216,9 +236,31 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
                 <div><label htmlFor="fig-x">X 轴说明</label><input id="fig-x" value={xLabel} onChange={(e) => setXLabel(e.target.value)} /></div>
                 <div><label htmlFor="fig-y">Y 轴说明</label><input id="fig-y" value={yLabel} onChange={(e) => setYLabel(e.target.value)} /></div>
               </div>
+              <div className="flex flex-wrap items-center gap-3 text-xs">
+                <label className="inline-flex cursor-pointer items-center gap-1.5">
+                  <input
+                    type="checkbox"
+                    checked={showValues}
+                    onChange={(e) => setShowValues(e.target.checked)}
+                    data-testid="fig-show-values"
+                  />
+                  显示数值标注（show_values）
+                </label>
+                <button
+                  type="button"
+                  className="text-link hover:underline"
+                  onClick={() => {
+                    setDataJson(SAMPLE_DATA_BY_TYPE[type] ?? initialData)
+                    setNotice('已填入该图型的示例 JSON（折线/柱状图支持 errors 误差棒）')
+                  }}
+                  data-testid="fig-sample-btn"
+                >
+                  填入当前图型示例数据
+                </button>
+              </div>
               <div>
                 <div className="flex items-center justify-between gap-2">
-                  <label htmlFor="fig-data">数据 JSON（categories 为横轴取值，series 每项一条曲线）</label>
+                  <label htmlFor="fig-data">数据 JSON（categories 为横轴取值；series 每项支持可选 errors 误差棒）</label>
                   <button
                     type="button"
                     className="text-xs text-link hover:underline"

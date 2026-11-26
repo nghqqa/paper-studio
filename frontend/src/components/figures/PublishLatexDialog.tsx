@@ -18,9 +18,11 @@ export function PublishLatexDialog({ pid, figure, onClose, onPublished }: {
   onClose: () => void
   onPublished: (path: string) => void
 }) {
+  const isChart = figure.kind !== 'diagram'
   const initial = useMemo(() => sanitizeStem(figure.name, figure.id), [figure])
   const [stem, setStem] = useState(initial)
   const [overwrite, setOverwrite] = useState(false)
+  const [format, setFormat] = useState<'pdf' | 'png'>('pdf')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const [snippet, setSnippet] = useState('')
@@ -31,7 +33,10 @@ export function PublishLatexDialog({ pid, figure, onClose, onPublished }: {
     if (busy) return
     setBusy(true); setErr('')
     try {
-      const reply = await figuresApi.publishLatex(pid, figure.id, { stem: stem.trim(), overwrite })
+      const payload = isChart
+        ? { stem: stem.trim(), overwrite, format }
+        : { stem: stem.trim(), overwrite }
+      const reply = await figuresApi.publishLatex(pid, figure.id, payload)
       setSnippet(reply.snippet)
       setPublishedPath(reply.path)
       onPublished(reply.path)
@@ -54,7 +59,9 @@ export function PublishLatexDialog({ pid, figure, onClose, onPublished }: {
       <DialogContent className="diagram-publish-dialog" data-testid="publish-latex-dialog">
         <DialogHeader>
           <DialogTitle>发布到 LaTeX</DialogTitle>
-          <p>把「{figure.name}」的 PNG 复制为 LaTeX 工程 figures/ 下的图片，并生成可粘贴的 figure 片段。</p>
+          <p>
+            把「{figure.name}」的{isChart ? '矢量 PDF 或高清 PNG' : ' PNG '}写入 LaTeX 工程 figures/ 目录，并生成可粘贴的 figure 片段。
+          </p>
         </DialogHeader>
         {err && <p className="paper-figures-error" role="alert">{err}</p>}
         {snippet ? (
@@ -66,7 +73,21 @@ export function PublishLatexDialog({ pid, figure, onClose, onPublished }: {
           </div>
         ) : (
           <>
-            <label htmlFor="publish-latex-stem">目标文件名（figures/&lt;名称&gt;.png）</label>
+            {isChart && (
+              <>
+                <label htmlFor="publish-latex-format">导出格式</label>
+                <select
+                  id="publish-latex-format"
+                  data-testid="publish-latex-format"
+                  value={format}
+                  onChange={(e) => setFormat(e.target.value as 'pdf' | 'png')}
+                >
+                  <option value="pdf">矢量 PDF（推荐，投稿清晰）</option>
+                  <option value="png">高清 PNG</option>
+                </select>
+              </>
+            )}
+            <label htmlFor="publish-latex-stem">目标文件名（figures/&lt;名称&gt;.{isChart ? format : 'png'}）</label>
             <input id="publish-latex-stem" data-testid="publish-latex-stem" value={stem}
               onChange={(e) => setStem(e.target.value)} />
             <label>

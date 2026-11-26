@@ -97,6 +97,21 @@ class PublishLatexIn(BaseModel):
     """发布到 LaTeX 工程的目标文件名（不含目录/扩展名）；留空由服务端从图名清洗。"""
     stem: str = Field(default="", max_length=120)
     overwrite: bool = False
+    format: Literal["png", "pdf"] = "png"
+
+
+def _chart_in_from_row(figure: dict, *, dpi: int) -> ChartIn:
+    return ChartIn(
+        type=figure.get("type") or "line",
+        title=figure.get("title") or "",
+        x_label=figure.get("x_label") or "",
+        y_label=figure.get("y_label") or "",
+        categories=figure.get("categories") or [],
+        series=figure.get("series") or [],
+        palette=figure.get("palette") or "default",
+        dpi=dpi,
+        show_values=bool(figure.get("show_values", False)),
+    )
 
 
 def _render_png(body: FigureCreate) -> bytes:
@@ -232,11 +247,13 @@ async def create_figure(pid: str, body: FigureCreate | DiagramCreate,
         "id": fid, "name": body.name, "type": body.type,
         "title": body.title, "x_label": body.x_label, "y_label": body.y_label,
         "categories": body.categories,
-        "series": [s.model_dump() for s in body.series],
+        "series": [s.model_dump(exclude_none=True) for s in body.series],
         "created_at": time.time(), "bytes": len(png),
     }
     if body.palette != "default":
         row["palette"] = body.palette
+    if body.show_values:
+        row["show_values"] = True
     # PNG 与索引按同一项目串行发布，避免并发创建相互覆盖索引。
     with atomic.studio_lock(project_dir, "project-figures"):
         rows = _load_meta(pid)
@@ -306,16 +323,7 @@ async def export_figure(
             data = f.read()
         return Response(content=data, media_type="image/png", headers={"Content-Disposition": disp})
 
-    chart_in = ChartIn(
-        type=figure.get("type") or "line",
-        title=figure.get("title") or "",
-        x_label=figure.get("x_label") or "",
-        y_label=figure.get("y_label") or "",
-        categories=figure.get("categories") or [],
-        series=figure.get("series") or [],
-        palette=figure.get("palette") or "default",
-        dpi=dpi,
-    )
+    chart_in = _chart_in_from_row(figure, dpi=dpi)
     data = await asyncio.to_thread(render_chart, chart_in, fmt=format, dpi=dpi)
     return Response(content=data, media_type=_EXPORT_MIME[format], headers={"Content-Disposition": disp})
 
@@ -398,31 +406,41 @@ async def figure_scene(pid: str, fid: FigureId, request: Request, response: Resp
 @router.post("/{fid}/publish-latex")
 async def publish_figure_to_latex(pid: str, fid: FigureId, body: PublishLatexIn,
                                   request: Request, user: CurrentUser) -> dict:
-    """发布图表 PNG 到 LaTeX 工程 figures/<stem>.png（默认拒绝覆盖），返回可粘贴的 figure 片段。
-
-    先存资源、后由作者自行粘贴源码片段：发布失败时工程内不留任何文件，天然不产生断链。"""
+    """发布图表（PNG 或矢量 PDF）到 LaTeX 工程 figures/<stem>.<ext>（默认拒绝覆盖），返回 figure 片段。"""
     project_dir = _require_project(request, pid)
     project = request.app.state.store.get(pid)
     if project.settings.get("source_format") != "latex":
         raise HTTPException(400, "只有 LaTeX 项目可以发布图表")
     with atomic.studio_lock(project_dir, "project-figures"):
         row, png = _read_locked_png(pid, fid)
+    if row.get("kind") == "diagram" and body.format != "png":
+        raise HTTPException(422, "方法图暂仅支持导出 PNG 到 LaTeX 工程")
+
     stem = _latex_stem(body.stem.strip() or row["name"], fid)
-    rel = f"figures/{stem}.png"
-    # LaTeX 工程 source root = 工程目录本体，图表库的 figures/ 天然在源码树内；
-    # stem 回退为 fid 时目标即库文件本身，资源已在位，无需拷贝。
-    library_png = os.path.join(_fig_dir(pid), fid + ".png")
-    saved = rel
-    if os.path.realpath(os.path.join(project.dir, rel)) != os.path.realpath(library_png):
-        saved = await asyncio.to_thread(latex_files.upload_file, project, rel, png, body.overwrite)
+    ext = body.format
+    rel = f"figures/{stem}.{ext}"
+    if ext == "pdf":
+        chart_in = _chart_in_from_row(row, dpi=300)
+        payload = await asyncio.to_thread(render_chart, chart_in, fmt="pdf", dpi=300)
+        saved = await asyncio.to_thread(latex_files.upload_file, project, rel, payload, body.overwrite)
         await asyncio.to_thread(latex_history.commit, project.dir,
                                 f"publish figure {fid} -> {saved}",
                                 user.email if user is not None else None, True)
+    else:
+        # LaTeX 工程 source root = 工程目录本体，图表库的 figures/ 天然在源码树内；
+        # stem 回退为 fid 时目标即库文件本身，资源已在位，无需拷贝。
+        library_png = os.path.join(_fig_dir(pid), fid + ".png")
+        saved = rel
+        if os.path.realpath(os.path.join(project.dir, rel)) != os.path.realpath(library_png):
+            saved = await asyncio.to_thread(latex_files.upload_file, project, rel, png, body.overwrite)
+            await asyncio.to_thread(latex_history.commit, project.dir,
+                                    f"publish figure {fid} -> {saved}",
+                                    user.email if user is not None else None, True)
     snippet = ("\\begin{figure}[htbp]\n  \\centering\n"
                f"  \\includegraphics[width=0.8\\linewidth]{{{os.path.splitext(saved)[0]}}}\n"
                f"  \\caption{{{_tex_escape(row['name'])}}}\n"
                f"  \\label{{fig:{stem}}}\n\\end{{figure}}")
-    return {"ok": True, "path": saved, "stem": stem, "snippet": snippet}
+    return {"ok": True, "path": saved, "stem": stem, "format": ext, "snippet": snippet}
 
 
 @router.get("/{fid}/word-image")

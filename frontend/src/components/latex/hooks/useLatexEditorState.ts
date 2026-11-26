@@ -1,4 +1,4 @@
-import { type MutableRefObject, useCallback, useMemo, useRef, useState } from 'react'
+import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { bracketMatching, defaultHighlightStyle, StreamLanguage, type StreamParser, syntaxHighlighting } from '@codemirror/language'
@@ -7,44 +7,65 @@ import { search, searchKeymap } from '@codemirror/search'
 import { EditorState } from '@codemirror/state'
 import { drawSelection, EditorView as EV, EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import { applyToView, type AnchorLike, locateAnchor, revertInView } from '@/components/paper/proposalApply'
-import type { LatexFileInfo } from '@/lib/api/latex'
+import type { LatexDiagnostic, LatexFileInfo } from '@/lib/api/latex'
 import { type CiteCandidate, makeCiteSource, makeRefSource } from '../citeCompletions'
+import {
+  diagnosticsField,
+  diagnosticsHoverExtension,
+  extractMathAtCursor,
+  latexHoverTooltipExtension,
+  type MathPreview,
+  setDiagnosticsEffect,
+  wrapSelectionCommand,
+} from '../editorEnhancements'
 import type { ProjectContentIndex } from '../editorSearch'
 import type { SaveBuildController } from '../saveBuild'
 
 export function useLatexEditorState({
+  pid,
   ctrl,
   active,
   reloadTick,
   canEdit,
   main,
   files,
+  diagList,
   openFile,
   citeDataRef,
   contentIndex,
   onSearchOpen,
   onLocateFlash,
+  onProposeFixFromDiag,
 }: {
+  pid: string
   ctrl: SaveBuildController
   active: string | null
   reloadTick: number
   canEdit: boolean
   main: string
   files: LatexFileInfo[]
+  diagList: LatexDiagnostic[]
   openFile: (rel: string) => Promise<void>
   citeDataRef: MutableRefObject<{ cites: CiteCandidate[] }>
   contentIndex: ProjectContentIndex
   onSearchOpen: () => void
   onLocateFlash: (msg: string) => void
+  onProposeFixFromDiag?: (diag: LatexDiagnostic) => void
 }) {
   const viewRef = useRef<EditorView | null>(null)
   const onSearchOpenRef = useRef(onSearchOpen)
   onSearchOpenRef.current = onSearchOpen
   const onLocateFlashRef = useRef(onLocateFlash)
   onLocateFlashRef.current = onLocateFlash
+  const onProposeFixRef = useRef(onProposeFixFromDiag)
+  onProposeFixRef.current = onProposeFixFromDiag
+  const activeRef = useRef(active)
+  activeRef.current = active
+  const filesRef = useRef(files)
+  filesRef.current = files
 
   const [cursorLine, setCursorLine] = useState<number | null>(null)
-  const [mathSel, setMathSel] = useState('')
+  const [mathPreview, setMathPreview] = useState<MathPreview | null>(null)
   const [docRev, setDocRev] = useState<{ key: string; rev: number }>({ key: '', rev: 0 })
 
   const stateKey = `${active ?? ''}:${reloadTick}:${canEdit ? '1' : '0'}`
@@ -70,12 +91,17 @@ export function useLatexEditorState({
                 return true
               },
             },
+            { key: 'Mod-b', run: wrapSelectionCommand('\\textbf{', '}') },
+            { key: 'Mod-i', run: wrapSelectionCommand('\\textit{', '}') },
             ...defaultKeymap,
             ...historyKeymap,
             ...searchKeymap,
             indentWithTab,
           ]),
           search({ top: true }),
+          diagnosticsField,
+          diagnosticsHoverExtension(canEdit, onProposeFixRef),
+          latexHoverTooltipExtension({ pid, activeRef, citeDataRef, contentIndex, filesRef }),
           ...(canEdit
             ? [
                 autocompletion({
@@ -98,10 +124,10 @@ export function useLatexEditorState({
               ctrl.edit(u.state.doc.toString())
               setDocRev((cur) => ({ key: stateKey, rev: cur.key === stateKey ? cur.rev + 1 : 1 }))
             }
-            if (u.selectionSet) {
-              setCursorLine(u.state.doc.lineAt(u.state.selection.main.head).number)
-              const selText = u.state.sliceDoc(u.state.selection.main.from, u.state.selection.main.to).trim()
-              setMathSel(/^(?:\$\$[\s\S]+\$\$|\$[^$\n]+\$|\\\[[\s\S]+\\\]|\\\([\s\S]+\\\))$/.test(selText) ? selText : '')
+            if (u.selectionSet || u.docChanged) {
+              const sel = u.state.selection.main
+              setCursorLine(u.state.doc.lineAt(sel.head).number)
+              setMathPreview(extractMathAtCursor(u.state.doc.toString(), sel.from, sel.to))
             }
           }),
         ],
@@ -109,6 +135,20 @@ export function useLatexEditorState({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [active, reloadTick, canEdit],
   )
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    const normActive = (active ?? '').replace(/^\.\//, '')
+    const activeDiags = active
+      ? diagList.filter((d) => d.file.replace(/^\.\//, '') === normActive && d.line != null)
+      : []
+    view.dispatch({ effects: setDiagnosticsEffect.of(activeDiags) })
+  }, [diagList, active, st])
+
+  useEffect(() => {
+    setMathPreview(null)
+  }, [stateKey])
 
   const jumpTo = useCallback(
     (file: string, line: number | null) => {
@@ -255,7 +295,7 @@ export function useLatexEditorState({
   return {
     viewRef,
     cursorLine,
-    mathSel,
+    mathPreview,
     st,
     jumpTo,
     jumpToSearchHit,

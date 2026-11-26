@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
-import { BookOpen, ChevronDown, ChevronRight, CircleAlert, FilePlus2, Loader2, Plus } from 'lucide-react'
+import { useEffect, useState, type DragEvent } from 'react'
+import { BookOpen, ChevronDown, ChevronRight, CircleAlert, FilePlus2, FileUp, Loader2, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { latexApi } from '@/lib/api/latex'
-import { libraryApi, type ImportReply, type LibraryReply, type ZoteroImportSource } from '@/lib/api/library'
+import { libraryApi, type ImportReply, type LibraryReply, type PdfExtractFileReport, type ZoteroImportSource } from '@/lib/api/library'
+import { cn } from '@/lib/utils'
 import { errText } from './types'
 import { ZoteroImportSection } from './ZoteroImportSection'
 
@@ -28,6 +29,8 @@ export function ImportTab({
   const [renames, setRenames] = useState<Record<number, string>>({})
   const [zotOpen, setZotOpen] = useState(false)
   const [zotSource, setZotSource] = useState<ZoteroImportSource | null>(null)
+  const [pdfFiles, setPdfFiles] = useState<PdfExtractFileReport[] | null>(null)
+  const [dragging, setDragging] = useState(false)
 
   const bibFiles = lib?.bib_files ?? []
   useEffect(() => {
@@ -42,11 +45,53 @@ export function ImportTab({
       const r = await libraryApi.import(pid, payload)
       setPreview(r)
       setZotSource(null)
+      setPdfFiles(null)
       setTargets(new Set(r.entries.map((_, i) => i)))
     } catch (e) {
       onError(errText(e))
     } finally {
       setBusy(false)
+    }
+  }
+
+  const doExtractPdfs = async (fileList: FileList | File[]) => {
+    const pdfs = Array.from(fileList).filter(
+      (f) => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf',
+    )
+    if (!pdfs.length) {
+      onError('请选择或拖入 .pdf 论文文件')
+      return
+    }
+    setBusy(true)
+    try {
+      const r = await libraryApi.extractPdf(pid, pdfs)
+      setPreview(r)
+      setZotSource(null)
+      setPdfFiles(r.files)
+      setTargets(new Set(r.entries.map((_, i) => i)))
+    } catch (e) {
+      onError(errText(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onDropFiles = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault()
+    setDragging(false)
+    if (busy || !e.dataTransfer.files?.length) return
+    const dropped = Array.from(e.dataTransfer.files)
+    const pdfs = dropped.filter((f) => f.name.toLowerCase().endsWith('.pdf') || f.type === 'application/pdf')
+    if (pdfs.length) {
+      void doExtractPdfs(pdfs)
+      return
+    }
+    const bib = dropped.find((f) => /\.(bib|txt)$/i.test(f.name))
+    if (bib) {
+      void bib.text().then((t) => {
+        setText(t)
+        return doPreview(t)
+      })
     }
   }
 
@@ -79,6 +124,7 @@ export function ImportTab({
       setPreview(null)
       setText('')
       setZotSource(null)
+      setPdfFiles(null)
     } catch (e) {
       onError(errText(e))
     } finally {
@@ -103,9 +149,21 @@ export function ImportTab({
   }
 
   return (
-    <div className="min-h-0 flex-1 overflow-auto p-2 text-xs" data-testid="library-import">
+    <div
+      className={cn(
+        'min-h-0 flex-1 overflow-auto p-2 text-xs transition-colors',
+        dragging && 'rounded border-2 border-dashed border-primary bg-primary-soft/30',
+      )}
+      onDragOver={(e) => {
+        e.preventDefault()
+        if (!dragging) setDragging(true)
+      }}
+      onDragLeave={() => setDragging(false)}
+      onDrop={onDropFiles}
+      data-testid="library-import"
+    >
       <div className="mb-1 text-fg-muted">
-        粘贴 BibTeX 或 GB/T 7714 引文文本（每行一条，如 Google Scholar 引用导出；或选择 .bib 文件）——解析预览逐条报错，确认后才写入：
+        粘贴 BibTeX / GB/T 7714 引文，上传 .bib，或直接拖拽论文 PDF 至此区域（自动提取 DOI / arXiv / 标题补全题录）：
       </div>
       <textarea
         className="h-32 w-full rounded border border-line bg-panel p-1.5 font-mono text-2xs"
@@ -140,6 +198,23 @@ export function ImportTab({
             }}
           />
         </label>
+        <label
+          className="inline-flex cursor-pointer items-center gap-1 rounded border border-line px-1.5 py-0.5 hover:bg-hover"
+          title="上传或拖入 1~10 篇论文 PDF，自动提取 DOI/arXiv 联网补全题录"
+        >
+          <FileUp aria-hidden className="size-3" /> 上传论文 PDF
+          <input
+            type="file"
+            accept=".pdf,application/pdf"
+            multiple
+            className="hidden"
+            data-testid="library-import-pdf-input"
+            onChange={(e) => {
+              if (e.target.files?.length) void doExtractPdfs(e.target.files)
+              e.target.value = ''
+            }}
+          />
+        </label>
         <button
           type="button"
           className="flex items-center gap-1 rounded border border-line px-1.5 py-0.5 transition-colors hover:bg-hover"
@@ -166,6 +241,25 @@ export function ImportTab({
         onDone={onDone}
         onError={onError}
       />
+
+      {pdfFiles && pdfFiles.length > 0 && (
+        <ul className="mt-2 space-y-1 rounded border border-line bg-panel p-1.5 text-2xs" data-testid="library-pdf-extract-summary">
+          {pdfFiles.map((f, idx) => (
+            <li key={`${f.filename}-${idx}`} className="flex flex-wrap items-center gap-1.5">
+              <span className="font-medium text-fg">{f.filename}</span>
+              {f.status === 'matched' && (
+                <span className="rounded bg-ok-bg px-1 text-ok-fg">已匹配（{f.source ?? 'metadata'}）</span>
+              )}
+              {f.status === 'partial' && (
+                <span className="rounded bg-warn-bg px-1 text-warn-fg">{f.warning ?? '仅部分字段'}</span>
+              )}
+              {f.status === 'failed' && (
+                <span className="rounded bg-danger-bg px-1 text-danger-fg">{f.error ?? '提取失败'}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {preview && (
         <div className="mt-2" data-testid="library-import-preview">

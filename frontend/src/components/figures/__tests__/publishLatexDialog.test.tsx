@@ -68,3 +68,11 @@ it('shows error when publish fails', async () => {
   await click('publish-latex-confirm')
   expect(q('[role="alert"]').textContent).toContain('已存在同名文件')
 })
+
+it('defaults to vector pdf for scientific charts', async () => {
+  await mount({ id: 'fig-9-abc123', name: 'acc', type: 'bar', created_at: 1, bytes: 10 })
+  const fmt = q<HTMLSelectElement>('[data-testid="publish-latex-format"]')
+  expect(fmt.value).toBe('pdf')
+  await click('publish-latex-confirm')
+  expect(figuresApi.publishLatex).toHaveBeenCalledWith('p1', 'fig-9-abc123', { stem: 'acc', overwrite: false, format: 'pdf' })
+})

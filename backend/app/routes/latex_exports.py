@@ -12,7 +12,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 from app import auth, config
-from app.domain import docx_export, events, latex_word, paper_templates
+from app.domain import docx_export, events, latex_submission, latex_word, paper_templates
 from app.domain import projects as projects_domain
 
 router = APIRouter(prefix="/api/projects/{pid}", tags=["latex"])
@@ -175,3 +175,81 @@ async def docx_export_artifact(pid: str, eid: str, name: str, request: Request):
     filename = f"{project.title or pid}-{eid}-{name}"
     headers = {**_NO_STORE, "Content-Disposition": f"attachment; filename*=utf-8''{quote(filename)}"}
     return Response(data, media_type=_ARTIFACT_MEDIA[name], headers=headers)
+
+
+class SubmissionExportIn(BaseModel):
+    strip_comments: bool = True
+    include_bbl: bool = True
+    prune_unused_media: bool = True
+
+
+class RevisionKitIn(BaseModel):
+    diff_id: str | None = None
+
+
+@router.post("/latex/export-submission/preview")
+async def preview_submission_package(
+    pid: str,
+    request: Request,
+    body: SubmissionExportIn | None = None,
+):
+    """预览干净投稿压缩包文件清单、被裁剪媒体及 arXiv 体积警告（不落盘）。"""
+    project = request.app.state.store.get(pid)
+    opts = body or SubmissionExportIn()
+    try:
+        res = await asyncio.to_thread(
+            latex_submission.build_submission_package,
+            project,
+            strip_comments=opts.strip_comments,
+            include_bbl=opts.include_bbl,
+            prune_unused_media=opts.prune_unused_media,
+        )
+    except projects_domain.ProjectError as e:
+        raise HTTPException(e.status, {"kind": "content", "message": str(e)})
+    res.pop("zip_bytes", None)
+    return res
+
+
+@router.post("/latex/export-submission")
+async def export_submission_package(
+    pid: str,
+    request: Request,
+    body: SubmissionExportIn | None = None,
+):
+    """导出干净投稿 ZIP（去注释 / 附 .bbl / 裁剪未引用图片）。"""
+    project = request.app.state.store.get(pid)
+    opts = body or SubmissionExportIn()
+    try:
+        res = await asyncio.to_thread(
+            latex_submission.build_submission_package,
+            project,
+            strip_comments=opts.strip_comments,
+            include_bbl=opts.include_bbl,
+            prune_unused_media=opts.prune_unused_media,
+        )
+    except projects_domain.ProjectError as e:
+        raise HTTPException(e.status, {"kind": "content", "message": str(e)})
+    headers = {**_NO_STORE, "Content-Disposition": f"attachment; filename*=utf-8''{quote(res['filename'])}"}
+    return Response(res["zip_bytes"], media_type="application/zip", headers=headers)
+
+
+@router.post("/latex/export-revision-kit")
+async def export_revision_kit(
+    pid: str,
+    request: Request,
+    body: RevisionKitIn | None = None,
+):
+    """一键打包大修返修三件套 ZIP（终稿 PDF + 高亮 Diff PDF + 审稿回复信）。"""
+    project = request.app.state.store.get(pid)
+    diff_id = body.diff_id if body else None
+    try:
+        zip_bytes, encoded_name = await asyncio.to_thread(
+            latex_submission.build_revision_kit_zip,
+            project,
+            diff_id=diff_id,
+        )
+    except projects_domain.ProjectError as e:
+        kind = "conflict" if e.status == 409 else "content"
+        raise HTTPException(e.status, {"kind": kind, "message": str(e)})
+    headers = {**_NO_STORE, "Content-Disposition": f"attachment; filename*=utf-8''{encoded_name}"}
+    return Response(zip_bytes, media_type="application/zip", headers=headers)

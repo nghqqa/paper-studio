@@ -136,6 +136,10 @@ export class ProjectContentIndex {
     return hits
   }
 
+  getFileContent(path: string): string | undefined {
+    return this.contents.get(path)
+  }
+
   /** 全工程 .tex 的 \label{...} 收集（\ref 补全数据源）。 */
   collectLabels(): LabelHit[] {
     const out: LabelHit[] = []

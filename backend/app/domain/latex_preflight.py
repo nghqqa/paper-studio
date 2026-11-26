@@ -48,8 +48,21 @@ _SRC_GENERAL_REFS = "通用投稿规范（模板未明示）：\\cite/\\ref 键�
 _SRC_GENERAL_ISSUES = "通用投稿规范（模板未明示）：投稿前应解决工程内全部手动 Issue（issues.jsonl）"
 _SRC_BLIND = "通用双盲评审规范（模板未明示）：送审稿源码不应残留作者/单位身份或资助信息；% 注释行已跳过"
 
-_LATEX_GENERAL_RULE_IDS = ("latex-todo-residue", "latex-undefined-refs", "latex-open-issues")
+_LATEX_GENERAL_RULE_IDS = (
+    "latex-todo-residue",
+    "latex-undefined-refs",
+    "latex-open-issues",
+    "latex-unused-figures",
+    "latex-acronym-consistency",
+)
 _LATEX_BLIND_RULE_IDS = ("blind-author-block", "blind-author-terms", "blind-funding-terms")
+_SUBMISSION_READINESS_RULE_IDS = (
+    "sub-pdf-pages",
+    "sub-bbl-ready",
+    "sub-unused-figures",
+    "sub-uncited-bib",
+    "sub-acronym-consistency",
+)
 
 RULESETS: dict[str, dict] = {
     "latex-general": {
@@ -64,7 +77,135 @@ RULESETS: dict[str, dict] = {
         "title": "双盲匿名审查",
         "scope": (".tex",),  # .bib 条目是他引作者名单，不参与匿名扫描，也不绑定过期
     },
+    "submission-readiness": {
+        "version": "1",
+        "run": "run_submission_readiness",
+        "title": "投稿就绪度体检",
+        "scope": (".tex", ".bib"),
+    },
 }
+
+_SRC_UNUSED_FIG = "源码 \\includegraphics 与浮动体 \\label{fig:/tab:}"
+_SRC_ACRONYM = "缩略语展开与连字符拼写一致性"
+_SRC_SUBMISSION = "最新编译 PDF/.bbl 与源码投稿就绪检查"
+
+_COMMON_ACRONYMS = frozenset({
+    "CPU", "GPU", "TPU", "RAM", "ROM", "API", "SDK", "CLI", "GUI", "URL", "URI", "HTTP", "HTTPS",
+    "JSON", "YAML", "HTML", "XML", "PDF", "PNG", "JPEG", "JPG", "SVG", "EPS", "CSV", "SQL",
+    "UTF", "ASCII", "IEEE", "ACM", "NIST", "ISO", "MIT", "BSD", "GPL", "RGB", "RGBA", "FPS",
+    "RMSE", "MSE", "MAE", "AUC", "ROC", "SGD", "CNN", "RNN", "LSTM", "GRU", "MLP", "GAN", "VAE",
+    "LLM", "LLMS", "NLP", "NLU", "NLG", "BLEU", "ROUGE", "SOTA", "BERT", "GPT", "TODO", "FIXME",
+    "DNA", "RNA", "MRI", "USA", "EOF", "DOI", "ISSN", "ISBN", "TEX", "BIB", "END", "TAB", "FIG",
+})
+_STRIP_CMD_ARG_RE = re.compile(
+    r"\\(?:documentclass|usepackage|bibliographystyle|bibliography|addbibresource|"
+    r"label|ref|eqref|autoref|cref|Cref|pageref|nameref|figref|tabref|"
+    r"[a-zA-Z]*cite[a-zA-Z]*|nocite|includegraphics|includesvg|overpic|"
+    r"input|include|begin|end|url|href|newcommand|renewcommand|newacronym|acro)"
+    r"\*?(?:\s*\[[^\]]*\])*(?:\s*\{[^{}]*\})+"
+)
+_INLINE_MATH_RE = re.compile(r"\$\$[\s\S]*?\$\$|\$[^$]*\$|\\\[[\s\S]*?\\\]|\\\([^)]*\\\)")
+_HYPHEN_PAIR_RE = re.compile(r"\b([A-Za-z]{3,})-([A-Za-z]{3,})\b")
+_BIB_ENTRY_KEY_RE = re.compile(r"^\s*@\s*(?!comment\b|string\b|preamble\b)[A-Za-z]+\s*[({]\s*([^,\s]+)\s*,", re.MULTILINE)
+_ANY_CITE_KEYS_RE = re.compile(r"\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?(?:\s*\[[^\]]*\])*\s*\{([^}]+)\}")
+
+
+def _check_unused_figures(project, lines: dict[str, list[tuple[int, str]]], rule_id: str = "latex-unused-figures") -> dict:
+    from app.domain import latex_submission
+
+    tex_map = {rel: "\n".join(code for _ln, code in rows) for rel, rows in lines.items() if rel.lower().endswith(".tex")}
+    all_rels = {item["path"] for item in latex_build.list_source_files(project)}
+    media_rels = sorted(r for r in all_rels if os.path.splitext(r)[1].lower() in latex_submission.MEDIA_EXTS)
+    used_media = latex_submission.find_referenced_media_in_texts(tex_map, all_rels)
+    unused_media = [r for r in media_rels if r not in used_media]
+
+    float_labels: dict[str, tuple[str, int]] = {}
+    referenced_labels: set[str] = set()
+    ref_re = re.compile(r"\\(?:[Cc]?ref|eqref|autoref|pageref|nameref|figref|tabref)\s*\{([^}]+)\}")
+    lbl_re = re.compile(r"\\label\s*\{((?:fig|figure|tab|table):[^}]+)\}")
+    for rel, rows in lines.items():
+        if not rel.lower().endswith(".tex"):
+            continue
+        for lineno, code in rows:
+            for lm in lbl_re.finditer(code):
+                float_labels.setdefault(lm.group(1).strip(), (rel, lineno))
+            for rm in ref_re.finditer(code):
+                for part in rm.group(1).split(","):
+                    if k := part.strip():
+                        referenced_labels.add(k)
+    unused_labels = sorted(lbl for lbl in float_labels if lbl not in referenced_labels)
+
+    issues: list[str] = []
+    if unused_media:
+        issues.append(f"未引用的图片文件（{len(unused_media)}）：" + "、".join(unused_media[:3]))
+    if unused_labels:
+        sample = [f"{lbl} ({float_labels[lbl][0]}:{float_labels[lbl][1]})" for lbl in unused_labels[:3]]
+        issues.append(f"未在正文引用的图表标签（{len(unused_labels)}）：" + "、".join(sample))
+    return {
+        "rule_id": rule_id,
+        "status": "warn" if issues else "pass",
+        "evidence": "；".join(issues) if issues else "工程图片文件与图表标签均已在正文引用",
+        "source": _SRC_UNUSED_FIG,
+    }
+
+
+def _check_acronyms_and_consistency(lines: dict[str, list[tuple[int, str]]], rule_id: str = "latex-acronym-consistency") -> dict:
+    prose_chunks: list[str] = []
+    for rel, rows in lines.items():
+        if not rel.lower().endswith(".tex"):
+            continue
+        raw_tex = "\n".join(code for _ln, code in rows)
+        if "\\begin{document}" in raw_tex:
+            raw_tex = raw_tex.split("\\begin{document}", 1)[1]
+        cleaned = _STRIP_CMD_ARG_RE.sub(" ", raw_tex)
+        cleaned = _INLINE_MATH_RE.sub(" ", cleaned)
+        cleaned = re.sub(r"\\[A-Za-z@]+\*?", " ", cleaned)
+        prose_chunks.append(cleaned)
+    prose = "\n".join(prose_chunks)
+
+    defined_acros: set[str] = set()
+    for m in re.finditer(r"\(([A-Z]{3,6})\)|\b([A-Z]{3,6})\s*\([^)]{4,80}\)", prose):
+        defined_acros.add(m.group(1) or m.group(2))
+    for rel, rows in lines.items():
+        if rel.lower().endswith(".tex"):
+            full = "\n".join(c for _l, c in rows)
+            for am in re.finditer(r"\\(?:newacronym|acro)\s*\{[^}]*\}\s*\{([A-Z]{3,6})\}", full):
+                defined_acros.add(am.group(1))
+
+    acro_counts: dict[str, int] = {}
+    for am in re.finditer(r"\b([A-Z]{3,6})\b", prose):
+        tok = am.group(1)
+        if tok in _COMMON_ACRONYMS or tok in defined_acros:
+            continue
+        acro_counts[tok] = acro_counts.get(tok, 0) + 1
+    undefined_repeats = sorted(k for k, cnt in acro_counts.items() if cnt >= 2)
+
+    hyphen_hits: list[str] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    for hm in _HYPHEN_PAIR_RE.finditer(prose):
+        a, b = hm.group(1), hm.group(2)
+        pair = (a.lower(), b.lower())
+        if pair in seen_pairs:
+            continue
+        seen_pairs.add(pair)
+        alt_space = re.search(rf"\b{re.escape(a)}\s+{re.escape(b)}\b", prose, re.IGNORECASE)
+        alt_joined = re.search(rf"\b{re.escape(a)}{re.escape(b)}\b", prose, re.IGNORECASE)
+        if alt_space:
+            hyphen_hits.append(f"{a}-{b} / {alt_space.group(0)}")
+        elif alt_joined:
+            hyphen_hits.append(f"{a}-{b} / {alt_joined.group(0)}")
+
+    warnings: list[str] = []
+    if undefined_repeats:
+        warnings.append("疑似未展开的大写缩略语：" + "、".join(undefined_repeats[:4]))
+    if hyphen_hits:
+        warnings.append("复合词连字符写法不统一：" + "；".join(hyphen_hits[:3]))
+    return {
+        "rule_id": rule_id,
+        "status": "warn" if warnings else "pass",
+        "evidence": "；".join(warnings) if warnings else "缩略语展开与复合词连字符写法一致",
+        "source": _SRC_ACRONYM,
+    }
 
 
 def resolve_ruleset(ruleset: str | None) -> tuple[str, dict]:
@@ -242,6 +383,13 @@ def run_latex_general(project, blind_terms=()) -> dict:
         items.append({"rule_id": "latex-open-issues", "status": "unknown",
                       "evidence": f"Issue 读取异常：{e}", "source": _SRC_GENERAL_ISSUES})
 
+    try:
+        items.append(_check_unused_figures(project, lines, "latex-unused-figures"))
+    except Exception as e:  # noqa: BLE001
+        items.append({"rule_id": "latex-unused-figures", "status": "unknown",
+                      "evidence": f"图片引用核对异常：{e}", "source": _SRC_UNUSED_FIG})
+
+    items.append(_check_acronyms_and_consistency(lines, "latex-acronym-consistency"))
     return _body(digest, items, error)
 
 
@@ -315,5 +463,130 @@ def run_latex_double_blind(project, blind_terms=()) -> dict:
         else "非注释行未发现基金或资助表述",
         "source": _SRC_BLIND,
     })
+
+    return _body(digest, items, error)
+
+
+def run_submission_readiness(project, blind_terms=()) -> dict:
+    """submission-readiness/1：PDF 页数、.bbl 就绪度、未使用图片、未引用文献与术语一致性。"""
+    del blind_terms
+    from pypdf import PdfReader
+
+    from app.domain import latex_submission
+
+    digest, lines, error = _scan_files(project, RULESETS["submission-readiness"]["scope"])
+    if error is not None:
+        return _body({}, _unknown_items(_SUBMISSION_READINESS_RULE_IDS, "submission-readiness/1", error), error)
+
+    items: list[dict] = []
+    latest = latex_build.latest_build(project, ok_only=True)
+    if not latest:
+        items.append({
+            "rule_id": "sub-pdf-pages",
+            "status": "warn",
+            "evidence": "尚未有成功编译的 PDF，无法核对最终页数与提交产物",
+            "source": _SRC_SUBMISSION,
+        })
+    else:
+        bdir = os.path.join(latex_build.builds_dir(project), latest["build_id"])
+        pdf_path, _gz = latex_build._build_artifact_pair(bdir, latest["main"])
+        if not pdf_path or not os.path.isfile(pdf_path):
+            items.append({
+                "rule_id": "sub-pdf-pages",
+                "status": "warn",
+                "evidence": "最近一次编译缺少 PDF 输出文件",
+                "source": _SRC_SUBMISSION,
+            })
+        else:
+            try:
+                pages = len(PdfReader(pdf_path).pages)
+            except Exception:  # noqa: BLE001
+                pages = None
+            cur_digest = latex_build.digest_source(project)
+            stale = bool(latest.get("digest")) and cur_digest != latest.get("digest")
+            page_txt = f"{pages} 页" if pages is not None else "页数未知"
+            if stale:
+                items.append({
+                    "rule_id": "sub-pdf-pages",
+                    "status": "warn",
+                    "evidence": f"最近编译 PDF 共 {page_txt}，但源码在编译后发生过修改（建议重新编译）",
+                    "source": _SRC_SUBMISSION,
+                })
+            else:
+                items.append({
+                    "rule_id": "sub-pdf-pages",
+                    "status": "pass",
+                    "evidence": f"最新编译 PDF 共 {page_txt}，与当前源码完全一致",
+                    "source": _SRC_SUBMISSION,
+                })
+
+    bbl = latex_submission.latest_build_bbl(project)
+    tex_full = "\n".join("\n".join(c for _l, c in rows) for rel, rows in lines.items() if rel.lower().endswith(".tex"))
+    needs_bbl = bool(re.search(r"\\(?:bibliography|addbibresource)\b|\\(?:[a-zA-Z]*cite[a-zA-Z]*)\b", tex_full))
+    if bbl is not None:
+        items.append({
+            "rule_id": "sub-bbl-ready",
+            "status": "pass",
+            "evidence": f"已就绪编译产物 {bbl[0]}（{len(bbl[1])} 字节），可直接用于 arXiv/期刊源码打包",
+            "source": _SRC_SUBMISSION,
+        })
+    elif not needs_bbl:
+        items.append({
+            "rule_id": "sub-bbl-ready",
+            "status": "pass",
+            "evidence": "当前工程未声明外部书目命令，无需附加 .bbl",
+            "source": _SRC_SUBMISSION,
+        })
+    else:
+        items.append({
+            "rule_id": "sub-bbl-ready",
+            "status": "warn",
+            "evidence": "正文包含参考文献引用但最近编译目录缺少 .bbl，投稿打包前建议先完整编译",
+            "source": _SRC_SUBMISSION,
+        })
+
+    items.append(_check_unused_figures(project, lines, "sub-unused-figures"))
+
+    defined_bib: list[str] = []
+    for rel, rows in lines.items():
+        if not rel.lower().endswith(".bib"):
+            continue
+        bib_txt = "\n".join(c for _l, c in rows)
+        for km in _BIB_ENTRY_KEY_RE.finditer(bib_txt):
+            k = km.group(1).strip()
+            if k and k not in defined_bib:
+                defined_bib.append(k)
+    cited_keys: set[str] = set()
+    for cm in _ANY_CITE_KEYS_RE.finditer(tex_full):
+        for part in cm.group(1).split(","):
+            if pk := part.strip():
+                cited_keys.add(pk)
+    if "*" in cited_keys:
+        uncited = []
+    else:
+        uncited = [k for k in defined_bib if k not in cited_keys]
+    if not defined_bib:
+        items.append({
+            "rule_id": "sub-uncited-bib",
+            "status": "pass",
+            "evidence": "未检测到 .bib 条目定义",
+            "source": _SRC_SUBMISSION,
+        })
+    elif uncited:
+        items.append({
+            "rule_id": "sub-uncited-bib",
+            "status": "warn",
+            "evidence": f"共有 {len(uncited)} 条 .bib 文献未在正文引用：" + "、".join(uncited[:5]),
+            "source": _SRC_SUBMISSION,
+        })
+    else:
+        items.append({
+            "rule_id": "sub-uncited-bib",
+            "status": "pass",
+            "evidence": f".bib 全部 {len(defined_bib)} 条文献均已在正文引用",
+            "source": _SRC_SUBMISSION,
+        })
+
+    items.append(_check_acronyms_and_consistency(lines, "sub-acronym-consistency"))
 
     return _body(digest, items, error)

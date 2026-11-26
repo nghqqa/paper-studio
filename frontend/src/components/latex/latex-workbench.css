@@ -76,6 +76,72 @@
 .latex-workspace [data-testid="latex-build-status"] { min-height: 40px; background: var(--bg-app); }
 .latex-workspace .cm-editor { font-size: 13px; }
 .latex-workspace .cm-line { line-height: 1.8; }
+
+/* 行内编译诊断高亮 + 悬停工具提示（仅消费当前作用域 CSS 变量，无硬编码色值） */
+.latex-workspace .cm-latex-diag-line {
+  text-decoration: underline wavy var(--danger-dot);
+  text-underline-offset: 3px;
+  background: var(--danger-bg);
+}
+.latex-workspace .cm-latex-diag-line-empty {
+  background: var(--danger-bg);
+}
+.cm-latex-tooltip {
+  max-width: 340px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--fg);
+  box-shadow: var(--sh-sm);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.cm-latex-tooltip-diag {
+  border-color: var(--danger-dot);
+}
+.cm-latex-tooltip-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+.cm-latex-tooltip-meta {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  word-break: break-word;
+}
+.cm-latex-tooltip-math {
+  margin-top: 4px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--bg-app);
+  overflow-x: auto;
+}
+.cm-latex-tooltip-img {
+  margin-top: 6px;
+  max-width: 240px;
+  max-height: 150px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  object-fit: contain;
+  background: var(--bg-panel);
+}
+.cm-latex-tooltip-btn {
+  margin-top: 6px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.cm-latex-tooltip-btn:hover {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
 @media (max-width: 1200px) {
   .latex-workspace [data-testid="latex-files"] { width: 256px; }
 }

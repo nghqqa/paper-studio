@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
-import { Bookmark, FileDiff, History, Loader2, RotateCcw, X } from 'lucide-react'
+import { Archive, Bookmark, FileDiff, History, Loader2, RotateCcw, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { latexApi, type LatexDiffItem, type LatexVersion } from '@/lib/api/latex'
+import { triggerBlobDownload } from '@/lib/api/net'
 import { fmtFull, fmtWhen } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { versionLabel } from '@/lib/versionLabel'
@@ -58,6 +59,8 @@ export function LatexHistory({ pid, canEdit, onRestore }: {
   const [diffPdfBusy, setDiffPdfBusy] = useState(false)
   const [diffPdfErr, setDiffPdfErr] = useState('')
   const [latestDiff, setLatestDiff] = useState<LatexDiffItem | null>(null)
+  const [kitBusy, setKitBusy] = useState(false)
+  const [kitErr, setKitErr] = useState('')
 
   const load = useCallback(async () => {
     setLoadErr('')
@@ -161,6 +164,20 @@ export function LatexHistory({ pid, canEdit, onRestore }: {
     }
   }
 
+  const onExportRevisionKit = async (diffId?: string | null) => {
+    if (kitBusy) return
+    setKitBusy(true)
+    setKitErr('')
+    try {
+      const { blob, filename } = await latexApi.downloadRevisionKit(pid, diffId)
+      triggerBlobDownload(blob, filename)
+    } catch (err) {
+      setKitErr(err instanceof Error ? err.message : String(err))
+    } finally {
+      setKitBusy(false)
+    }
+  }
+
   if (versions === null) {
     return (
       <div className="flex h-tree-row items-center gap-1.5 px-2.5 text-base text-fg-muted" data-testid="latex-history-loading">
@@ -177,19 +194,33 @@ export function LatexHistory({ pid, canEdit, onRestore }: {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col text-sm" data-testid="latex-history">
-      <div className="flex shrink-0 items-center justify-between px-2.5 py-1">
+      <div className="flex shrink-0 items-center justify-between gap-1 px-2.5 py-1">
         <p className="text-2xs leading-4 text-fg-muted">编译与保存自动记录版本；支持里程碑标记与返修高亮 PDF。</p>
-        <button
-          type="button"
-          className="shrink-0 rounded p-1 text-fg-muted hover:bg-hover hover:text-fg"
-          title="刷新版本列表"
-          aria-label="刷新版本列表"
-          onClick={() => void load()}
-          data-testid="latex-history-refresh"
-        >
-          <History aria-hidden className="size-3.5" />
-        </button>
+        <div className="flex shrink-0 items-center gap-0.5">
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-2xs text-fg-muted hover:bg-hover hover:text-fg disabled:opacity-50"
+            disabled={kitBusy}
+            title="一键导出返修三件套 ZIP（终稿 PDF + 修订高亮 Diff PDF + 多格式回复信）"
+            onClick={() => void onExportRevisionKit(activeDiffPdf?.diff_id)}
+            data-testid="latex-revision-kit-btn"
+          >
+            {kitBusy ? <Loader2 aria-hidden className="size-3 animate-spin" /> : <Archive aria-hidden className="size-3" />}
+            返修包
+          </button>
+          <button
+            type="button"
+            className="shrink-0 rounded p-1 text-fg-muted hover:bg-hover hover:text-fg"
+            title="刷新版本列表"
+            aria-label="刷新版本列表"
+            onClick={() => void load()}
+            data-testid="latex-history-refresh"
+          >
+            <History aria-hidden className="size-3.5" />
+          </button>
+        </div>
       </div>
+      {kitErr && <p role="alert" className="px-2.5 pb-1 text-xs text-danger" data-testid="latex-revision-kit-error">{kitErr}</p>}
 
       {canEdit && (
         <form onSubmit={(e) => void onCreateMilestone(e)} className="flex shrink-0 items-center gap-1 px-2.5 pb-1.5">

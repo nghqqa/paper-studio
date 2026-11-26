@@ -1,16 +1,21 @@
-import { useState, type RefObject } from 'react'
+import { useMemo, useState, type ClipboardEvent, type DragEvent, type RefObject } from 'react'
 import { openSearchPanel } from '@codemirror/search'
 import type { EditorState } from '@codemirror/state'
 import type { EditorView } from '@codemirror/view'
 import katex from 'katex'
-import { Crosshair, Search, Sigma, Table2 } from 'lucide-react'
+import { Crosshair, ImagePlus, Search, Sigma, Table2 } from 'lucide-react'
+import type { LatexFileInfo } from '@/lib/api/latex'
 import { cn } from '@/lib/utils'
+import type { MathPreview } from '../editorEnhancements'
+import { PasteImageDialog } from '../PasteImageDialog'
 import { SymbolPanel } from '../SymbolPanel'
 import { TableGeneratorDialog } from '../TableGeneratorDialog'
 import { CodeMirrorHost } from './CodeMirrorHost'
 
 export function LatexEditorPane({
+  pid,
   active,
+  files,
   docStats,
   canEdit,
   saving,
@@ -24,13 +29,16 @@ export function LatexEditorPane({
   hasPreviewBuild,
   st,
   viewRef,
-  mathSel,
+  mathPreview,
   onOpenCrossFileSearch,
   onToggleSymbols,
   onInsertSymbol,
+  onUploadedFile,
   onLocateInPdf,
 }: {
+  pid: string
   active: string | null
+  files: LatexFileInfo[]
   docStats: { cjk: number; words: number; lines: number } | null
   canEdit: boolean
   saving: boolean
@@ -44,13 +52,44 @@ export function LatexEditorPane({
   hasPreviewBuild: boolean
   st: EditorState
   viewRef: RefObject<EditorView | null>
-  mathSel: string
+  mathPreview: MathPreview | null
   onOpenCrossFileSearch: () => void
   onToggleSymbols: () => void
   onInsertSymbol: (text: string) => void
+  onUploadedFile: () => void
   onLocateInPdf: () => void
 }) {
   const [tableOpen, setTableOpen] = useState(false)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [pasteFile, setPasteFile] = useState<File | null>(null)
+  const existingPaths = useMemo(() => new Set(files.map((f) => f.path)), [files])
+
+  const openImageModalWith = (img: File | null) => {
+    if (!canEdit || !active) return
+    setPasteFile(img)
+    setPasteOpen(true)
+  }
+
+  const onEditorPaste = (e: ClipboardEvent<HTMLDivElement>) => {
+    if (!canEdit || !active) return
+    const items = Array.from(e.clipboardData?.files ?? [])
+    const img = items.find((f) => f.type.startsWith('image/'))
+    if (img) {
+      e.preventDefault()
+      openImageModalWith(img)
+    }
+  }
+
+  const onEditorDrop = (e: DragEvent<HTMLDivElement>) => {
+    if (!canEdit || !active) return
+    const items = Array.from(e.dataTransfer?.files ?? [])
+    const img = items.find((f) => f.type.startsWith('image/') || /\.(png|jpe?g|webp|svg|pdf)$/i.test(f.name))
+    if (img) {
+      e.preventDefault()
+      openImageModalWith(img)
+    }
+  }
+
   return (
     <section aria-label="源码编辑" className="flex h-full min-h-0 min-w-0 flex-col" data-testid="latex-editor">
       <div className="flex min-h-8 shrink-0 flex-wrap items-center gap-2 border-b border-line px-2 py-1 text-xs text-fg-muted">
@@ -115,6 +154,17 @@ export function LatexEditorPane({
           type="button"
           className="shrink-0 rounded px-1.5 py-0.5 text-xs text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-50"
           disabled={!canEdit || !active}
+          title="上传或粘贴截图至 figures/ 并插入 figure 环境（亦支持 Ctrl+V / 拖放图片）"
+          onClick={() => openImageModalWith(null)}
+          data-testid="latex-insert-image-btn"
+        >
+          <ImagePlus aria-hidden className="mr-0.5 inline size-3.5" />
+          插图
+        </button>
+        <button
+          type="button"
+          className="shrink-0 rounded px-1.5 py-0.5 text-xs text-fg-muted transition-colors hover:bg-hover hover:text-fg disabled:opacity-50"
+          disabled={!canEdit || !active}
           title="CSV / Excel 转 LaTeX booktabs 三线表"
           onClick={() => setTableOpen(true)}
           data-testid="latex-table-gen-toggle"
@@ -141,23 +191,42 @@ export function LatexEditorPane({
           onInsert={onInsertSymbol}
         />
       )}
+      {pasteOpen && (
+        <PasteImageDialog
+          pid={pid}
+          open={pasteOpen}
+          initialFile={pasteFile}
+          existingPaths={existingPaths}
+          onOpenChange={setPasteOpen}
+          onUploaded={onUploadedFile}
+          onInsert={onInsertSymbol}
+        />
+      )}
       {symbolsOpen && (
         <div className="shrink-0 border-b border-line bg-panel">
           <SymbolPanel onInsert={onInsertSymbol} onClose={onToggleSymbols} />
         </div>
       )}
-      <div className="min-h-0 flex-1" data-testid="latex-cm-host">
+      <div
+        className="min-h-0 flex-1"
+        onPaste={onEditorPaste}
+        onDragOver={(e) => {
+          if (canEdit && active && e.dataTransfer?.types?.includes('Files')) e.preventDefault()
+        }}
+        onDrop={onEditorDrop}
+        data-testid="latex-cm-host"
+      >
         <CodeMirrorHost state={st} viewRef={viewRef} />
       </div>
-      {mathSel && (
-        <div className="shrink-0 border-t border-line bg-panel px-2 py-1.5" data-testid="latex-math-preview">
-          <span className="mr-1.5 text-2xs text-fg-muted">公式预览</span>
+      {mathPreview && (
+        <div className="shrink-0 overflow-auto border-t border-line bg-panel px-2 py-1.5" data-testid="latex-math-preview">
+          <span className="mr-1.5 text-2xs text-fg-muted">公式实时预览</span>
           <span
             className="text-fg-strong"
             dangerouslySetInnerHTML={{
-              __html: katex.renderToString(mathSel, {
+              __html: katex.renderToString(mathPreview.tex, {
                 throwOnError: false,
-                displayMode: mathSel.trimStart().startsWith('$$'),
+                displayMode: mathPreview.displayMode,
               }),
             }}
           />

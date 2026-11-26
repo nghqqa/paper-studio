@@ -24,7 +24,7 @@ from app.auth import CurrentUser  # noqa: E402
 
 router = APIRouter(prefix="/api/charts", tags=["charts"])
 
-CHART_TYPES = ("line", "bar", "scatter", "pie")
+CHART_TYPES = ("line", "bar", "scatter", "pie", "heatmap", "boxplot")
 MAX_CATEGORIES = 50
 MAX_SERIES = 6
 MAX_POINTS = 200
@@ -48,6 +48,12 @@ def _cjk_font():
         "/usr/share/texlive/texmf-dist/fonts/opentype/public/fandol/FandolSong-Regular.otf",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "C:/Windows/Fonts/Deng.ttf",
+        "C:/Windows/Fonts/simhei.ttf",
+        "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/simsun.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
     ]
     for p in candidates:
         if os.path.isfile(p):
@@ -58,6 +64,7 @@ def _cjk_font():
 class SeriesIn(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     values: list[float] = Field(max_length=MAX_POINTS)
+    errors: list[float] | None = Field(default=None, max_length=MAX_POINTS)
 
 
 class ChartIn(BaseModel):
@@ -69,6 +76,7 @@ class ChartIn(BaseModel):
     series: list[SeriesIn] = Field(min_length=1, max_length=MAX_SERIES)
     palette: PaletteName = "default"
     dpi: int = Field(default=140, ge=72, le=600)
+    show_values: bool = False
 
     @field_validator("type")
     @classmethod
@@ -93,6 +101,11 @@ class ChartIn(BaseModel):
                 raise ValueError(f"系列「{s.name}」数据点数与分类数不一致")
             if any(x != x or abs(x) > 1e12 for x in s.values):
                 raise ValueError(f"系列「{s.name}」含无效数值")
+            if s.errors is not None:
+                if len(s.errors) != len(s.values):
+                    raise ValueError(f"系列「{s.name}」误差条长度与数据点数不一致")
+                if any(e != e or e < 0 or abs(e) > 1e12 for e in s.errors):
+                    raise ValueError(f"系列「{s.name}」含无效误差值（须非负实数）")
         return v
 
     @model_validator(mode="after")
@@ -128,11 +141,53 @@ def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dp
         pie_colors = list(colors[: len(cats)]) if colors else None
         ax.pie(body.series[0].values, labels=cats, autopct="%1.1f%%", startangle=90, colors=pie_colors)
         ax.axis("equal")
+    elif body.type == "heatmap":
+        matrix = [s.values for s in body.series]
+        flat = [v for row in matrix for v in row]
+        vmin, vmax = min(flat), max(flat)
+        span = (vmax - vmin) or 1.0
+        cmap = "Greys" if body.palette == "grayscale" else ("cividis" if body.palette == "colorblind" else "YlGnBu")
+        im = ax.imshow(matrix, aspect="auto", cmap=cmap)
+        ax.set_xticks(xs)
+        ax.set_xticklabels(cats)
+        ax.set_yticks(list(range(len(body.series))))
+        ax.set_yticklabels([s.name for s in body.series])
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        if body.show_values:
+            for r, row in enumerate(matrix):
+                for c, val in enumerate(row):
+                    norm = (val - vmin) / span
+                    txt_color = "#ffffff" if norm > 0.55 else "#111111"
+                    ax.text(c, r, f"{val:g}", ha="center", va="center", color=txt_color, fontsize=8)
+    elif body.type == "boxplot":
+        data = [s.values for s in body.series]
+        labels = [s.name for s in body.series]
+        mpl_ver = tuple(int(p) for p in matplotlib.__version__.split(".")[:2] if p.isdigit())
+        label_kw = {"tick_labels": labels} if mpl_ver >= (3, 9) else {"labels": labels}
+        bp = ax.boxplot(data, patch_artist=True, **label_kw)
+        for i, box in enumerate(bp["boxes"]):
+            c = colors[i % len(colors)] if colors else "#4c72b0"
+            box.set_facecolor(c)
+            box.set_alpha(0.75)
+        for med in bp["medians"]:
+            med.set_color("#111111")
+            med.set_linewidth(1.5)
+        if body.show_values:
+            for i, vals in enumerate(data, 1):
+                sv = sorted(vals)
+                mid = len(sv) // 2
+                med_val = sv[mid] if len(sv) % 2 == 1 else (sv[mid - 1] + sv[mid]) / 2
+                ax.annotate(f"{med_val:g}", (i, med_val), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
     elif body.type == "bar":
         width = 0.8 / len(body.series)
         for i, s in enumerate(body.series):
             color = colors[i % len(colors)] if colors else None
-            ax.bar([x + i * width for x in xs], s.values, width=width, label=s.name, color=color)
+            bar_kw = {}
+            if s.errors:
+                bar_kw = {"yerr": s.errors, "capsize": 3, "error_kw": {"elinewidth": 1.1, "ecolor": "#333333"}}
+            bars = ax.bar([x + i * width for x in xs], s.values, width=width, label=s.name, color=color, **bar_kw)
+            if body.show_values:
+                ax.bar_label(bars, fmt="%.3g", padding=2, fontsize=8)
         ax.set_xticks([x + 0.4 - width / 2 for x in xs] if len(body.series) > 1 else xs)
         ax.set_xticklabels(cats)
     elif body.type == "scatter":
@@ -140,6 +195,9 @@ def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dp
             color = colors[i % len(colors)] if colors else None
             marker = _GRAY_MARKERS[i % len(_GRAY_MARKERS)] if body.palette == "grayscale" else "o"
             ax.scatter(xs, s.values, label=s.name, color=color, marker=marker)
+            if body.show_values:
+                for x, y in zip(xs, s.values):
+                    ax.annotate(f"{y:g}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
         ax.set_xticks(xs)
         ax.set_xticklabels(cats)
     else:  # line
@@ -147,11 +205,28 @@ def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dp
             color = colors[i % len(colors)] if colors else None
             ls = _GRAY_LINESTYLES[i % len(_GRAY_LINESTYLES)] if body.palette == "grayscale" else "-"
             marker = _GRAY_MARKERS[i % len(_GRAY_MARKERS)] if body.palette == "grayscale" else "o"
-            ax.plot(xs, s.values, marker=marker, linestyle=ls, linewidth=1.6, label=s.name, color=color)
+            if s.errors:
+                ax.errorbar(
+                    xs,
+                    s.values,
+                    yerr=s.errors,
+                    marker=marker,
+                    linestyle=ls,
+                    linewidth=1.6,
+                    capsize=3,
+                    elinewidth=1.0,
+                    label=s.name,
+                    color=color,
+                )
+            else:
+                ax.plot(xs, s.values, marker=marker, linestyle=ls, linewidth=1.6, label=s.name, color=color)
+            if body.show_values:
+                for x, y in zip(xs, s.values):
+                    ax.annotate(f"{y:g}", (x, y), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
         ax.set_xticks(xs)
         ax.set_xticklabels(cats)
 
-    if body.type != "pie":
+    if body.type not in ("pie", "heatmap"):
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
     if body.title:
@@ -160,9 +235,10 @@ def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dp
         ax.set_xlabel(body.x_label)
     if body.y_label:
         ax.set_ylabel(body.y_label)
-    if body.type != "pie" and len(body.series) > 1:
+    if body.type not in ("pie", "heatmap", "boxplot") and len(body.series) > 1:
         ax.legend(fontsize=9, frameon=False)
-    ax.grid(axis="y", linestyle="--", alpha=0.35)
+    if body.type not in ("pie", "heatmap"):
+        ax.grid(axis="y", linestyle="--", alpha=0.35)
 
     buf = io.BytesIO()
     fig.tight_layout()

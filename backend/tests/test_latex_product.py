@@ -334,13 +334,13 @@ def test_latexmkrc_imported_is_never_executed(client, tmp_path):
 
 @pytest.mark.skipif(not HAS_LATEXMK, reason="需要宿主 latexmk")
 def test_shell_escape_is_disabled(client):
-    """负向探针：-no-shell-escape 下 \write18 是空操作，不产生标记文件。"""
+    r"""负向探针：-no-shell-escape 下 \write18 是空操作，不产生标记文件。"""
     c, _ = client
     demo = c.post("/api/projects/latex-demo").json()["id"]
     read = c.get(f"/api/projects/{demo}/latex/files/bare_conf.tex").json()
     evil = read["content"].replace(
-        "\section{Conclusion}",
-        "\immediate\write18{echo PWNED > pwned-marker.txt}\n\section{Conclusion}")
+        r"\section{Conclusion}",
+        r"\immediate\write18{echo PWNED > pwned-marker.txt}" + "\n" + r"\section{Conclusion}")
     c.put(f"/api/projects/{demo}/latex/files/bare_conf.tex", json={"content": evil, "base": None})
     out = c.post(f"/api/projects/{demo}/latex/build", json={}).json()
     assert out["status"] == "ok"

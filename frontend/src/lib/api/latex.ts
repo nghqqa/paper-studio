@@ -1,4 +1,4 @@
-import { req } from './net'
+import { handle, netFetch, req } from './net'
 
 /** w21 批A：LaTeX 工程最小闭环 API（文件清单 / 文本读写 / 手动编译 / 构建历史与产物）。 */
 
@@ -146,7 +146,52 @@ export interface LatexDiffListResponse {
 }
 
 /** 投稿前检查（只读体检，backend/app/domain/latex_preflight.py）：条目结构与 Word 侧同构 */
-export type LatexPreflightRuleset = 'latex-general' | 'double-blind'
+export type LatexPreflightRuleset = 'latex-general' | 'double-blind' | 'submission-readiness'
+
+export interface SubmissionExportOptions {
+  strip_comments?: boolean
+  include_bbl?: boolean
+  prune_unused_media?: boolean
+}
+
+export interface SubmissionPreviewReply {
+  filename: string
+  included_files: string[]
+  pruned_media: string[]
+  kept_media: string[]
+  stripped_tex_count: number
+  bbl_file: string | null
+  total_bytes: number
+  zip_size_bytes: number
+  exceeds_arxiv_limit: boolean
+  warnings: string[]
+}
+
+async function postBlobDownload(
+  url: string,
+  body: unknown,
+  fallbackName: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const r = await netFetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body ?? {}),
+  })
+  if (!r.ok) {
+    await handle(r)
+  }
+  const cd = r.headers.get('Content-Disposition') || ''
+  const m = cd.match(/filename\*=utf-8''([^;\s]+)/i) || cd.match(/filename="?([^";\s]+)"?/i)
+  let filename = fallbackName
+  if (m?.[1]) {
+    try {
+      filename = decodeURIComponent(m[1])
+    } catch {
+      filename = m[1]
+    }
+  }
+  return { blob: await r.blob(), filename }
+}
 
 export interface LatexPreflightItem {
   rule_id: string
@@ -383,4 +428,23 @@ export const latexApi = {
       { method: 'POST', body: JSON.stringify(opts ?? {}) }),
   getPreflight: (pid: string, ruleset?: LatexPreflightRuleset) =>
     req<LatexPreflightGet>(`/api/projects/${enc(pid)}/latex/preflight${ruleset ? `?ruleset=${encodeURIComponent(ruleset)}` : ''}`),
+
+  /* ---- 干净投稿打包与大修返修三件套 ZIP ---- */
+  previewSubmission: (pid: string, opts?: SubmissionExportOptions) =>
+    req<SubmissionPreviewReply>(`/api/projects/${enc(pid)}/latex/export-submission/preview`, {
+      method: 'POST',
+      body: JSON.stringify(opts ?? {}),
+    }),
+  downloadSubmission: (pid: string, opts?: SubmissionExportOptions) =>
+    postBlobDownload(
+      `/api/projects/${enc(pid)}/latex/export-submission`,
+      opts ?? {},
+      `${pid}-submission.zip`,
+    ),
+  downloadRevisionKit: (pid: string, diffId?: string | null) =>
+    postBlobDownload(
+      `/api/projects/${enc(pid)}/latex/export-revision-kit`,
+      diffId ? { diff_id: diffId } : {},
+      `${pid}-revision-kit.zip`,
+    ),
 }

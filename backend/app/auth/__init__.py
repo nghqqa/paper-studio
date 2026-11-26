@@ -35,6 +35,9 @@ ROUTE_ROLE = {
     "/api/projects/{pid}/latex/export-docx": "viewer",
     "/api/projects/{pid}/latex/docx-exports": "viewer",
     "/api/projects/{pid}/latex/docx-exports/{eid}/artifacts/{name}": "viewer",
+    "/api/projects/{pid}/latex/export-submission/preview": "viewer",
+    "/api/projects/{pid}/latex/export-submission": "viewer",
+    "/api/projects/{pid}/latex/export-revision-kit": "viewer",
     "/api/projects/{pid}/members": "owner",
     "/api/projects/{pid}/members/{user_id}": "owner",
     "/api/projects/{pid}/share": "owner",
@@ -62,6 +65,7 @@ ROUTE_ROLE = {
     "/api/projects/{pid}/library/citations": "viewer",
     "/api/projects/{pid}/library/export": "viewer",
     "/api/projects/{pid}/library/bibliography": "viewer",
+    "/api/projects/{pid}/library/extract-pdf": "viewer",
     "/api/projects/{pid}/library/entries/{rid}/ai-suggest": "editor",
     "/api/projects/{pid}/library/entries/{rid}/confirm": "editor",
     # 论文 AI 修改提案

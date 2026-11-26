@@ -94,6 +94,21 @@ export interface ImportReply {
   total_blocks: number
 }
 
+export interface PdfExtractFileReport {
+  filename: string
+  status: 'matched' | 'partial' | 'failed'
+  source?: string
+  doi?: string | null
+  arxiv_id?: string | null
+  title?: string
+  warning?: string
+  error?: string
+}
+
+export interface PdfExtractReply extends ImportReply {
+  files: PdfExtractFileReport[]
+}
+
 /** Zotero 公开群组（v0.5）。 */
 export interface ZoteroGroup {
   id: number
@@ -209,6 +224,11 @@ export const libraryApi = {
     req<{ entries: number }>(`/api/projects/${enc(pid)}/library/reindex`, { method: 'POST', body: JSON.stringify({}) }),
   import: (pid: string, text: string) =>
     req<ImportReply>(`/api/projects/${enc(pid)}/library/import`, { method: 'POST', body: JSON.stringify({ text }) }),
+  extractPdf: (pid: string, files: File[]) => {
+    const fd = new FormData()
+    for (const f of files) fd.append('files', f)
+    return req<PdfExtractReply>(`/api/projects/${enc(pid)}/library/extract-pdf`, { method: 'POST', body: fd })
+  },
   commit: (pid: string, entries: Record<string, unknown>[], targetBib: string | null, baseSha?: string | null,
            source?: ZoteroImportSource) =>
     req<{ reference_ids: string[]; bib_sha: string | null; total: number }>(`/api/projects/${enc(pid)}/library/commit`, {

@@ -16,6 +16,7 @@ import { LatexStatusBanners } from './parts/LatexStatusBanners'
 import { LatexStatusBar } from './parts/LatexStatusBar'
 import { type LatexSideTab, LatexTopBar } from './parts/LatexTopBar'
 import { SourcePreviewOverlay } from './parts/SourcePreviewOverlay'
+import 'katex/dist/katex.min.css'
 import './latex-workbench.css'
 
 /**
@@ -61,18 +62,23 @@ export function LatexWorkbench({ pid }: { pid: string }) {
   wordExportRef.current = word.autoDetectThesis
 
   const syncTexRef = useRefPlaceholder<((msg: string) => void) | null>(null)
+  const proposeFixRef = useRefPlaceholder<((diag: { file: string; line: number | null; message: string }) => void) | null>(null)
+  const diagList = session.outcome?.diagnostics ?? []
   const editor = useLatexEditorState({
+    pid,
     ctrl: session.ctrl,
     active: session.active,
     reloadTick: session.reloadTick,
     canEdit,
     main,
     files: session.files,
+    diagList,
     openFile: session.openFile,
     citeDataRef: session.citeDataRef,
     contentIndex: session.contentIndex,
     onSearchOpen: () => setSearchSignal((t) => t + 1),
     onLocateFlash: (msg) => syncTexRef.current?.(msg),
+    onProposeFixFromDiag: (d) => proposeFixRef.current?.(d),
   })
 
   const dirty = session.snap?.dirty ?? false
@@ -83,7 +89,6 @@ export function LatexWorkbench({ pid }: { pid: string }) {
   const permLost = session.snap?.permLost ?? false
   const notice = session.snap?.notice ?? null
   const error = session.snap?.error ?? null
-  const diagList = session.outcome?.diagnostics ?? []
 
   const syncTex = useLatexSyncTex({
     pid,
@@ -120,6 +125,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
     setLoadErr: session.setLoadErr,
     onShowProposals: () => setSideTab('proposals'),
   })
+  proposeFixRef.current = canEdit ? (d) => { void review.proposeFixFromDiag(d) } : null
 
   const pdfUrl = session.previewBuildId
     ? `/api/projects/${encodeURIComponent(pid)}/latex/builds/${session.previewBuildId}/artifacts/pdf`
@@ -226,7 +232,9 @@ export function LatexWorkbench({ pid }: { pid: string }) {
             min={0.25}
             left={
               <LatexEditorPane
+                pid={pid}
                 active={session.active}
+                files={session.files}
                 docStats={editor.docStats}
                 canEdit={canEdit}
                 saving={saving}
@@ -240,10 +248,14 @@ export function LatexWorkbench({ pid }: { pid: string }) {
                 hasPreviewBuild={Boolean(session.previewBuildId)}
                 st={editor.st}
                 viewRef={editor.viewRef}
-                mathSel={editor.mathSel}
+                mathPreview={editor.mathPreview}
                 onOpenCrossFileSearch={() => setSearchSignal((t) => t + 1)}
                 onToggleSymbols={() => setSymbolsOpen((v) => !v)}
                 onInsertSymbol={editor.insertAtCursor}
+                onUploadedFile={() => {
+                  void session.reloadFiles()
+                  void session.refreshIndex()
+                }}
                 onLocateInPdf={() => void syncTex.locateInPdf()}
               />
             }

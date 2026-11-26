@@ -23,19 +23,33 @@ export const CHANGE_CATEGORY_META: Record<ChangeCategory, { label: string; tone:
   fix: { label: '问题修复', tone: 'ok' },
 }
 
-export const LATEST_RELEASE_VERSION = 'v1.2.2'
+export const LATEST_RELEASE_VERSION = 'v1.3.0'
 
 /**
  * 面向科研用户的版本演进记录（按发布时间倒序）。
  */
 export const CHANGELOG_RELEASES: ReleaseEntry[] = [
   {
+    id: 'v1.3.0',
+    version: 'v1.3.0',
+    date: '2026-11-26',
+    title: 'LaTeX 沉浸式编辑增强、投稿与返修闭环及科研图表升级',
+    summary: '全面升级 LaTeX 实时公式/悬停/行内诊断与插图流，补齐干净投稿源码打包、投稿就绪度体检与返修三件套一键打包，并支持 PDF 文献拖拽自动抽取与科研热力图/箱线图矢量发布。',
+    badge: '最新',
+    changes: [
+      { category: 'feature', text: 'LaTeX 编辑器支持剪贴板粘贴/拖放/工具栏上传插图，光标进入数学环境即触发 KaTeX 实时预览，新增 Ctrl/Cmd+B/I 快捷键、\\cite/\\ref/\\includegraphics 悬停预览及行内编译诊断波浪线与 AI 修复提案入口。' },
+      { category: 'feature', text: '新增「投稿打包」干净源码 ZIP 导出（安全移除 % 注释且保留 \\% 与代码环境、自动附带 .bbl、裁剪未引用图片与 50 MB 体积预警）及历史面板「返修包」三件套打包（终稿 PDF + 高亮 Diff PDF + 多格式回复信）。' },
+      { category: 'feature', text: '投稿前检查新增未使用图片/图表标签与缩略语连字符一致性规则，并上线「投稿就绪度体检」规则集（核对 PDF 页数与新鲜度、.bbl 就绪度及未引用文献）。' },
+      { category: 'feature', text: '文献库支持直接上传/拖拽论文 PDF 自动抽取 DOI / arXiv / 标题并联网补全题录；科研图表新增热力图（heatmap）、箱线图（boxplot）、误差棒（errors）、数值标注及矢量 PDF 发布到 LaTeX。' },
+      { category: 'fix', text: '补齐工作台 KaTeX 样式表消除公式重复文本，修复 \\ref 悬停跨块误匹配、插图/打包弹窗响应式尺寸与跨平台 Matplotlib 中文字体回落问题。' },
+    ],
+  },
+  {
     id: 'v1.2.2',
     version: 'v1.2.2',
     date: '2026-11-26',
     title: '架构精简、PDF 预览器与后端路由模块化',
     summary: '下线早期实验性结构化写作遗留模块并移除冗余依赖，将 LaTeX PDF 预览器与核心后端模块拆解为独立子模块，进一步提升可维护性与接口权限一致性。',
-    badge: '最新',
     changes: [
       { category: 'improvement', text: '下线默认关闭的早期实验性结构化写作模块及 ProseMirror 冗余依赖，进一步收口纯学术 LaTeX / Word 双主线。' },
       { category: 'improvement', text: '拆解 LaTeX PDF 预览器、文献管理路由、LaTeX 路由与 Word 导出后处理模块，降低单文件复杂度并保持接口与交互零破坏。' },

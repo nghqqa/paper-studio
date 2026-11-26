@@ -104,9 +104,10 @@ describe('LaTeX 投稿检查面板', () => {
     const h = mount()
     await flush()
     const sel = h.querySelector<HTMLSelectElement>('[data-testid="latex-preflight-ruleset"]')!
-    expect(sel.options.length).toBe(2)
+    expect(sel.options.length).toBe(3)
     expect(sel.options[0].textContent).toContain('通用学术检查')
     expect(sel.options[1].textContent).toContain('双盲')
+    expect(sel.options[2].textContent).toContain('投稿就绪')
     await act(async () => {
       sel.value = 'double-blind'
       sel.dispatchEvent(new Event('change', { bubbles: true }))

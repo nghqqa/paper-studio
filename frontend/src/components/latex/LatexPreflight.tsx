@@ -11,12 +11,17 @@ const RULESETS: PreflightRulesetOption<LatexPreflightRuleset>[] = [
   {
     id: 'latex-general',
     label: '通用学术检查',
-    hint: '通用投稿规范：TODO/FIXME/\\hl/?? 残留、未定义 \\cite/\\ref（工程源码索引对账）、未解决的手动 Issue。只读。',
+    hint: '通用投稿规范：TODO/FIXME/\\hl/?? 残留、未定义 \\cite/\\ref、未解决 Issue、未使用图片/标签与缩略语连字符一致性。只读。',
   },
   {
     id: 'double-blind',
     label: '双盲匿名检查',
     hint: '双盲匿名审查：扫描非注释行的 \\author/\\thanks/\\affiliation/Acknowledgments、资助基金词与屏蔽词；% 注释行跳过。只读。',
+  },
+  {
+    id: 'submission-readiness',
+    label: '投稿就绪度体检',
+    hint: '投稿终检：最新编译 PDF 页数与新鲜度、.bbl 就绪度、未使用图片/图表标签、未引用 .bib 文献与缩略语/连字符一致性。只读。',
   },
 ]
 

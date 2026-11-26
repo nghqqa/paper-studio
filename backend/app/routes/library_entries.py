@@ -7,14 +7,28 @@ import asyncio
 import json
 import re
 import time
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 
 from app import auth, config
-from app.domain import citation_verify, library, library_ops, library_sources
-from app.domain.library import KEY_RE, RID_RE, format_bibtex, load_index
+from app.domain import citation_verify, library, library_ops, library_pdf, library_sources
+from app.domain.library import (
+    KEY_RE,
+    RID_RE,
+    BibParseError,
+    BibParseResult,
+    LibraryEntry,
+    format_bibtex,
+    load_index,
+    new_reference_id,
+    normalize_arxiv,
+    normalize_doi,
+    suggested_key,
+)
 from app.errors import error_detail, kind_error
+from app.routes import read_bounded
 
 from .library_shared import (
     _current_index,
@@ -351,3 +365,130 @@ async def run_citation_verify(pid: str, request: Request, body: VerifyIn | None 
     index = await _current_index(project)
     rids = body.reference_ids if body and body.reference_ids else None
     return await citation_verify.verify_entries(project.dir, index.entries, rids=rids)
+
+
+_MAX_PDF_EXTRACT_FILES = 10
+_MAX_PDF_EXTRACT_BYTES = 32 * 1024 * 1024
+
+
+def _entry_from_fields(fields: dict, fallback_doi: str | None = None, fallback_arxiv: str | None = None) -> LibraryEntry:
+    authors = [str(a).strip() for a in (fields.get("authors") or []) if str(a).strip()]
+    doi = normalize_doi(fields.get("doi") or fallback_doi)
+    arxiv_id = normalize_arxiv(fields.get("arxiv_id") or fallback_arxiv)
+    ent = LibraryEntry(
+        reference_id=new_reference_id(),
+        citation_key="tmpkey",
+        entry_type=str(fields.get("entry_type") or "article"),
+        title=str(fields.get("title") or "").strip(),
+        authors=authors,
+        year=str(fields["year"]) if fields.get("year") else None,
+        venue=str(fields["venue"]) if fields.get("venue") else None,
+        volume=str(fields["volume"]) if fields.get("volume") else None,
+        number=str(fields["number"]) if fields.get("number") else None,
+        pages=str(fields["pages"]) if fields.get("pages") else None,
+        publisher=str(fields["publisher"]) if fields.get("publisher") else None,
+        doi=doi,
+        arxiv_id=arxiv_id,
+        url=str(fields["url"]) if fields.get("url") else None,
+        abstract=str(fields["abstract"]) if fields.get("abstract") else None,
+    )
+    key = suggested_key(ent)
+    if not KEY_RE.match(key):
+        key = re.sub(r"[^A-Za-z0-9_:-]+", "", key) or "refpdf"
+    ent.citation_key = key
+    ent.raw_bibtex = format_bibtex(ent)
+    return ent
+
+
+@router.post("/library/extract-pdf")
+async def extract_pdf_references(
+    pid: str,
+    request: Request,
+    files: Annotated[list[UploadFile], File(...)],
+):
+    """上传论文 PDF 提取 DOI/arXiv/标题并联网补全标准题录，返回导入预览清单（不落盘）。"""
+    project, _store = _project(request, pid)
+    _require_paperish(project)
+    if not files:
+        raise kind_error("validation", "请至少上传一个 PDF 文件")
+    if len(files) > _MAX_PDF_EXTRACT_FILES:
+        raise kind_error("validation", f"单次最多解析 {_MAX_PDF_EXTRACT_FILES} 个 PDF 文件")
+
+    index = await _current_index(project)
+    parsed_entries: list[LibraryEntry] = []
+    parse_errors: list[BibParseError] = []
+    file_reports: list[dict] = []
+
+    for idx, f in enumerate(files, 1):
+        fname = f.filename or f"paper-{idx}.pdf"
+        raw = await read_bounded(f, "PDF", _MAX_PDF_EXTRACT_BYTES)
+        try:
+            info = await asyncio.to_thread(library_pdf.extract_identifiers_from_pdf, raw, fname)
+        except ValueError as e:
+            parse_errors.append(BibParseError(line=idx, raw=fname, error=str(e)))
+            file_reports.append({"filename": fname, "status": "failed", "error": str(e)})
+            continue
+
+        cand: dict | None = None
+        lookup_err: str | None = None
+        if info.get("doi"):
+            try:
+                cand = await library_sources.lookup_doi(info["doi"])
+            except library_sources.SourceError as e:
+                lookup_err = e.message
+                try:
+                    cand = await library_sources.lookup_doi_openalex(info["doi"])
+                except library_sources.SourceError:
+                    pass
+        if cand is None and info.get("arxiv_id"):
+            try:
+                cand = await library_sources.lookup_arxiv(info["arxiv_id"])
+            except library_sources.SourceError as e:
+                lookup_err = lookup_err or e.message
+        if cand is None and info.get("title"):
+            try:
+                hits = await library_sources.search(info["title"], limit=1)
+                if hits:
+                    cand = hits[0]
+            except library_sources.SourceError as e:
+                lookup_err = lookup_err or e.message
+
+        if cand is not None and (cand.get("fields") or {}).get("title"):
+            ent = _entry_from_fields(cand["fields"], info.get("doi"), info.get("arxiv_id"))
+            parsed_entries.append(ent)
+            file_reports.append({
+                "filename": fname,
+                "status": "matched",
+                "source": cand.get("source"),
+                "doi": info.get("doi"),
+                "arxiv_id": info.get("arxiv_id"),
+                "title": ent.title,
+            })
+        elif info.get("title") or info.get("doi") or info.get("arxiv_id"):
+            ent = _entry_from_fields(
+                {"title": info.get("title") or fname.rsplit(".", 1)[0]},
+                info.get("doi"),
+                info.get("arxiv_id"),
+            )
+            parsed_entries.append(ent)
+            file_reports.append({
+                "filename": fname,
+                "status": "partial",
+                "doi": info.get("doi"),
+                "arxiv_id": info.get("arxiv_id"),
+                "title": ent.title,
+                "warning": lookup_err or "仅本地提取到基础标识符/标题，建议入库前补充核对",
+            })
+        else:
+            msg = lookup_err or "未从该 PDF 文字层识别出 DOI、arXiv 号或标题（扫描版暂不支持）"
+            parse_errors.append(BibParseError(line=idx, raw=fname, error=msg))
+            file_reports.append({"filename": fname, "status": "failed", "error": msg})
+
+    parsed = BibParseResult(entries=parsed_entries, errors=parse_errors)
+    out_entries, errors, total_blocks = library_ops.annotate_import_preview(parsed, index)
+    return {
+        "entries": out_entries,
+        "errors": errors,
+        "total_blocks": total_blocks,
+        "files": file_reports,
+    }
