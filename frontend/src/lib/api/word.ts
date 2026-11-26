@@ -134,7 +134,6 @@ export const wordApi = {
   renumberCitations: (pid: string, opts?: { style?: WordCitationStyle; expected_sha?: string }) =>
     req<WordRenumberResult>(`${P(pid)}/word/renumber-citations`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),
   exportPdf: (pid: string) => req<{ url: string; sha: string }>(`${P(pid)}/word/export/pdf`, { method: 'POST', body: '{}' }),
-  convertStructured: (pid: string) => req<WordProjectCreated>(`${P(pid)}/word/convert-structured`, { method: 'POST', body: '{}' }),
   /** ruleset 缺省 = jcip-preflight（后端空 body 语义一致，旧行为不变） */
   runPreflight: (pid: string, opts?: WordPreflightRunOptions) =>
     req<WordPreflightPost>(`${P(pid)}/word/preflight`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),

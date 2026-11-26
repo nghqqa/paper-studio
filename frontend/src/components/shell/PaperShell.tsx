@@ -5,7 +5,6 @@ import { Toasts } from './Toasts'
 
 const LatexWorkbench = lazy(() => import('@/components/latex/LatexWorkbench').then((m) => ({ default: m.LatexWorkbench })))
 const WordWorkbench = lazy(() => import('@/components/word/WordWorkbench').then((m) => ({ default: m.WordWorkbench })))
-const LegacyStructuredWorkbench = lazy(() => import('@/components/word/LegacyStructuredWorkbench').then((m) => ({ default: m.LegacyStructuredWorkbench })))
 const MarkdownPaperWorkbench = lazy(() => import('@/components/paper/MarkdownPaperWorkbench').then((m) => ({ default: m.MarkdownPaperWorkbench })))
 
 function PaperLoading({ text = '正在加载工作台…' }: { text?: string }) {
@@ -14,7 +13,7 @@ function PaperLoading({ text = '正在加载工作台…' }: { text?: string }) 
 
 /**
  * 论文产品专属工作台外壳（PRODUCT=paper）：
- * 按 source_format 按需懒加载 LaTeX / Word / 结构化 / Markdown 四种工作台，
+ * 按 source_format 按需懒加载 LaTeX / Word / Markdown 工作台，
  * 不静态引入专利桌面/移动壳（Dockview / ProseMirror / Yjs / 槽位扩展）。
  */
 export function PaperShell() {
@@ -50,8 +49,6 @@ export function PaperShell() {
   const workbench =
     sourceFormat === 'latex' ? (
       <LatexWorkbench key={pid} pid={pid} />
-    ) : sourceFormat === 'structured' ? (
-      <LegacyStructuredWorkbench pid={pid} />
     ) : sourceFormat === 'docx' ? (
       <WordWorkbench key={pid} pid={pid} />
     ) : (

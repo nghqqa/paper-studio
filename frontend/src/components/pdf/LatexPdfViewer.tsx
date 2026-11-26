@@ -8,150 +8,37 @@ import {
   useRef,
   useState,
 } from 'react'
-import { Document, Page } from 'react-pdf'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
+import { Loader2, RotateCw } from 'lucide-react'
 import { pdfDocumentOptions } from '@/lib/pdfjs'
-import 'react-pdf/dist/Page/TextLayer.css'
-import 'react-pdf/dist/Page/AnnotationLayer.css'
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  ChevronUp,
-  FileDown,
-  List,
-  Loader2,
-  Moon,
-  RotateCw,
-  Search,
-  Sun,
-  X,
-  ZoomIn,
-  ZoomOut,
-} from 'lucide-react'
 import { withFetchTimeout } from '@/lib/api'
 import { FOCUS_RING_INSET, cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { type PageText, extractPageTexts, findMatches, highlightHtml } from './pdfFind'
+import { extractPageTexts, findMatches, highlightHtml } from './pdfFind'
 import { A4_PT_H, A4_PT_W, ZOOM_PRESETS, type ZoomFit, clampZoom } from './pdfZoom'
+import PdfDocumentSlot from './PdfDocumentSlot'
+import PdfFindBar from './PdfFindBar'
+import PdfOutlineDrawer from './PdfOutlineDrawer'
+import PdfToolbar from './PdfToolbar'
+import {
+  clamp01,
+  computePageLayouts,
+  computeVisibleRange,
+  type InversePing,
+  type LatexPdfViewerProps,
+  MIN_PAGE_WIDTH,
+  type OutlineNode,
+  OVERSCAN,
+  PAD_X,
+  type PageLayout,
+  type PtSize,
+  scrollToY,
+  type Slot,
+  SWAP_TIMEOUT_MS,
+  type SyncHighlight,
+} from './pdfTypes'
 
-export interface SyncTexTarget {
-  page: number
-  xPt?: number
-  yPt?: number
-  nonce: number
-}
-
-export interface InverseSyncInfo {
-  page: number
-  xPt: number
-  yPt: number
-}
-
-export interface LatexPdfViewerProps {
-  url: string | null
-  downloadUrl?: string | null
-  downloadFilename?: string
-  jumpTarget?: SyncTexTarget | null
-  onInverseSync?: (info: InverseSyncInfo) => void
-  building?: boolean
-  stale?: boolean
-  className?: string
-}
-
-interface OutlineNode {
-  title: string
-  dest: unknown
-  url?: string | null
-  items?: OutlineNode[]
-}
-
-interface PtSize {
-  w: number
-  h: number
-}
-
-interface Slot {
-  url: string
-  file: { data: Uint8Array }
-  numPages: number
-  doc?: PDFDocumentProxy
-  defaultPt: PtSize
-  pageSizes: Record<number, PtSize>
-  texts?: PageText[]
-  outline?: OutlineNode[]
-}
-
-interface PageLayout {
-  page: number
-  width: number
-  height: number
-  top: number
-  ptW: number
-  ptH: number
-}
-
-interface SyncHighlight {
-  page: number
-  xFrac: number
-  yFrac: number
-  nonce: number
-}
-
-interface InversePing {
-  page: number
-  xFrac: number
-  yFrac: number
-  nonce: number
-}
-
-const GAP = 14
-const PAD_X = 28
-const PAD_Y = 24
-const OVERSCAN = 1
-const MIN_PAGE_WIDTH = 140
-const SWAP_TIMEOUT_MS = 20_000
-
-function scrollToY(el: HTMLDivElement, top: number, behavior: ScrollBehavior = 'auto') {
-  const safeTop = Math.max(0, top)
-  if (typeof el.scrollTo === 'function') el.scrollTo({ top: safeTop, behavior })
-  else el.scrollTop = safeTop
-}
-
-function clamp01(v: number): number {
-  return Math.min(1, Math.max(0, v))
-}
-
-function FlatOutlineList({
-  items,
-  depth = 0,
-  onSelect,
-}: {
-  items: OutlineNode[]
-  depth?: number
-  onSelect: (item: OutlineNode) => void
-}) {
-  return (
-    <ul className="space-y-0.5">
-      {items.map((item, idx) => (
-        <li key={`${depth}-${idx}-${item.title}`}>
-          <button
-            type="button"
-            className="w-full truncate rounded px-2 py-1 text-left text-xs text-fg hover:bg-hover hover:text-fg-strong"
-            style={{ paddingLeft: `${8 + depth * 12}px` }}
-            onClick={() => onSelect(item)}
-            title={item.title}
-          >
-            {item.title || '（无标题）'}
-          </button>
-          {item.items && item.items.length > 0 && (
-            <FlatOutlineList items={item.items} depth={depth + 1} onSelect={onSelect} />
-          )}
-        </li>
-      ))}
-    </ul>
-  )
-}
+export type { InverseSyncInfo, LatexPdfViewerProps, SyncTexTarget } from './pdfTypes'
 
 /**
  * LaTeX 专属高阶 PDF 预览器：
@@ -184,7 +71,6 @@ export default function LatexPdfViewer({
   const abortRef = useRef<AbortController | null>(null)
   const stagingRendered = useRef<Set<number>>(new Set())
 
-  // 工具条独立状态
   const [fit, setFit] = useState<ZoomFit>('width')
   const [customZoom, setCustomZoom] = useState(1)
   const [currentPage, setCurrentPage] = useState(1)
@@ -193,12 +79,10 @@ export default function LatexPdfViewer({
   const [invert, setInvert] = useState(false)
   const [outlineOpen, setOutlineOpen] = useState(false)
 
-  // PDF 内查找状态
   const [findOpen, setFindOpen] = useState(false)
   const [findQuery, setFindQuery] = useState('')
   const [findIdx, setFindIdx] = useState(0)
 
-  // SyncTeX 正/反向脉冲反馈
   const [syncHighlight, setSyncHighlight] = useState<SyncHighlight | null>(null)
   const [inversePing, setInversePing] = useState<InversePing | null>(null)
   const lastJumpNonce = useRef<number | null>(null)
@@ -236,7 +120,6 @@ export default function LatexPdfViewer({
     if (retryTimer.current != null) window.clearTimeout(retryTimer.current)
   }, [])
 
-  // 获取 PDF 字节：首次加载直出，后续重编译进隐藏槽实现零闪白热切换
   useEffect(() => {
     if (!url) {
       abortRef.current?.abort()
@@ -285,31 +168,10 @@ export default function LatexPdfViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [url, retryTick, scheduleRetry])
 
-  // 计算每页真实渲染宽高与纵坐标表
-  const pageLayouts = useMemo<PageLayout[]>(() => {
-    if (!shown || shown.numPages <= 0) return []
-    const availW = Math.max(MIN_PAGE_WIDTH, box.w - PAD_X)
-    const availH = Math.max(MIN_PAGE_WIDTH, box.h - PAD_Y)
-    const layouts: PageLayout[] = []
-    let top = 0
-    for (let p = 1; p <= shown.numPages; p++) {
-      const pt = shown.pageSizes[p] ?? shown.defaultPt
-      const aspect = pt.w > 0 ? pt.h / pt.w : A4_PT_H / A4_PT_W
-      let width: number
-      if (fit === 'width') {
-        width = availW
-      } else if (fit === 'page') {
-        width = Math.min(availW, Math.floor(availH / aspect))
-      } else {
-        width = Math.round(pt.w * (96 / 72) * customZoom)
-      }
-      width = Math.max(MIN_PAGE_WIDTH, width)
-      const height = Math.max(120, Math.round(width * aspect))
-      layouts.push({ page: p, width, height, top, ptW: pt.w, ptH: pt.h })
-      top += height + GAP
-    }
-    return layouts
-  }, [shown, box.w, box.h, fit, customZoom])
+  const pageLayouts = useMemo<PageLayout[]>(
+    () => computePageLayouts(shown, box, fit, customZoom),
+    [shown, box, fit, customZoom],
+  )
 
   const totalHeight = useMemo(() => {
     if (!pageLayouts.length) return 0
@@ -324,11 +186,11 @@ export default function LatexPdfViewer({
     return basePx > 0 ? Math.round((first.width / basePx) * 100) / 100 : 1
   }, [pageLayouts, fit, customZoom])
 
-  const maxRenderedWidth = useMemo(() => {
-    return pageLayouts.reduce((mx, l) => Math.max(mx, l.width), MIN_PAGE_WIDTH)
-  }, [pageLayouts])
+  const maxRenderedWidth = useMemo(
+    () => pageLayouts.reduce((mx, l) => Math.max(mx, l.width), MIN_PAGE_WIDTH),
+    [pageLayouts],
+  )
 
-  // 缩放 / 面板拖动改变文档总高度时按比例保持视口位置
   const prevTotalH = useRef(0)
   useLayoutEffect(() => {
     const el = scroller.current
@@ -340,42 +202,12 @@ export default function LatexPdfViewer({
     prevTotalH.current = totalHeight
   }, [totalHeight])
 
-  // 根据滚动位置计算可见页区间与当前页码
   const updateRange = useCallback(() => {
     const el = scroller.current
     if (!el || !pageLayouts.length) return
-    const viewTop = el.scrollTop
-    const viewBot = viewTop + (el.clientHeight || box.h)
-    const midY = viewTop + (el.clientHeight || box.h) / 3
-    let first = 1
-    let last = pageLayouts.length
-    let cur = 1
-    for (let i = 0; i < pageLayouts.length; i++) {
-      const l = pageLayouts[i]
-      const bot = l.top + l.height
-      if (bot >= viewTop) {
-        first = l.page
-        break
-      }
-    }
-    for (let i = pageLayouts.length - 1; i >= 0; i--) {
-      if (pageLayouts[i].top <= viewBot) {
-        last = pageLayouts[i].page
-        break
-      }
-    }
-    for (let i = 0; i < pageLayouts.length; i++) {
-      const l = pageLayouts[i]
-      if (midY <= l.top + l.height + GAP / 2) {
-        cur = l.page
-        break
-      }
-      cur = l.page
-    }
-    setCurrentPage(cur)
-    const from = Math.max(1, first - OVERSCAN)
-    const to = Math.min(pageLayouts.length, last + OVERSCAN)
-    setRange((r) => (r.from === from && r.to === to ? r : { from, to }))
+    const next = computeVisibleRange(pageLayouts, el.scrollTop, el.clientHeight || box.h)
+    setCurrentPage(next.currentPage)
+    setRange((r) => (r.from === next.from && r.to === next.to ? r : { from: next.from, to: next.to }))
   }, [pageLayouts, box.h])
 
   useEffect(() => {
@@ -404,7 +236,6 @@ export default function LatexPdfViewer({
     [pageLayouts],
   )
 
-  // SyncTeX 正向定位（由 nonce 驱动，支持同一页多次精确跳转并亮脉冲条）
   useEffect(() => {
     if (!jumpTarget || jumpTarget.nonce === lastJumpNonce.current || !pageLayouts.length) return
     const el = scroller.current
@@ -425,7 +256,6 @@ export default function LatexPdfViewer({
     return () => window.clearTimeout(t)
   }, [jumpTarget, pageLayouts, box.h])
 
-  // 隐藏槽渲染完毕 → 原子切前台；看门狗兜底防悬挂
   const trySwap = useCallback(
     (idx: 0 | 1) => {
       const slot = slots[idx]
@@ -461,7 +291,6 @@ export default function LatexPdfViewer({
     return () => window.clearTimeout(t)
   }, [staging, slots])
 
-  // PDF 内查找（延迟提取当前激活槽文本）
   const normalizedQuery = findOpen ? findQuery.trim() : ''
   useEffect(() => {
     if (!normalizedQuery || !shown?.doc || shown.texts) return
@@ -508,7 +337,6 @@ export default function LatexPdfViewer({
       )
   }, [normalizedQuery, currentMatch])
 
-  // Ctrl/Cmd + 滚轮缩放（需 passive: false 以阻断浏览器整页缩放）
   const effectiveZoomRef = useRef(effectiveZoom)
   effectiveZoomRef.current = effectiveZoom
   useEffect(() => {
@@ -556,23 +384,26 @@ export default function LatexPdfViewer({
     }
   }
 
-  const triggerInverseSync = (e: MouseEvent<HTMLDivElement>, l: PageLayout) => {
-    if (!onInverseSync) return
-    const sel = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() : ''
-    if (sel) return
-    const rect = e.currentTarget.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return
-    const rx = clamp01((e.clientX - rect.left) / rect.width)
-    const ry = clamp01((e.clientY - rect.top) / rect.height)
-    const nonce = Date.now()
-    setInversePing({ page: l.page, xFrac: rx, yFrac: ry, nonce })
-    window.setTimeout(() => {
-      setInversePing((cur) => (cur?.nonce === nonce ? null : cur))
-    }, 700)
-    onInverseSync({ page: l.page, xPt: rx * l.ptW, yPt: ry * l.ptH })
-  }
+  const triggerInverseSync = useCallback(
+    (e: MouseEvent<HTMLDivElement>, l: PageLayout) => {
+      if (!onInverseSync) return
+      const sel = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() : ''
+      if (sel) return
+      const rect = e.currentTarget.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) return
+      const rx = clamp01((e.clientX - rect.left) / rect.width)
+      const ry = clamp01((e.clientY - rect.top) / rect.height)
+      const nonce = Date.now()
+      setInversePing({ page: l.page, xFrac: rx, yFrac: ry, nonce })
+      window.setTimeout(() => {
+        setInversePing((cur) => (cur?.nonce === nonce ? null : cur))
+      }, 700)
+      onInverseSync({ page: l.page, xPt: rx * l.ptW, yPt: ry * l.ptH })
+    },
+    [onInverseSync],
+  )
 
-  const selectZoomValue = (val: string) => {
+  const selectZoomValue = useCallback((val: string) => {
     if (val === 'width' || val === 'page') {
       setFit(val)
     } else {
@@ -582,7 +413,7 @@ export default function LatexPdfViewer({
         setCustomZoom(clampZoom(z))
       }
     }
-  }
+  }, [])
 
   const jumpOutlineNode = async (item: OutlineNode) => {
     const doc = shown?.doc
@@ -604,6 +435,39 @@ export default function LatexPdfViewer({
     }
   }
 
+  const handleDocLoaded = useCallback(
+    (idx: 0 | 1, loadedSlot: Slot, doc: PDFDocumentProxy, defaultPt: PtSize, outline: OutlineNode[]) => {
+      setSlots((s) =>
+        s.map((cur, si) =>
+          si === idx && cur === loadedSlot
+            ? { ...cur, numPages: doc.numPages, doc, defaultPt, pageSizes: { 1: defaultPt }, outline }
+            : cur,
+        ) as [Slot | null, Slot | null],
+      )
+    },
+    [],
+  )
+
+  const handlePageSize = useCallback((idx: 0 | 1, page: number, w: number, h: number) => {
+    setSlots((s) =>
+      s.map((cur, si) => {
+        if (si !== idx || !cur) return cur
+        const prev = cur.pageSizes[page]
+        if (prev && Math.abs(prev.w - w) < 0.5 && Math.abs(prev.h - h) < 0.5) return cur
+        return { ...cur, pageSizes: { ...cur.pageSizes, [page]: { w, h } } }
+      }) as [Slot | null, Slot | null],
+    )
+  }, [])
+
+  const handleStagingPageSettled = useCallback(
+    (idx: 0 | 1, page: number) => {
+      if (idx !== staging) return
+      stagingRendered.current.add(page)
+      trySwap(idx)
+    },
+    [staging, trySwap],
+  )
+
   const options = useMemo(() => ({ ...pdfDocumentOptions }), [])
   const zoomSelectValue =
     fit === 'width'
@@ -613,143 +477,6 @@ export default function LatexPdfViewer({
         : ZOOM_PRESETS.some((p) => Math.abs(p - customZoom) < 0.01)
           ? String(ZOOM_PRESETS.find((p) => Math.abs(p - customZoom) < 0.01))
           : 'custom'
-
-  const renderSlot = (idx: 0 | 1) => {
-    const slot = slots[idx]
-    if (!slot) return null
-    const isActive = idx === active
-    const isStaging = idx === staging
-    if (!isActive && !isStaging) return null
-    return (
-      <div
-        key={`${idx}-${slot.url}`}
-        style={{ width: maxRenderedWidth }}
-        className={cn(
-          'mx-auto flex flex-col items-center',
-          !isActive && 'pointer-events-none invisible absolute inset-x-0 top-3',
-        )}
-        aria-hidden={!isActive}
-        data-testid={isActive ? 'latex-pdf-active' : 'latex-pdf-staging'}
-      >
-        <Document
-          file={slot.file}
-          options={options}
-          loading={null}
-          error={isActive ? <PdfFailBox onRetry={() => setRetryTick((t) => t + 1)} /> : null}
-          externalLinkTarget="_blank"
-          onItemClick={({ pageNumber }) => {
-            if (pageNumber) goToPage(pageNumber)
-          }}
-          onLoadSuccess={(doc) => {
-            void Promise.all([
-              doc.getPage(1).then((p) => {
-                const v = p.getViewport({ scale: 1 })
-                return { w: v.width || A4_PT_W, h: v.height || A4_PT_H }
-              }).catch(() => ({ w: A4_PT_W, h: A4_PT_H })),
-              typeof doc.getOutline === 'function'
-                ? doc.getOutline().catch(() => [])
-                : Promise.resolve([]),
-            ]).then(([defaultPt, rawOutline]) => {
-              const outline = Array.isArray(rawOutline) ? (rawOutline as OutlineNode[]) : []
-              setSlots((s) =>
-                s.map((cur, si) =>
-                  si === idx && cur === slot
-                    ? { ...cur, numPages: doc.numPages, doc, defaultPt, pageSizes: { 1: defaultPt }, outline }
-                    : cur,
-                ) as [Slot | null, Slot | null],
-              )
-            })
-          }}
-          onLoadError={() => scheduleRetry(slot.url)}
-          className="flex flex-col items-center"
-        >
-          {Array.from({ length: slot.numPages }, (_, i) => {
-            const n = i + 1
-            const layout = pageLayouts[i]
-            const w = layout?.width ?? Math.max(MIN_PAGE_WIDTH, box.w - PAD_X)
-            const h = layout?.height ?? Math.round(w * (A4_PT_H / A4_PT_W))
-            const inRange = n >= range.from && n <= range.to
-            const hasHighlight = isActive && syncHighlight?.page === n
-            const hasPing = isActive && inversePing?.page === n
-            return (
-              <div
-                key={n}
-                style={{ width: w, height: h, marginBottom: n < slot.numPages ? GAP : 0 }}
-                className="relative select-text rounded-xs bg-paper text-paper-fg shadow-paper"
-                data-page={n}
-                onDoubleClick={(e) => {
-                  if (!layout) return
-                  triggerInverseSync(e, layout)
-                }}
-                onClick={(e) => {
-                  if (!layout || !(e.ctrlKey || e.metaKey)) return
-                  triggerInverseSync(e, layout)
-                }}
-                title={onInverseSync ? '双击或 Ctrl+点击跳转到对应源码行' : undefined}
-              >
-                <div style={invert ? { filter: 'invert(0.9) hue-rotate(180deg)' } : undefined}>
-                  {inRange && (
-                    <Page
-                      pageNumber={n}
-                      width={w}
-                      renderAnnotationLayer
-                      customTextRenderer={textRenderer}
-                      loading={null}
-                      onLoadSuccess={(page) => {
-                        const v = page.getViewport({ scale: 1 })
-                        if (!v.width || !v.height) return
-                        setSlots((s) =>
-                          s.map((cur, si) => {
-                            if (si !== idx || !cur) return cur
-                            const prev = cur.pageSizes[n]
-                            if (prev && Math.abs(prev.w - v.width) < 0.5 && Math.abs(prev.h - v.height) < 0.5) {
-                              return cur
-                            }
-                            return { ...cur, pageSizes: { ...cur.pageSizes, [n]: { w: v.width, h: v.height } } }
-                          }) as [Slot | null, Slot | null],
-                        )
-                      }}
-                      onRenderSuccess={() => {
-                        if (idx !== staging) return
-                        stagingRendered.current.add(n)
-                        trySwap(idx)
-                      }}
-                      onRenderError={() => {
-                        if (idx !== staging) return
-                        stagingRendered.current.add(n)
-                        trySwap(idx)
-                      }}
-                    />
-                  )}
-                </div>
-                {hasHighlight && syncHighlight && (
-                  <div
-                    aria-hidden
-                    data-testid="latex-pdf-synctex-highlight"
-                    className="pointer-events-none absolute inset-x-0 h-5 -translate-y-1/2 border-y border-accent bg-accent/20 transition-opacity"
-                    style={{ top: `${syncHighlight.yFrac * 100}%` }}
-                  >
-                    <span
-                      className="absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent"
-                      style={{ left: `${syncHighlight.xFrac * 100}%` }}
-                    />
-                  </div>
-                )}
-                {hasPing && inversePing && (
-                  <span
-                    aria-hidden
-                    data-testid="latex-pdf-inverse-ping"
-                    className="pointer-events-none absolute size-4 -translate-x-1/2 -translate-y-1/2 animate-ping rounded-full bg-accent/50"
-                    style={{ left: `${inversePing.xFrac * 100}%`, top: `${inversePing.yFrac * 100}%` }}
-                  />
-                )}
-              </div>
-            )
-          })}
-        </Document>
-      </div>
-    )
-  }
 
   if (!url) return null
 
@@ -762,255 +489,63 @@ export default function LatexPdfViewer({
       data-testid="latex-pdf-viewer"
       data-zoom-fit={fit}
     >
-      {/* 紧凑工具条 */}
-      <div
-        className="flex min-h-8 shrink-0 flex-wrap items-center gap-1 border-b border-line bg-panel px-2 py-1 text-xs"
-        data-testid="latex-pdf-toolbar"
-      >
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="上一页"
-          title="上一页"
-          disabled={numPages === 0 || currentPage <= 1}
-          onClick={() => goToPage(currentPage - 1)}
-          data-testid="latex-pdf-prev-page"
-        >
-          <ChevronUp aria-hidden />
-        </Button>
-        <label className="flex items-center gap-1 text-xs text-fg-muted">
-          <input
-            type="text"
-            inputMode="numeric"
-            aria-label="当前页码"
-            data-testid="latex-pdf-page-input"
-            className="h-xs w-11 rounded border border-line bg-surface px-1 text-center text-xs tabular-nums text-fg focus:border-accent focus:outline-none"
-            value={pageDraft ?? (numPages > 0 ? String(currentPage) : '')}
-            disabled={numPages === 0}
-            onFocus={(e) => {
-              setPageDraft(String(currentPage))
-              e.currentTarget.select()
-            }}
-            onChange={(e) => setPageDraft(e.target.value)}
-            onBlur={() => {
-              if (pageDraft != null) {
-                const parsed = Number.parseInt(pageDraft, 10)
-                if (Number.isFinite(parsed)) goToPage(parsed)
-                else setPageDraft(null)
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const parsed = Number.parseInt(pageDraft ?? '', 10)
-                if (Number.isFinite(parsed)) goToPage(parsed)
-                e.currentTarget.blur()
-              } else if (e.key === 'Escape') {
-                setPageDraft(null)
-                e.currentTarget.blur()
-              }
-            }}
-          />
-          <span className="tabular-nums" data-testid="latex-pdf-total-pages">/ {numPages || '—'}</span>
-        </label>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="下一页"
-          title="下一页"
-          disabled={numPages === 0 || currentPage >= numPages}
-          onClick={() => goToPage(currentPage + 1)}
-          data-testid="latex-pdf-next-page"
-        >
-          <ChevronDown aria-hidden />
-        </Button>
+      <PdfToolbar
+        numPages={numPages}
+        currentPage={currentPage}
+        pageDraft={pageDraft}
+        onPageDraftChange={setPageDraft}
+        onGoToPage={goToPage}
+        effectiveZoom={effectiveZoom}
+        customZoom={customZoom}
+        zoomSelectValue={zoomSelectValue}
+        onSelectZoomValue={selectZoomValue}
+        onStepZoom={(delta) => {
+          setFit('custom')
+          setCustomZoom(clampZoom(effectiveZoom + delta))
+        }}
+        building={building}
+        stale={stale}
+        findOpen={findOpen}
+        onToggleFind={() => {
+          const next = !findOpen
+          setFindOpen(next)
+          if (next) window.setTimeout(() => findInputRef.current?.focus(), 0)
+        }}
+        hasOutline={outlineItems.length > 0}
+        outlineOpen={outlineOpen}
+        onToggleOutline={() => setOutlineOpen((o) => !o)}
+        invert={invert}
+        onToggleInvert={() => setInvert((v) => !v)}
+        downloadUrl={downloadUrl}
+        downloadFilename={downloadFilename}
+      />
 
-        <span className="mx-1 h-4 w-px bg-line" aria-hidden />
-
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="缩小"
-          title="缩小（Ctrl+-）"
-          onClick={() => {
-            setFit('custom')
-            setCustomZoom(clampZoom(effectiveZoom - 0.15))
-          }}
-          data-testid="latex-pdf-zoom-out"
-        >
-          <ZoomOut aria-hidden />
-        </Button>
-        <select
-          aria-label="缩放比例"
-          data-testid="latex-pdf-zoom-select"
-          value={zoomSelectValue}
-          onChange={(e) => selectZoomValue(e.target.value)}
-          className="h-xs rounded border border-line bg-surface px-1.5 text-xs tabular-nums text-fg focus:border-accent focus:outline-none"
-        >
-          <option value="width">适宽（{Math.round(effectiveZoom * 100)}%）</option>
-          <option value="page">适页</option>
-          {ZOOM_PRESETS.map((z) => (
-            <option key={z} value={String(z)}>{Math.round(z * 100)}%</option>
-          ))}
-          {zoomSelectValue === 'custom' && (
-            <option value="custom">{Math.round(customZoom * 100)}%</option>
-          )}
-        </select>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label="放大"
-          title="放大（Ctrl++）"
-          onClick={() => {
-            setFit('custom')
-            setCustomZoom(clampZoom(effectiveZoom + 0.15))
-          }}
-          data-testid="latex-pdf-zoom-in"
-        >
-          <ZoomIn aria-hidden />
-        </Button>
-
-        <div className="ml-auto flex items-center gap-1">
-          {building && (
-            <span className="inline-flex items-center gap-1 text-2xs text-fg-muted" data-testid="latex-pdf-rebuilding">
-              <Loader2 aria-hidden className="size-3 animate-spin" />
-              编译更新中
-            </span>
-          )}
-          {!building && stale && (
-            <span className="text-2xs text-warning" title="源码已改，待重新编译">过期</span>
-          )}
-          <Button
-            variant={findOpen ? 'soft' : 'ghost'}
-            size="icon-xs"
-            aria-label="PDF 内查找"
-            title="PDF 内查找（Ctrl+F）"
-            onClick={() => {
-              const next = !findOpen
-              setFindOpen(next)
-              if (next) window.setTimeout(() => findInputRef.current?.focus(), 0)
-            }}
-            data-testid="latex-pdf-find-toggle"
-          >
-            <Search aria-hidden />
-          </Button>
-          {outlineItems.length > 0 && (
-            <Button
-              variant={outlineOpen ? 'soft' : 'ghost'}
-              size="icon-xs"
-              aria-label="PDF 目录书签"
-              title="PDF 目录书签"
-              onClick={() => setOutlineOpen((o) => !o)}
-              data-testid="latex-pdf-outline-toggle"
-            >
-              <List aria-hidden />
-            </Button>
-          )}
-          <Button
-            variant={invert ? 'soft' : 'ghost'}
-            size="icon-xs"
-            aria-label={invert ? '关闭护眼反色' : '开启护眼反色'}
-            title={invert ? '恢复浅色纸面' : '夜间护眼反色'}
-            onClick={() => setInvert((v) => !v)}
-            data-testid="latex-pdf-invert"
-          >
-            {invert ? <Sun aria-hidden /> : <Moon aria-hidden />}
-          </Button>
-          {downloadUrl && (
-            <a
-              href={downloadUrl}
-              download={downloadFilename ?? 'paper.pdf'}
-              aria-label="下载 PDF"
-              title="下载当前预览 PDF"
-              data-testid="latex-pdf-toolbar-download"
-              className="inline-flex h-xs items-center gap-1 rounded px-1.5 text-xs text-fg-muted hover:bg-hover hover:text-fg"
-            >
-              <FileDown aria-hidden className="size-3.5" />
-            </a>
-          )}
-        </div>
-      </div>
-
-      {/* 查找浮条 */}
       {findOpen && (
-        <div
-          className="flex shrink-0 items-center gap-1.5 border-b border-line bg-surface px-2 py-1 text-xs"
-          data-testid="latex-pdf-find-bar"
-        >
-          <Search aria-hidden className="size-3.5 shrink-0 text-fg-muted" />
-          <input
-            ref={findInputRef}
-            type="text"
-            value={findQuery}
-            onChange={(e) => {
-              setFindQuery(e.target.value)
-              setFindIdx(0)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && matches.length > 0) {
-                e.preventDefault()
-                const delta = e.shiftKey ? -1 : 1
-                setFindIdx((i) => (i + delta + matches.length) % matches.length)
-              } else if (e.key === 'Escape') {
-                setFindOpen(false)
-              }
-            }}
-            placeholder="在 PDF 中查找…"
-            aria-label="在 PDF 中查找"
-            data-testid="latex-pdf-find-input"
-            className="h-xs min-w-0 flex-1 rounded border border-line bg-panel px-2 text-xs text-fg focus:border-accent focus:outline-none"
-          />
-          <span className="shrink-0 text-2xs tabular-nums text-fg-muted" data-testid="latex-pdf-find-count">
-            {normalizedQuery ? (matches.length ? `${clampedFindIdx + 1} / ${matches.length}` : '0 命中') : ''}
-          </span>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="上一处"
-            disabled={matches.length === 0}
-            onClick={() => setFindIdx((i) => (i - 1 + matches.length) % matches.length)}
-            data-testid="latex-pdf-find-prev"
-          >
-            <ChevronLeft aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="下一处"
-            disabled={matches.length === 0}
-            onClick={() => setFindIdx((i) => (i + 1) % matches.length)}
-            data-testid="latex-pdf-find-next"
-          >
-            <ChevronRight aria-hidden />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-xs"
-            aria-label="关闭查找"
-            onClick={() => setFindOpen(false)}
-          >
-            <X aria-hidden />
-          </Button>
-        </div>
+        <PdfFindBar
+          inputRef={findInputRef}
+          query={findQuery}
+          normalizedQuery={normalizedQuery}
+          matchCount={matches.length}
+          currentIndex={clampedFindIdx}
+          onQueryChange={(q) => {
+            setFindQuery(q)
+            setFindIdx(0)
+          }}
+          onStepMatch={(delta) => {
+            if (matches.length > 0) setFindIdx((i) => (i + delta + matches.length) % matches.length)
+          }}
+          onClose={() => setFindOpen(false)}
+        />
       )}
 
-      {/* 书签大纲抽屉 */}
       {outlineOpen && outlineItems.length > 0 && (
-        <aside
-          aria-label="PDF 书签大纲"
-          data-testid="latex-pdf-outline"
-          className="absolute right-2 top-9 z-popover max-h-72 w-64 overflow-y-auto rounded-md border border-line bg-panel p-2 shadow-md"
-        >
-          <div className="mb-1 flex items-center justify-between px-1 text-2xs font-medium text-fg-muted">
-            <span>PDF 书签</span>
-            <button type="button" className="hover:text-fg" onClick={() => setOutlineOpen(false)} aria-label="关闭书签">
-              <X className="size-3.5" />
-            </button>
-          </div>
-          <FlatOutlineList items={outlineItems} onSelect={(it) => void jumpOutlineNode(it)} />
-        </aside>
+        <PdfOutlineDrawer
+          items={outlineItems}
+          onSelect={(it) => void jumpOutlineNode(it)}
+          onClose={() => setOutlineOpen(false)}
+        />
       )}
 
-      {/* 滚动容器 */}
       <div
         ref={scroller}
         onScroll={onScroll}
@@ -1024,8 +559,37 @@ export default function LatexPdfViewer({
         )}
         data-testid="latex-pdf-scroll"
       >
-        {renderSlot(0)}
-        {renderSlot(1)}
+        {([0, 1] as const).map((idx) => {
+          const slot = slots[idx]
+          const isActive = idx === active
+          const isStaging = idx === staging
+          if (!slot || (!isActive && !isStaging)) return null
+          return (
+            <PdfDocumentSlot
+              key={`${idx}-${slot.url}`}
+              slot={slot}
+              slotIndex={idx}
+              isActive={isActive}
+              options={options}
+              maxRenderedWidth={maxRenderedWidth}
+              boxWidth={box.w}
+              pageLayouts={pageLayouts}
+              range={range}
+              invert={invert}
+              textRenderer={textRenderer}
+              syncHighlight={syncHighlight}
+              inversePing={inversePing}
+              inverseSyncEnabled={Boolean(onInverseSync)}
+              onGoToPage={goToPage}
+              onDocLoaded={handleDocLoaded}
+              onDocError={scheduleRetry}
+              onRetry={() => setRetryTick((t) => t + 1)}
+              onPageSize={handlePageSize}
+              onStagingPageSettled={handleStagingPageSettled}
+              onInverseSyncTrigger={triggerInverseSync}
+            />
+          )
+        })}
         {!shown && !effectiveFailed && (
           <div className="grid min-h-40 place-items-center text-xs text-fg-muted" data-testid="latex-pdf-loading">
             <Loader2 aria-hidden className="size-5 animate-spin" />
@@ -1049,18 +613,6 @@ export default function LatexPdfViewer({
           </div>
         )}
       </div>
-    </div>
-  )
-}
-
-function PdfFailBox({ onRetry }: { onRetry: () => void }) {
-  return (
-    <div className="my-6 flex flex-col items-center gap-2" role="alert">
-      <p className="text-xs text-danger-fg">PDF 解析失败</p>
-      <Button variant="ghost" size="sm" onClick={onRetry} data-testid="latex-pdf-retry">
-        <RotateCw aria-hidden className="size-3.5" />
-        重试
-      </Button>
     </div>
   )
 }

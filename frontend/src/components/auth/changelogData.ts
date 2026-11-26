@@ -23,19 +23,42 @@ export const CHANGE_CATEGORY_META: Record<ChangeCategory, { label: string; tone:
   fix: { label: '问题修复', tone: 'ok' },
 }
 
-export const LATEST_RELEASE_VERSION = 'v1.2.0'
+export const LATEST_RELEASE_VERSION = 'v1.2.2'
 
 /**
  * 面向科研用户的版本演进记录（按发布时间倒序）。
  */
 export const CHANGELOG_RELEASES: ReleaseEntry[] = [
   {
+    id: 'v1.2.2',
+    version: 'v1.2.2',
+    date: '2026-11-26',
+    title: '架构精简、PDF 预览器与后端路由模块化',
+    summary: '下线早期实验性结构化写作遗留模块并移除冗余依赖，将 LaTeX PDF 预览器与核心后端模块拆解为独立子模块，进一步提升可维护性与接口权限一致性。',
+    badge: '最新',
+    changes: [
+      { category: 'improvement', text: '下线默认关闭的早期实验性结构化写作模块及 ProseMirror 冗余依赖，进一步收口纯学术 LaTeX / Word 双主线。' },
+      { category: 'improvement', text: '拆解 LaTeX PDF 预览器、文献管理路由、LaTeX 路由与 Word 导出后处理模块，降低单文件复杂度并保持接口与交互零破坏。' },
+      { category: 'fix', text: '修复路由拆分后子路由前缀在权限矩阵匹配中的边界问题，确保全部受保护接口权限校验一致生效。' },
+    ],
+  },
+  {
+    id: 'v1.2.1',
+    version: 'v1.2.1',
+    date: '2026-11-25',
+    title: 'Word 编辑器加载稳定性与 LaTeX 侧栏排版优化',
+    summary: '优化 ONLYOFFICE 静态资源命中与冷加载超时容错，拓宽 LaTeX 工作台左侧栏以完整展示全部功能页签。',
+    changes: [
+      { category: 'fix', text: '优化 Word 文档编辑器静态资源版本路由匹配与冷加载等待时长，消除服务重启后偶发打开超时问题。' },
+      { category: 'improvement', text: '拓宽 LaTeX 左侧栏并精简页签布局，完整展示「文件 / 大纲 / Issues / 检查 / 历史 / 同步」6 个页签，消除底部横向滚动条。' },
+    ],
+  },
+  {
     id: 'v1.2.0',
     version: 'v1.2.0',
     date: '2026-11-25',
     title: '科研写作效率套件、返修差异 PDF 与自托管治理升级',
     summary: '围绕科研投稿全链路新增三线表生成、命名里程碑与 latexdiff 返修高亮 PDF、300/600 DPI 与矢量科研图表导出、arXiv 预印本一键升级，以及公网注册管控与站内通知铃铛。',
-    badge: '最新',
     changes: [
       { category: 'feature', text: '新增公网自托管注册管控（支持开放注册 / 邀请码 / 关闭注册与高校邮箱域名白名单，支持环境变量预设与平台后台实时调整）。' },
       { category: 'feature', text: '工作空间顶栏上线轻量站内通知铃铛，实时提醒成员邀请、角色变更、批注 @ 提及与外部审阅确认定稿。' },

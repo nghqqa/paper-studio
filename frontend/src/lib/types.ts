@@ -14,7 +14,7 @@ export interface ProjectSummary {
   id: string
   title: string
   submission?: PaperSubmission
-  source_format?: 'markdown' | 'latex' | 'structured' | 'docx'
+  source_format?: 'markdown' | 'latex' | 'docx'
   /** 最后修改时间（Unix 秒） */
   mtime: number
   /** 负责人账号；无 owner / auth=off / 账号已删 ⇒ null */
@@ -31,7 +31,7 @@ export interface ProjectSummary {
 
 export interface Settings {
   ai_enabled?: boolean
-  source_format?: 'markdown' | 'latex' | 'structured' | 'docx'
+  source_format?: 'markdown' | 'latex' | 'docx'
   latex?: { main: string; engine: string; title?: string }
   document_type?: 'patent' | 'paper'
   title?: string

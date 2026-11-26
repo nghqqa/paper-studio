@@ -8,8 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Segmented } from '@/components/ui/segmented'
 import { latexApi } from '@/lib/api/latex'
 import { wordApi } from '@/lib/api/word'
-import { structApi, type PaperTemplatesReply } from '@/lib/api/struct'
-import { thumbUrl } from '@/lib/api/paperTemplates'
+import { paperTemplatesApi, thumbUrl, type PaperTemplatesReply } from '@/lib/api/paperTemplates'
 import { ApiError } from '@/lib/api/net'
 import { useStudio } from '@/store'
 import { cn } from '@/lib/utils'
@@ -25,7 +24,7 @@ function TemplateThumb({ format, id, name, version, updatedAt, thumb, icon, clas
     onError={() => setBroken(true)} className={cn('h-12 w-9 shrink-0 rounded-xs border border-border object-cover object-top', className)} />
 }
 
-/** Word 原稿是中文论文默认入口；存量结构化稿件在原工作台提供转换入口。 */
+/** Word 原稿与 LaTeX 工程是论文项目新建入口。 */
 export function NewPaperProjectDialog({ open, onOpenChange, onZipImport }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -63,7 +62,7 @@ export function NewPaperProjectDialog({ open, onOpenChange, onZipImport }: {
     setBusy(false)
     if (useStudio.getState().wordEditorEnabled === null) void useStudio.getState().fetchMeta()
     let alive = true
-    structApi.paperTemplates()
+    paperTemplatesApi.catalogue()
       .then((r) => {
         if (!alive) return
         setReg(r)

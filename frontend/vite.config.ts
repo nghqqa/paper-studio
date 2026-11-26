@@ -54,7 +54,6 @@ export default defineConfig({
           groups: [
             { name: 'vendor-codemirror', test: /[\\/]node_modules[\\/](@codemirror|@lezer|style-mod|crelt|@marijn[\\/]find-cluster-break)[\\/]/ },
             { name: 'vendor-katex', test: /[\\/]node_modules[\\/]katex[\\/]/ },
-            { name: 'vendor-prosemirror', test: /[\\/]node_modules[\\/]prosemirror-[^\\/]+[\\/]/ },
           ],
         },
       },

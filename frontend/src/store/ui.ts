@@ -26,7 +26,6 @@ export interface UiSlice extends UiPersisted {
   product: ProductMode
   metaError: string | null
   docxExportEnabled: boolean | null
-  structWriterEnabled: boolean | null
   wordEditorEnabled: boolean | null
   wordEditorReady: boolean | null
   demoMode: boolean
@@ -57,7 +56,6 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
   product: 'unknown',
   metaError: null,
   docxExportEnabled: null,
-  structWriterEnabled: null,
   wordEditorEnabled: null,
   wordEditorReady: null,
   demoMode: false,
@@ -77,7 +75,6 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
       const m = (await r.json()) as {
         product: string
         docx_export: boolean
-        struct_writer?: boolean
         word_editor?: boolean
         word_editor_ready?: boolean
         demo_mode?: boolean
@@ -93,7 +90,6 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
       set({
         product: 'paper',
         docxExportEnabled: Boolean(m.docx_export),
-        structWriterEnabled: Boolean(m.struct_writer),
         wordEditorEnabled: Boolean(m.word_editor),
         wordEditorReady: Boolean(m.word_editor_ready),
         demoMode: Boolean(m.demo_mode),

@@ -47,7 +47,7 @@ export interface PublicShareMeta {
   /** 已有确认（最新一条） */
   confirmation: Confirmation | null
   pdf_ready: boolean
-  source_format?: 'markdown' | 'structured' | 'latex' | 'docx'
+  source_format?: 'markdown' | 'latex' | 'docx'
   document_type?: 'patent' | 'paper'
   layout_supported?: boolean
 }

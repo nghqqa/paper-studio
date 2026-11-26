@@ -218,23 +218,6 @@ def test_word_comments_and_confirm_record_word_version(on, tmp_path):
 # ---------------- structured / markdown 兼容 ----------------
 
 
-def test_structured_link_meta_and_comments(on, tmp_path):
-    anon, su = _team(on)
-    d = tmp_path / "projects" / "method"
-    (d / "content.md").unlink(missing_ok=True)
-    _set_settings(d, {"source_format": "structured", "document_type": "paper"})
-    tok = _link(su, scope="comment")["token"]
-
-    m = anon.get(f"/api/public/{tok}/meta")
-    assert m.status_code == 200, m.text
-    j = m.json()
-    assert j["source_format"] == "structured" and j["layout_supported"] is False and j["pending_revisions"] == 0
-
-    r = anon.post(f"/api/public/{tok}/comments", json={"name": "王编辑", "anchor": {"block_id": "pdf:page-1", "line": 1}, "body": "x"})
-    assert r.status_code == 201, r.text
-    assert anon.get(f"/api/public/{tok}/comments").status_code == 200
-
-
 def test_markdown_meta_keeps_paper_defaults(on):
     """纯化后公开审阅仅支持 PDF 审阅（layout_supported 恒为 False，默认 paper）。"""
     anon, su = _team(on)

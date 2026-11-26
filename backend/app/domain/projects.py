@@ -18,11 +18,10 @@ DOCX_FIG_EXTS = (".emf", ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff")
 ID_RE = re.compile(r"^[A-Za-z0-9_\-\u4e00-\u9fff]{1,64}$")
 _BAD_ID_CHARS = re.compile(r"[^A-Za-z0-9_\-\u4e00-\u9fff]+")
 
-SOURCE_FORMATS = ("markdown", "latex", "structured", "docx")
+SOURCE_FORMATS = ("markdown", "latex", "docx")
 LATEX_TEXT_EXTS = (".tex", ".bib", ".cls", ".bst", ".sty", ".ltx", ".txt")
 LATEX_SOURCE_EXCLUDE_DIRS = (".studio", "__pycache__")
 LATEX_INTERNAL_FILES = ("studio.json", "content.md", "case.json")
-STRUCT_CONTENT_FILE = "content.json"
 
 ATTACHMENTS_DIR = "attachments"
 ATTACHMENT_EXTS = (".pdf", ".docx", ".doc", ".md", ".txt", ".png", ".jpg", ".zip")
@@ -54,17 +53,6 @@ def _is_latex_dir(d) -> bool:
     try:
         with open(p, encoding="utf-8") as f:
             return (json.load(f) or {}).get("source_format") == "latex"
-    except (OSError, ValueError):
-        return False
-
-
-def _is_struct_dir(d) -> bool:
-    p = os.path.join(d, SETTINGS_FILE)
-    if not os.path.isfile(p):
-        return False
-    try:
-        with open(p, encoding="utf-8") as f:
-            return (json.load(f) or {}).get("source_format") == "structured"
     except (OSError, ValueError):
         return False
 
@@ -196,7 +184,6 @@ class ProjectStore:
             os.path.isfile(os.path.join(d, SETTINGS_FILE))
             or os.path.isfile(os.path.join(d, "content.md"))
             or _is_latex_dir(d)
-            or _is_struct_dir(d)
             or _is_word_dir(d)
         )
 
@@ -300,35 +287,6 @@ class ProjectStore:
         }
         atomic.write_json(os.path.join(d, SETTINGS_FILE), normalize_settings(settings))
         return self.get(pid)
-
-    def create_structured(self, pid, title=None, submission=None):
-        if not ID_RE.match(pid) or pid in (".", ".."):
-            raise ProjectError("id 只能包含字母、数字、下划线、连字符或中文", 400)
-        d = os.path.join(self.root, pid)
-        if os.path.exists(d):
-            raise ProjectError(f"已存在：{pid}", 409)
-        os.makedirs(os.path.join(d, "resources"))
-        settings = {
-            "document_type": "paper",
-            "source_format": "structured",
-            "title": title or "结构化中文论文（实验）",
-            "style": {},
-        }
-        if submission:
-            settings["submission"] = {k: str(v or "")[:80] for k, v in submission.items() if v}
-        atomic.write_json(os.path.join(d, SETTINGS_FILE), settings)
-        content = {
-            "schema_version": 1,
-            "title": title or "",
-            "title_en": "", "authors": "", "affil": "",
-            "abstract_zh": "", "abstract_en": "", "keywords": "",
-            "body": [
-                {"type": "h1", "text": "引言"},
-                {"type": "p", "text": ""},
-            ],
-        }
-        atomic.write_json(os.path.join(d, STRUCT_CONTENT_FILE), content)
-        return Project(id=pid, dir=d, title=settings["title"], settings=settings)
 
     def create_latex_demo(self, pid, seed_dir=None, title=None):
         if not ID_RE.match(pid) or pid in (".", ".."):

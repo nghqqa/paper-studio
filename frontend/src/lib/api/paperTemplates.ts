@@ -67,6 +67,32 @@ export interface PaperTemplateInput {
   engine: 'pdflatex' | 'xelatex'
 }
 
+export interface PaperTemplateInfo {
+  id: string
+  name: string
+  desc: string
+  language: string
+  kind: string
+  venue: string
+  /** 版本年份（滚动模板标 master 实际取用年；未标注=通用骨架） */
+  year?: string
+  /** review/final 模式说明 */
+  mode?: string
+  /** 官方来源（仅 verified 模板给出可溯源地址） */
+  source?: string
+  /** verified=镜像内真实编译验证；link-only=仅官方链接待验证（不可创建） */
+  verify: 'verified' | 'link-only' | 'unverified'
+  /** 服务端已生成首页缩略图（缺失时前端回退图标，不发 404 请求） */
+  thumb?: boolean
+  version?: number
+  updated_at?: number | null
+}
+
+export interface PaperTemplatesReply {
+  latex: PaperTemplateInfo[]
+  word?: { id: string; name: string; desc: string; venue?: string; thumb?: boolean; version?: number; updated_at?: number | null }[]
+}
+
 const BASE = '/api/admin/paper-templates'
 const path = (t: Pick<ManagedPaperTemplate, 'format' | 'id'>) => `${BASE}/${t.format}/${encodeURIComponent(t.id)}`
 
@@ -75,6 +101,7 @@ export const thumbUrl = (t: Pick<ManagedPaperTemplate, 'format' | 'id' | 'versio
   `/api/paper-templates/${t.format}/${encodeURIComponent(t.id)}/thumbnail?v=${t.version ?? 1}&t=${t.updated_at ?? 0}`
 
 export const paperTemplatesApi = {
+  catalogue: () => req<PaperTemplatesReply>('/api/paper-templates'),
   list: () => req<PaperTemplateListReply>(BASE),
   upload: (metadata: PaperTemplateInput, file: File) => {
     const body = new FormData()

@@ -790,30 +790,3 @@
 .brand-hero {
   background-color: var(--bg-sunken);
 }
-
-/* ---- v0.2 结构化连续编辑器 ---- */
-.struct-continuous-host { width: 100%; }
-.struct-continuous { outline: none; }
-.struct-continuous .ProseMirror { outline: none; }
-.struct-continuous .ProseMirror p { margin: 0.35em 0; line-height: 1.85; white-space: pre-wrap; }
-.struct-continuous .ProseMirror h2 { font-size: 1.15rem; font-weight: 700; margin: 0.9em 0 0.35em; }
-.struct-continuous .ProseMirror h3 { font-size: 1.02rem; font-weight: 700; margin: 0.7em 0 0.3em; }
-.struct-titleblock { border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-bottom: 10px; background: var(--panel); display: grid; gap: 6px; }
-.struct-meta-input { border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 13px; width: 100%; background: transparent; color: inherit; }
-.struct-caption-input { border: 1px dashed var(--border); border-radius: 4px; padding: 3px 8px; font-size: 12px; width: 95%; background: transparent; color: inherit; }
-.struct-formula-block { display: block; text-align: center; padding: 8px 6px; margin: 8px 0; background: color-mix(in oklab, currentColor 3%, transparent); border-radius: 6px; cursor: pointer; position: relative; }
-.dark .struct-formula-block { background: color-mix(in oklab, currentColor 5%, transparent); }
-.struct-formula-inline { display: inline-block; padding: 0 2px; cursor: pointer; }
-.struct-fx-body .katex-display { margin: 0; }
-.struct-ref-chip { display: inline-block; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-weight: 600; font-size: 0.92em; }
-.struct-ref-broken { color: var(--danger-fg); border-color: var(--danger-fg); }
-.struct-figure { margin: 10px 0; padding: 8px; border: 1px solid var(--border); border-radius: 6px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
-.struct-table { margin: 10px 0; }
-.struct-unknown { border: 1px dashed var(--border); border-radius: 6px; padding: 8px; margin: 8px 0; font-size: 12px; opacity: 0.85; }
-.struct-fx-popover { position: absolute; z-index: 30; min-width: 320px; max-width: 90%; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px; box-shadow: 0 8px 24px color-mix(in oklab, black 18%, transparent); margin-top: 4px; left: 0; top: 100%; }
-.struct-fx-input { width: 100%; font-family: Consolas, monospace; font-size: 12px; border: 1px solid var(--border); border-radius: 4px; padding: 4px; background: transparent; color: inherit; }
-.struct-fx-preview { margin-top: 6px; text-align: center; min-height: 24px; background: color-mix(in oklab, currentColor 3%, transparent); border-radius: 4px; padding: 4px; }
-.dark .struct-fx-preview { background: color-mix(in oklab, currentColor 6%, transparent); }
-.struct-fx-warn { color: var(--danger-fg); font-size: 11px; min-height: 14px; }
-.struct-fx-btn { border: 1px solid var(--border); border-radius: 4px; padding: 2px 10px; font-size: 12px; background: transparent; color: inherit; }
-.struct-fx-btn-primary { background: var(--ok-dot); color: var(--ok-fg); border-color: var(--ok-dot); }

@@ -244,7 +244,7 @@ def read_access_log(project_dir: str) -> list[dict]:
 
 # ---------------- 版本 / 元信息 ----------------
 
-SOURCE_FORMATS = ("markdown", "structured", "latex", "docx")
+SOURCE_FORMATS = ("markdown", "latex", "docx")
 
 
 def source_format_of(project) -> str:
@@ -269,7 +269,7 @@ def _word_version_of(project_dir: str) -> tuple[int, str]:
 
 
 def version_of(project) -> tuple[int, str]:
-    """(版本号, HEAD sha)。markdown / structured / latex 看 git 提交数；docx 看 Word 状态（P1-4）。"""
+    """(版本号, HEAD sha)。markdown / latex 看 git 提交数；docx 看 Word 状态（P1-4）。"""
     if source_format_of(project) == "docx":
         return _word_version_of(project.dir)
     versions = history.log(project.dir)

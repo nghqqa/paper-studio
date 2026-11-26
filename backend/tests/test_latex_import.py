@@ -171,7 +171,7 @@ def test_import_failure_leaves_no_project(client, tmp_path):
     assert [p.name for p in projects_dir.iterdir()] == []
     # 无效引擎 → 无半成品
     meta = upload(client, "ok.zip", make_zip({"main.tex": MAIN_TEX.encode()})).json()
-    r = create(client, meta["token"], "main.tex", engine="lualatex")
+    r = create(client, meta["token"], "main.tex", engine="tectonic")
     assert r.status_code == 422
     assert [p.name for p in projects_dir.iterdir()] == []
 

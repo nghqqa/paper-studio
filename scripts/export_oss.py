@@ -52,11 +52,7 @@ EXCLUDE_DIRS: tuple[str, ...] = (
     "examples/latex-accept",
     "examples/latex-trial",
     "examples/latex-mentoring",
-    "examples/struct-paper",
-    "examples/struct-paper-2",
-    "examples/struct-paper-3",
     "frontend/dist",
-    "docker/struct-pdf-svc",
 )
 
 # Specific files (relative POSIX paths) excluded from the public distribution

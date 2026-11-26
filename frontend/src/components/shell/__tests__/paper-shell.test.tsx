@@ -47,7 +47,6 @@ function importGraph(entry: string) {
 }
 
 vi.mock('@/components/latex/LatexWorkbench', () => ({ LatexWorkbench: () => <div data-testid="mock-latex-workbench" /> }))
-vi.mock('@/components/word/LegacyStructuredWorkbench', () => ({ LegacyStructuredWorkbench: () => <div data-testid="mock-structured-workbench" /> }))
 vi.mock('@/components/word/WordWorkbench', () => ({ WordWorkbench: () => <div data-testid="mock-word-workbench" /> }))
 vi.mock('@/components/paper/MarkdownPaperWorkbench', () => ({ MarkdownPaperWorkbench: () => <div data-testid="mock-markdown-workbench" /> }))
 vi.mock('@/components/collab-center', () => ({ CollabDrawer: () => null }))

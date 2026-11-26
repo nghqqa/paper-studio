@@ -79,9 +79,6 @@ PAPER_TEMPLATE_AUTO_ACCEPT = (
 # LaTeX→DOCX 实验性导出（jcip profile）：默认关闭，显式开启才暴露入口
 DOCX_EXPORT_ON = _env("PAPER_STUDIO_DOCX_EXPORT", "PATENT_STUDIO_DOCX_EXPORT", "off").strip().lower() == "on"
 
-# 历史结构化中文论文写作（实验）：默认关闭
-STRUCT_WRITER_ON = _env("PAPER_STUDIO_STRUCT_WRITER", "PATENT_STUDIO_STRUCT_WRITER", "off").strip().lower() == "on"
-STRUCT_PDF_SVC_URL = _env("PAPER_STUDIO_STRUCT_PDF_SVC_URL", "PATENT_STUDIO_STRUCT_PDF_SVC_URL", "").strip()
 DOCX_EXPORT_IMAGE = (
     _env("PAPER_STUDIO_DOCX_IMAGE", "PATENT_STUDIO_DOCX_IMAGE", "pandoc/latex:3.6.4").strip()
     or "pandoc/latex:3.6.4"

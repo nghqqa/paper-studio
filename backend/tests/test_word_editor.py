@@ -350,75 +350,6 @@ def test_pdf_uses_immutable_saved_snapshot(matrix, monkeypatch):
     assert len(calls) == 1
 
 
-def test_structured_conversion_creates_copy_and_preserves_original(matrix, monkeypatch):
-    from app import config
-    from app.domain import structured_export
-    from app.domain import word_documents as w
-    from app.main import store
-
-    owner = matrix["users"]["owner"]
-    monkeypatch.setattr(config, "STRUCT_WRITER_ON", True)
-    r = owner.post("/api/projects/struct/create", json={"title": "旧稿"})
-    assert r.status_code == 200, r.text
-    pid = r.json()["id"]
-    old = (matrix["projects"] / pid / "content.json").read_bytes()
-    exported = matrix["projects"] / "conversion-result.docx"
-    exported.write_bytes(w.make_document("旧稿", "blank"))
-    monkeypatch.setattr(config, "STRUCT_WRITER_ON", False)
-    monkeypatch.setattr(structured_export, "export_docx", lambda *args: {"docx": str(exported)})
-    count = len(store.list_ids())
-    assert owner.put(f"/api/projects/{pid}/collab-settings", json={"allow_download": False}).status_code == 200
-    denied = owner.post(f"/api/projects/{pid}/word/convert-structured")
-    assert denied.status_code == 403 and len(store.list_ids()) == count
-    assert (matrix["projects"] / pid / "content.json").read_bytes() == old
-    assert owner.put(f"/api/projects/{pid}/collab-settings", json={"allow_download": True}).status_code == 200
-    r = owner.post(f"/api/projects/{pid}/word/convert-structured")
-    assert r.status_code == 200, r.text
-    assert r.json()["id"] != pid and r.json()["source_format"] == "docx"
-    assert (matrix["projects"] / pid / "content.json").read_bytes() == old
-    assert store.get(pid).settings["source_format"] == "structured"
-
-    def blocked(*args):
-        raise structured_export.StructExportBlocked(["不支持的公式"])
-
-    monkeypatch.setattr(structured_export, "export_docx", blocked)
-    count = len(store.list_ids())
-    r = owner.post(f"/api/projects/{pid}/word/convert-structured")
-    assert r.status_code == 422 and "不支持的公式" in r.text
-    assert len(store.list_ids()) == count
-
-    def unavailable(*args):
-        raise structured_export.StructExportUnavailable("需要 Pandoc 3.1 或更高版本；原稿已保留")
-
-    monkeypatch.setattr(structured_export, "export_docx", unavailable)
-    r = owner.post(f"/api/projects/{pid}/word/convert-structured")
-    assert r.status_code == 503 and "Pandoc 3.1" in r.text
-    assert len(store.list_ids()) == count
-
-
-def test_local_migration_converter_uses_configured_binary_and_rejects_old_lua_api(monkeypatch):
-    from types import SimpleNamespace
-
-    from app import config
-    from app.domain import structured_export
-
-    executable = r"D:\tools\pandoc-3.6.4\pandoc.exe"
-    monkeypatch.setattr(config, "DOCX_EXPORT_PANDOC", executable)
-    calls = []
-
-    def old_version(args, **kwargs):
-        calls.append(args)
-        return SimpleNamespace(stdout="pandoc.exe 2.12\n")
-
-    monkeypatch.setattr(structured_export.subprocess, "run", old_version)
-    with pytest.raises(structured_export.StructExportUnavailable, match="Pandoc 3.1"):
-        structured_export._local_pandoc()
-    assert calls == [[executable, "--version"]]
-    monkeypatch.setattr(structured_export.subprocess, "run",
-                        lambda *args, **kwargs: SimpleNamespace(stdout="pandoc.exe 3.6.4\n"))
-    assert structured_export._local_pandoc() == (executable, "pandoc.exe 3.6.4")
-
-
 def test_plugin_is_local_and_embeddable(matrix):
     from app import config
 
@@ -670,8 +601,7 @@ def test_upload_version_rejects_bad_files_and_non_word_projects(matrix, monkeypa
     monkeypatch.setattr(config, "WORD_MAX_BYTES", 16)
     assert owner.post(url, files={"file": ("big.docx", good, w.DOCX_MEDIA)}).status_code == 413
     monkeypatch.setattr(config, "WORD_MAX_BYTES", 50 * 1024 * 1024)
-    monkeypatch.setattr(config, "STRUCT_WRITER_ON", True)
-    r = owner.post("/api/projects/struct/create", json={"title": "结构化旧案"})
+    r = owner.post("/api/projects/latex-demo", json={"title": "非Word工程"})
     assert r.status_code == 200, r.text
     r = owner.post(f"/api/projects/{r.json()['id']}/word/upload-version",
                    files={"file": ("x.docx", good, w.DOCX_MEDIA)})

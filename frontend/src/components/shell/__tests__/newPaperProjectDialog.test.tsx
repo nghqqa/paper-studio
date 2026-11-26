@@ -22,13 +22,13 @@ vi.mock('@/lib/api/latex', async (importOriginal) => {
   }
 })
 
-vi.mock('@/lib/api/struct', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/api/struct')>()
+vi.mock('@/lib/api/paperTemplates', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/api/paperTemplates')>()
   return {
     ...actual,
-    structApi: {
-      ...actual.structApi,
-      paperTemplates: vi.fn().mockResolvedValue({
+    paperTemplatesApi: {
+      ...actual.paperTemplatesApi,
+      catalogue: vi.fn().mockResolvedValue({
         word: [
           { id: 'blank', name: '空白 Word 文档', desc: '原生 DOCX' },
           { id: 'jcip', name: '中文信息学报投稿模板', desc: '期刊原件', venue: '中文信息学报' },
@@ -41,9 +41,7 @@ vi.mock('@/lib/api/struct', async (importOriginal) => {
           { id: 'lncs_springer', name: 'Springer LNCS（ECCV 等）', desc: 'LNCS 会议/丛书格式', language: '英文', kind: '会议', venue: 'Springer' },
           { id: 'elsevier_journal', name: 'Elsevier 期刊', desc: 'elsarticle', language: '英文', kind: '期刊', venue: 'Elsevier' },
         ],
-        struct: [{ id: 'jcip', name: '中文信息学报（jcip）', desc: '结构化写作 → DOCX/PDF 导出', experimental: true }],
       }),
-      create: vi.fn().mockResolvedValue({ id: 'struct-paper-9', title: '结构化中文论文（实验）', settings: { source_format: 'structured' } }),
     },
   }
 })
@@ -62,7 +60,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useStudio.setState({ structWriterEnabled: false, wordEditorEnabled: true, wordEditorReady: true, product: 'paper' })
+  useStudio.setState({ wordEditorEnabled: true, wordEditorReady: true, product: 'paper' })
 })
 
 afterEach(async () => {

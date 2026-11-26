@@ -29,12 +29,17 @@ from app.routes.ai import router as ai_router
 from app.routes.cases import router as cases_router
 from app.routes.charts import router as charts_router
 from app.routes.comments import router as comments_router
-from app.routes.latex import demo_router as latex_demo_router
 from app.routes.latex import router as latex_router
+from app.routes.latex_exports import demo_router as latex_exports_demo_router
+from app.routes.latex_exports import router as latex_exports_router
 from app.routes.latex_history import diff_router as latex_diff_router
 from app.routes.latex_history import router as latex_history_router
 from app.routes.latex_preflight import router as latex_preflight_router
+from app.routes.latex_sync import demo_router as latex_sync_demo_router
+from app.routes.latex_sync import router as latex_sync_router
 from app.routes.library import router as library_router
+from app.routes.library_entries import router as library_entries_router
+from app.routes.library_zotero import router as library_zotero_router
 from app.routes.notifications import router as notifications_router
 from app.routes.office_refs import router as office_refs_router
 from app.routes.paper_proposals import router as paper_proposals_router
@@ -43,8 +48,6 @@ from app.routes.paper_templates import router as paper_templates_router
 from app.routes.project_figures import router as project_figures_router
 from app.routes.public import router as public_router
 from app.routes.rebuttal import router as rebuttal_router
-from app.routes.struct_writer import create_router as struct_create_router
-from app.routes.struct_writer import router as struct_writer_router
 from app.routes.word_editor import router as word_editor_router
 from app.routes.word_preflight import router as word_preflight_router
 from app.routes.zotero_account import router as zotero_account_router
@@ -92,14 +95,15 @@ app.include_router(comments_router)
 app.include_router(ai_router)
 app.include_router(cases_router)
 app.include_router(public_router)
-# 论文主线（LaTeX / Word / 结构化迁移壳 / 文献 / 提案 / 审稿回复 / 图表 / 模板）
+# 论文主线（LaTeX / Word / 文献 / 提案 / 审稿回复 / 图表 / 模板）
 app.include_router(latex_router)
+app.include_router(latex_exports_router)
+app.include_router(latex_sync_router)
+app.include_router(latex_exports_demo_router)
+app.include_router(latex_sync_demo_router)
 app.include_router(latex_history_router)
 app.include_router(latex_diff_router)
-app.include_router(latex_demo_router)
 app.include_router(latex_preflight_router)
-app.include_router(struct_writer_router)
-app.include_router(struct_create_router)
 app.include_router(charts_router)
 app.include_router(project_figures_router)
 app.include_router(word_editor_router)
@@ -107,6 +111,8 @@ app.include_router(word_preflight_router)
 app.include_router(paper_templates_router)
 app.include_router(paper_templates_author_router)
 app.include_router(library_router)
+app.include_router(library_zotero_router)
+app.include_router(library_entries_router)
 app.include_router(zotero_account_router)
 app.include_router(paper_proposals_router)
 app.include_router(rebuttal_router)
@@ -285,8 +291,6 @@ def _mtime(p):
             from app.domain.latex_build import list_source_files
 
             paths = [os.path.join(p.dir, item["path"]) for item in list_source_files(p)]
-        elif fmt == "structured":
-            paths = [os.path.join(p.dir, "content.json")]
         else:
             paths = [p.content_path]
         paths.append(os.path.join(p.dir, "studio.json"))
@@ -313,7 +317,6 @@ async def meta():
     return {
         "product": "paper",
         "docx_export": config.DOCX_EXPORT_ON,
-        "struct_writer": config.STRUCT_WRITER_ON,
         "word_editor": config.WORD_EDITOR_ON,
         "word_editor_ready": word_documents.ready(),
         "demo_mode": config.DEMO_MODE,
@@ -330,17 +333,7 @@ async def meta():
 async def paper_templates():
     from app.domain import paper_templates as registry
 
-    struct = []
-    if config.STRUCT_WRITER_ON:
-        struct = [
-            {
-                "id": "jcip",
-                "name": "中文信息学报（jcip）",
-                "desc": "结构化写作 → DOCX/PDF 导出；编号为静态文本，仅支持受限公式子集（实验）",
-                "experimental": True,
-            }
-        ]
-    return {**await asyncio.to_thread(registry.catalogue), "struct": struct}
+    return await asyncio.to_thread(registry.catalogue)
 
 
 @app.get("/api/health")

@@ -17,7 +17,7 @@ export function paperStage(row: ProjectSummary): PaperStage {
   return PAPER_STAGES.find((s) => s.id === row.submission?.stage)?.id ?? 'unset'
 }
 export const stageLabel = (stage: PaperStage) => PAPER_STAGES.find((s) => s.id === stage)!.label
-export const formatLabel = (row: ProjectSummary) => row.source_format === 'docx' ? 'Word' : row.source_format === 'latex' ? 'LaTeX' : row.source_format === 'structured' ? '旧版结构化' : 'Markdown'
+export const formatLabel = (row: ProjectSummary) => row.source_format === 'docx' ? 'Word' : row.source_format === 'latex' ? 'LaTeX' : 'Markdown'
 export function paperTags(row: ProjectSummary): string[] {
   return [...new Set((row.submission?.keywords ?? '').split(/[,，;；、]/).map((s) => s.trim()).filter(Boolean))]
 }

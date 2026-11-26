@@ -208,34 +208,6 @@ async def pdf_file(pid: str, filename: str, request: Request):
     return FileResponse(path, media_type="application/pdf", filename=p.title + ".pdf")
 
 
-@router.post("/api/projects/{pid}/word/convert-structured")
-async def convert_structured(pid: str, request: Request, user: auth.CurrentUser):
-    word.require_ready()
-    p = request.app.state.store.get(pid)
-    if p.settings.get("source_format") != "structured":
-        raise ProjectError("只能从旧结构化论文创建 Word 副本", 400)
-    await _download_allowed(pid)
-    from app.domain import structured, structured_export
-
-    content = await asyncio.to_thread(structured.load_content, p.dir)
-    sha = structured.content_sha(content)
-    versions = structured.load_versions(p.dir)
-    vid = versions[-1]["vid"] if versions else "v001-migration"
-    try:
-        result = await asyncio.to_thread(structured_export.export_docx, p.dir, content, sha, vid)
-        with open(result["docx"], "rb") as f:
-            data = f.read()
-    except structured_export.StructExportBlocked as e:
-        raise ProjectError("无法迁移此稿件：" + "；".join(e.errors), 422) from e
-    except structured_export.StructExportUnavailable as e:
-        raise ProjectError(str(e), 503) from e
-    except Exception as e:
-        raise ProjectError("旧稿转为 Word 失败，原稿已保留。请检查 Pandoc 导出服务后重试", 502) from e
-    new = await asyncio.to_thread(word.create, request.app.state.store, p.title + "（Word 副本）",
-                                  data, p.settings.get("submission"), "migrate:" + pid)
-    return await _created(new, user)
-
-
 # project_id deliberately differs from the ACL dependency's pid parameter:
 # these endpoints authenticate DS with purpose-bound capabilities, never cookies.
 @router.get("/api/office/document/{project_id}/{key}")

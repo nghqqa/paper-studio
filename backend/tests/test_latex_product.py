@@ -23,6 +23,7 @@ def client(tmp_path, monkeypatch):
     projects.mkdir()
     monkeypatch.setenv("PATENT_PROJECTS_DIR", str(projects))
     monkeypatch.setenv("LO_PROFILE_DIR", str(tmp_path / "lo"))
+    monkeypatch.setenv("PATENT_STATIC_DIR", str(tmp_path / "no-static"))
     import importlib
 
     from app import config, main
@@ -81,7 +82,7 @@ def test_unknown_source_format_and_engine_rejected(client):
     assert r.status_code == 422 and "未知源格式" in r.text
     r = c.put(
         "/api/projects/set-1/settings",
-        json={"source_format": "latex", "latex": {"main": "a.tex", "engine": "lualatex"}},
+        json={"source_format": "latex", "latex": {"main": "a.tex", "engine": "tectonic"}},
     )
     assert r.status_code == 422 and "未知 LaTeX 引擎" in r.text
     r = c.put(
@@ -251,7 +252,7 @@ def test_artifact_pdf_survives_transient_file_lock(client, monkeypatch):
 def test_build_unknown_engine_422(client):
     c, _ = client
     demo = c.post("/api/projects/latex-demo").json()["id"]
-    r = c.post(f"/api/projects/{demo}/latex/build", json={"engine": "lualatex"})
+    r = c.post(f"/api/projects/{demo}/latex/build", json={"engine": "tectonic"})
     assert r.status_code == 422 and "未知 LaTeX 引擎" in r.text
 
 
