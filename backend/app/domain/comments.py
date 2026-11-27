@@ -114,10 +114,16 @@ class Comment:
     resolved_by: Author | None = None
     source: str = "human"
     mentions: list[str] = field(default_factory=list)
+    linked_issue_id: str | None = None
+    linked_rebuttal_id: str | None = None
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d["anchor"] = self.anchor.to_dict()
+        if self.linked_issue_id is None:
+            d.pop("linked_issue_id", None)
+        if self.linked_rebuttal_id is None:
+            d.pop("linked_rebuttal_id", None)
         return d
 
 
@@ -162,6 +168,8 @@ def _from_dict(d: dict) -> Comment:
         resolved_by=Author(**rb) if rb else None,
         source=d.get("source", "human"),
         mentions=list(d.get("mentions", [])),
+        linked_issue_id=d.get("linked_issue_id"),
+        linked_rebuttal_id=d.get("linked_rebuttal_id"),
     )
 
 

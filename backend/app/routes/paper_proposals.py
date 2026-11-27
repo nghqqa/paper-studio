@@ -11,10 +11,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app import auth, config
@@ -46,6 +48,16 @@ ACTION_PROMPTS = {
         "如需引用文献只能使用上下文中已给出的引用键，禁止编造文献、数据与实验结果；"
         "只输出指令要求的一段正文，不输出标题、解释或寒暄。"
     ),
+    "translate_en": (
+        "将中文学术文本精准翻译为符合国际顶会/SCI期刊出版标准的英文学术表达："
+        "术语规范、逻辑严谨、地道流畅，不增删事实与结论；"
+        "严格保留原文的数学公式、\\cite 引用、\\ref/\\label、数值与单位。"
+    ),
+    "translate_zh": (
+        "将英文学术文本精准翻译为严谨流畅的简体中文学术表达："
+        "术语符合国内学科规范、无机械翻译腔，不增删事实与结论；"
+        "严格保留原文的数学公式、\\cite 引用、\\ref/\\label、数值与单位。"
+    ),
 }
 
 _PROTECT_RULES = (
@@ -69,6 +81,12 @@ class GenerateIn(BaseModel):
     # 修复闭环（可选）：从编译错误发起的提案记录目标错误与关联 Issue，供 verify-fix 对照
     error_context: pp.ErrorContext | None = None
     linked_issue_id: str | None = Field(default=None, max_length=32)
+    # 多轮微调（可选）：基于上一版提案建议进一步迭代，锚点仍指向原文
+    parent_proposal_id: str | None = Field(default=None, max_length=32)
+    previous_suggestion: str | None = Field(default=None, max_length=MAX_ORIGINAL + 2000)
+    # 学术增强上下文（可选）：术语表约束 + 引文感知文献卡片
+    use_glossary: bool = False
+    cite_keys: list[str] = Field(default_factory=list, max_length=12)
 
 
 def _ai_client(user=None):
@@ -95,8 +113,7 @@ def _parse_model_json(text: str) -> dict:
     return {"text": raw, "rationale": ""}
 
 
-@router.post("/paper-proposals/generate", dependencies=[Depends(require_org_ai)])
-async def generate(pid: str, body: GenerateIn, request: Request, user: auth.CurrentUser = None):
+def _prepare_generate(pid: str, body: GenerateIn, request: Request, user) -> tuple:
     if config.AUTH_ON and user is None:
         raise auth.login_required()
     if body.mode not in ("latex", "word"):
@@ -110,6 +127,8 @@ async def generate(pid: str, body: GenerateIn, request: Request, user: auth.Curr
         raise kind_error("validation", "请先在编辑器中选中要修改的文字", detail="original_text")
     if insert_mode and not (body.instruction or "").strip():
         raise kind_error("validation", "写作必须填写写作指令（写什么、多长、给谁看）")
+    if body.parent_proposal_id and not pp.PID_RE.match(body.parent_proposal_id):
+        raise kind_error("validation", "parent_proposal_id 不合法", detail=body.parent_proposal_id)
     project = request.app.state.store.get(pid)
     client, _provider = _ai_client(user)
     who = getattr(user, "email", None) or (str(getattr(user, "id", "")) if user else None)
@@ -122,28 +141,85 @@ async def generate(pid: str, body: GenerateIn, request: Request, user: auth.Curr
                          insert=insert_mode),
         suggested_text="", model="", created_by=who, status="generating",
         error_context=body.error_context, linked_issue_id=body.linked_issue_id,
+        parent_proposal_id=body.parent_proposal_id,
     )
     pp.append(project.dir, pid, placeholder, by=who)
     action_text = ACTION_PROMPTS[body.action]
     if body.instruction and body.action not in ("custom", "writing"):
         action_text += f"\n用户附加要求：{body.instruction}"
+    prev_block = (
+        f"【上一版 AI 建议（请在此基础上继续微调）】\n{body.previous_suggestion}\n"
+        if (body.previous_suggestion or "").strip()
+        else ""
+    )
+    glossary_block = ""
+    if body.use_glossary:
+        from app.domain import glossary as glossary_mod
+
+        gb = glossary_mod.format_prompt_block(project.dir)
+        if gb:
+            glossary_block = gb + "\n"
+    cite_block = ""
+    if body.cite_keys:
+        from app.domain import library as library_mod
+        from app.domain import library_pdf as library_pdf_mod
+
+        idx = library_mod.load_index(project.dir)
+        by_key = {e.citation_key: e for e in idx.entries}
+        cards: list[str] = []
+        used_chars = 0
+        for ck in body.cite_keys[:12]:
+            ent = by_key.get(str(ck).strip())
+            if ent is None:
+                continue
+            auth_txt = ", ".join((ent.authors or [])[:3]) or "Unknown"
+            card = f"- \\cite{{{ent.citation_key}}}: {ent.title} ({auth_txt}, {ent.year or 'n.d.'}{', ' + ent.venue if ent.venue else ''})"
+            if ent.abstract:
+                card += f"\n  摘要：{ent.abstract[:350]}"
+            try:
+                pdf_info = library_pdf_mod.get_pdf_text(project.dir, ent.reference_id)
+                if pdf_info.get("text"):
+                    card += f"\n  原文摘录：{pdf_info['text'][:600]}"
+            except FileNotFoundError:
+                pass
+            if used_chars + len(card) > 5500:
+                break
+            cards.append(card)
+            used_chars += len(card)
+        if cards:
+            cite_block = (
+                "【可引用的真实文献卡片（仅允许使用以上 \\cite{key}，严禁编造文献与实验数字）】\n"
+                + "\n".join(cards)
+                + "\n"
+            )
     user_content = (
         (f"写作指令：{body.instruction}\n" if insert_mode and body.instruction else "")
         + (f"修改指令：{body.instruction}\n" if body.action == "custom" and body.instruction else "")
         + (f"修改要求：{body.instruction}\n" if body.action not in ("custom", "writing") and body.instruction else "")
+        + glossary_block
+        + cite_block
         + (f"【前文（仅供理解语境）】\n{body.context_before}\n" if body.context_before else "")
         + (f"【待修改原文】\n{body.original_text}\n" if not insert_mode else "")
+        + prev_block
         + (f"【后文（仅供理解语境）】\n{body.context_after}\n" if body.context_after else "")
         + "\n请只输出 JSON：{\"text\": \"<修改后的正文>\", \"rationale\": \"<不超过两句话的修改理由>\"}"
     )
+    messages = [
+        {"role": "system", "content": f"你是学术论文修改助手。任务：{action_text}\n{_PROTECT_RULES}"},
+        {"role": "user", "content": user_content},
+    ]
+    return project, client, who, placeholder, messages
+
+
+def _sse_event(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+@router.post("/paper-proposals/generate", dependencies=[Depends(require_org_ai)])
+async def generate(pid: str, body: GenerateIn, request: Request, user: auth.CurrentUser = None):
+    project, client, who, placeholder, messages = _prepare_generate(pid, body, request, user)
     try:
-        result = await client.chat(
-            [
-                {"role": "system", "content": f"你是学术论文修改助手。任务：{action_text}\n{_PROTECT_RULES}"},
-                {"role": "user", "content": user_content},
-            ],
-            "interactive", max_tokens=4096, temperature=0.4,
-        )
+        result = await client.chat(messages, "interactive", max_tokens=4096, temperature=0.4)
     except AiError as e:
         failed = placeholder.model_copy(update={"status": "failed", "error": str(e), "updated_at": time.time()})
         pp.append(project.dir, pid, failed, by=who)
@@ -165,6 +241,75 @@ async def generate(pid: str, body: GenerateIn, request: Request, user: auth.Curr
     })
     pp.append(project.dir, pid, prop, by=who)
     return {"proposal": prop.model_dump(mode="json")}
+
+
+@router.post("/paper-proposals/generate/stream", dependencies=[Depends(require_org_ai)])
+async def generate_stream(pid: str, body: GenerateIn, request: Request, user: auth.CurrentUser = None):
+    project, client, who, placeholder, messages = _prepare_generate(pid, body, request, user)
+
+    async def event_iter():
+        finalized = False
+        try:
+            try:
+                res = await client.chat(messages, "interactive", stream=True, max_tokens=4096, temperature=0.4)
+            except TypeError:
+                res = await client.chat(messages, "interactive", max_tokens=4096, temperature=0.4)
+            parts: list[str] = []
+            model_name = ""
+            if hasattr(res, "__aiter__"):
+                async for chunk in res:
+                    if chunk:
+                        parts.append(chunk)
+                        yield _sse_event("delta", {"text": chunk})
+                chat_res = getattr(res, "result", None)
+                full_text = chat_res.text if chat_res is not None and getattr(chat_res, "text", None) else "".join(parts)
+                model_name = str(getattr(chat_res, "model", "") or "")
+            else:
+                full_text = str(getattr(res, "text", "") or "")
+                model_name = str(getattr(res, "model", "") or "")
+                if full_text:
+                    yield _sse_event("delta", {"text": full_text})
+            parsed = _parse_model_json(full_text)
+            if not parsed["text"].strip():
+                failed = placeholder.model_copy(update={
+                    "status": "failed", "error": "模型返回了空内容，未生成提案", "updated_at": time.time()})
+                pp.append(project.dir, pid, failed, by=who)
+                finalized = True
+                yield _sse_event("error", {"message": "模型返回了空内容，未生成提案"})
+                return
+            flags = pp.analyze_changes(body.original_text, parsed["text"])
+            prop = placeholder.model_copy(update={
+                "suggested_text": parsed["text"],
+                "rationale": parsed["rationale"],
+                "model": model_name,
+                "protection_flags": flags,
+                "status": "pending",
+                "updated_at": time.time(),
+            })
+            pp.append(project.dir, pid, prop, by=who)
+            finalized = True
+            yield _sse_event("done", {"proposal": prop.model_dump(mode="json")})
+        except AiError as e:
+            failed = placeholder.model_copy(update={"status": "failed", "error": str(e), "updated_at": time.time()})
+            pp.append(project.dir, pid, failed, by=who)
+            finalized = True
+            yield _sse_event("error", {"message": str(e)})
+        except asyncio.CancelledError:
+            if not finalized:
+                failed = placeholder.model_copy(update={"status": "failed", "error": "已取消生成", "updated_at": time.time()})
+                pp.append(project.dir, pid, failed, by=who)
+                finalized = True
+            raise
+        finally:
+            if not finalized:
+                failed = placeholder.model_copy(update={"status": "failed", "error": "生成中断", "updated_at": time.time()})
+                pp.append(project.dir, pid, failed, by=who)
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/paper-proposals")
@@ -329,4 +474,55 @@ async def assistant_read(pid: str, body: ReadIn, request: Request, user: auth.Cu
     if not answer:
         raise HTTPException(502, error_detail("ai", "模型返回了空内容"))
     return {"answer": answer, "model": result.model, "chars": len(body.text)}
+
+
+@router.post("/paper-assistant/read/stream", dependencies=[Depends(require_org_ai)])
+async def assistant_read_stream(pid: str, body: ReadIn, request: Request, user: auth.CurrentUser = None):
+    """论文精读 SSE 流式输出：只读分析，不产生提案、不修改文档。"""
+    if config.AUTH_ON and user is None:
+        raise auth.login_required()
+    request.app.state.store.get(pid)
+    client, _provider = _ai_client(user)
+    user_content = f"【待精读片段】\n{body.text}\n"
+    if body.question:
+        user_content += f"\n【读者提问】{body.question}"
+    messages = [
+        {"role": "system", "content": READ_SYSTEM},
+        {"role": "user", "content": user_content},
+    ]
+
+    async def event_iter():
+        try:
+            try:
+                res = await client.chat(messages, "interactive", stream=True, max_tokens=4096, temperature=0.3)
+            except TypeError:
+                res = await client.chat(messages, "interactive", max_tokens=4096, temperature=0.3)
+            parts: list[str] = []
+            model_name = ""
+            if hasattr(res, "__aiter__"):
+                async for chunk in res:
+                    if chunk:
+                        parts.append(chunk)
+                        yield _sse_event("delta", {"text": chunk})
+                chat_res = getattr(res, "result", None)
+                full_text = chat_res.text if chat_res is not None and getattr(chat_res, "text", None) else "".join(parts)
+                model_name = str(getattr(chat_res, "model", "") or "")
+            else:
+                full_text = str(getattr(res, "text", "") or "")
+                model_name = str(getattr(res, "model", "") or "")
+                if full_text:
+                    yield _sse_event("delta", {"text": full_text})
+            answer = full_text.strip()
+            if not answer:
+                yield _sse_event("error", {"message": "模型返回了空内容"})
+                return
+            yield _sse_event("done", {"answer": answer, "model": model_name, "chars": len(body.text)})
+        except AiError as e:
+            yield _sse_event("error", {"message": str(e)})
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 

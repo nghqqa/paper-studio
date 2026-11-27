@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { CheckCheck, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
+import { BookMarked, CheckCheck, RotateCcw, ShieldCheck, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { libraryApi, type LibraryEntry } from '@/lib/api/library'
 import type { FixVerification } from '@/lib/api/paperProposals'
 import { cn } from '@/lib/utils'
 import { AiDisclosurePanel } from './proposal/AiDisclosurePanel'
@@ -53,6 +54,28 @@ export function ProposalPanel({
   const [bottomMode, setBottomMode] = useState<'custom' | 'writing'>('custom')
   const [writingFocus, setWritingFocus] = useState(0)
   const [disclosureOpen, setDisclosureOpen] = useState(false)
+  const [useSection, setUseSection] = useState(false)
+  const [useGlossary, setUseGlossary] = useState(false)
+  const [citeKeys, setCiteKeys] = useState<string[]>([])
+  const [citePickerOpen, setCitePickerOpen] = useState(false)
+  const [libEntries, setLibEntries] = useState<LibraryEntry[] | null>(null)
+
+  const toggleCitePicker = () => {
+    const next = !citePickerOpen
+    setCitePickerOpen(next)
+    if (next && libEntries === null) {
+      void libraryApi
+        .get(pid)
+        .then((r) => setLibEntries(r.entries))
+        .catch(() => setLibEntries([]))
+    }
+  }
+
+  const toggleCiteKey = (key: string) => {
+    setCiteKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : prev.length < 6 ? [...prev, key] : prev,
+    )
+  }
 
   const act = useProposalActions({
     pid,
@@ -103,13 +126,84 @@ export function ProposalPanel({
         reading={act.reading}
         readingError={act.readingError}
         onRunReading={() => void act.runReading()}
+        onStopReading={act.cancelReading}
         onStartWriting={() => {
           setBottomMode('writing')
           setWritingFocus((v) => v + 1)
         }}
-        onGenerate={(a) => void act.generate(a)}
+        onGenerate={(a) => void act.generate(a, undefined, useSection, { useGlossary, citeKeys })}
         onClearReading={() => act.setReading(null)}
       />
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-2.5 py-1 text-2xs text-fg-muted">
+        <label className="flex cursor-pointer items-center gap-1" title="勾选后注入项目术语与符号表约定">
+          <input
+            type="checkbox"
+            className="accent-primary"
+            checked={useGlossary}
+            disabled={act.busy}
+            onChange={(e) => setUseGlossary(e.target.checked)}
+            data-testid="proposal-use-glossary"
+          />
+          遵循术语表
+        </label>
+        <button
+          type="button"
+          onClick={toggleCitePicker}
+          className={cn(
+            'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-2xs transition-colors',
+            citeKeys.length > 0 ? 'border-primary/40 bg-primary/10 text-primary' : 'border-line bg-app text-fg-muted hover:text-fg',
+          )}
+          data-testid="proposal-cite-picker-toggle"
+        >
+          <BookMarked aria-hidden className="size-3" /> 引用文献 ({citeKeys.length}/6)
+        </button>
+      </div>
+      {citePickerOpen && (
+        <div className="max-h-32 shrink-0 overflow-auto border-b border-line bg-sunken p-2 text-2xs" data-testid="proposal-cite-picker">
+          {libEntries === null ? (
+            <span className="text-fg-muted">正在加载文献库…</span>
+          ) : libEntries.length === 0 ? (
+            <span className="text-fg-muted">当前项目文献库为空，请先在「文献」面板导入。</span>
+          ) : (
+            <ul className="space-y-1">
+              {libEntries.slice(0, 30).map((e) => (
+                <li key={e.reference_id}>
+                  <label className="flex cursor-pointer items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      className="accent-primary"
+                      checked={citeKeys.includes(e.citation_key)}
+                      onChange={() => toggleCiteKey(e.citation_key)}
+                    />
+                    <code className="font-mono text-primary">{e.citation_key}</code>
+                    <span className="truncate text-fg-muted">{e.title}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+
+      {act.busy && act.streamingPreview !== null && (
+        <div className="shrink-0 border-b border-line bg-sunken px-2.5 py-2 text-xs" data-testid="proposal-streaming">
+          <div className="mb-1 flex items-center justify-between gap-2 text-2xs text-fg-muted">
+            <span className="font-medium text-primary">AI 正在生成建议…</span>
+            <button
+              type="button"
+              className="rounded border border-line bg-panel px-1.5 py-0.5 text-2xs text-fg-muted hover:bg-hover hover:text-fg"
+              onClick={act.cancelGenerate}
+              data-testid="proposal-stream-stop"
+            >
+              停止
+            </button>
+          </div>
+          <div className="max-h-28 overflow-auto whitespace-pre-wrap text-xs leading-5 text-fg">
+            {act.streamingPreview || '正在组织学术表述…'}
+          </div>
+        </div>
+      )}
 
       {act.error && (
         <div role="alert" className="shrink-0 border-b border-line px-2.5 py-1.5 text-xs text-danger" data-testid="proposal-error">
@@ -203,6 +297,7 @@ export function ProposalPanel({
               expanded={act.expanded === p.proposal_id}
               onToggle={() => act.setExpanded(act.expanded === p.proposal_id ? null : p.proposal_id)}
               canEdit={canEdit}
+              busy={act.busy}
               acked={act.protectedAck.has(p.proposal_id)}
               onAck={() => act.setProtectedAck((prev) => new Set(prev).add(p.proposal_id))}
               batchChecked={act.batchSel.has(p.proposal_id)}
@@ -225,6 +320,7 @@ export function ProposalPanel({
               }
               onApply={() => void act.doApply(p)}
               onReject={() => void act.doReject(p)}
+              onRefine={(inst) => void act.refine(p, inst)}
               editing={editingId === p.proposal_id}
               onStartEdit={() => {
                 setEditingId(p.proposal_id)
@@ -259,21 +355,23 @@ export function ProposalPanel({
         focusSignal={writingFocus}
         section={
           !hideSectionOption ? (
-            <label className="flex items-center gap-1 text-2xs text-fg-muted">
+            <label
+              className="flex cursor-pointer items-center gap-1 text-2xs text-fg-muted"
+              title="开启后，所有改写/互译动作将自动作用于光标所在章节（≤8000 字）"
+            >
               <input
                 type="checkbox"
                 className="accent-primary"
+                checked={useSection}
                 disabled={act.busy}
-                onChange={(e) => {
-                  if (e.target.checked) void act.generate('polish', undefined, true)
-                }}
+                onChange={(e) => setUseSection(e.target.checked)}
                 data-testid="proposal-gen-section"
               />
-              按当前章节整体生成
+              作用于当前章节
             </label>
           ) : null
         }
-        onSend={(text, m) => void act.generate(m === 'writing' ? 'writing' : 'custom', text)}
+        onSend={(text, m) => void act.generate(m === 'writing' ? 'writing' : 'custom', text, useSection, { useGlossary, citeKeys })}
       />
     </div>
   )

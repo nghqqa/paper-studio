@@ -2,6 +2,8 @@ import { useCallback } from 'react'
 import { PreflightPanel, type PreflightRulesetOption } from '@/components/paper/PreflightPanel'
 import {
   latexApi,
+  type LatexPreflightItem,
+  type LatexPreflightLocation,
   type LatexPreflightReport,
   type LatexPreflightRuleset,
 } from '@/lib/api/latex'
@@ -28,10 +30,12 @@ const RULESETS: PreflightRulesetOption<LatexPreflightRuleset>[] = [
 interface Props {
   pid: string
   canEdit: boolean
+  onJumpLocation?: (loc: LatexPreflightLocation) => void
+  onAskAiFix?: (item: LatexPreflightItem) => void
 }
 
 /** LaTeX 投稿前检查（只读体检）：不改源码、不调外部 AI；报告绑定源码内容指纹，过期如实提示。 */
-export function LatexPreflight({ pid, canEdit }: Props) {
+export function LatexPreflight({ pid, canEdit, onJumpLocation, onAskAiFix }: Props) {
   const loadReport = useCallback((ruleset: LatexPreflightRuleset) => latexApi.getPreflight(pid, ruleset), [pid])
   const runReport = useCallback((ruleset: LatexPreflightRuleset) => latexApi.runPreflight(pid, { ruleset }), [pid])
 
@@ -53,6 +57,8 @@ export function LatexPreflight({ pid, canEdit }: Props) {
           {report.parse_error && <span className="text-warning">（解析异常：{report.parse_error}）</span>}
         </>
       )}
+      onJumpLocation={onJumpLocation}
+      onAskAiFix={onAskAiFix}
     />
   )
 }

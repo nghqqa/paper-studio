@@ -1,9 +1,15 @@
-import { useState } from 'react'
-import { ArrowUpCircle, CheckCircle2, Loader2, Search, Sparkles, Trash2 } from 'lucide-react'
+import { useRef, useState } from 'react'
+import { ArrowUpCircle, CheckCircle2, FileText, FileUp, Loader2, Search, Sparkles, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { libraryApi, type LibraryEntry, type SourceCandidate } from '@/lib/api/library'
+import {
+  type CitationVerifyItem,
+  libraryApi,
+  type LibraryEntry,
+  type SourceCandidate,
+} from '@/lib/api/library'
 import { cn } from '@/lib/utils'
+import { LibraryPdfDialog } from './LibraryPdfDialog'
 import { SOURCE_LABEL_FALLBACK, errText } from './types'
 
 export function EntryDetail({
@@ -15,6 +21,7 @@ export function EntryDetail({
   onNotice,
   onError,
   entries,
+  verifyItem,
 }: {
   pid: string
   entry: LibraryEntry
@@ -24,6 +31,7 @@ export function EntryDetail({
   onNotice: (s: string) => void
   onError: (s: string) => void
   entries: LibraryEntry[]
+  verifyItem?: CitationVerifyItem
 }) {
   const [busy, setBusy] = useState(false)
   const [lookupResult, setLookupResult] = useState<{ candidates: SourceCandidate[]; upgradeMode?: boolean } | null>(null)
@@ -33,6 +41,33 @@ export function EntryDetail({
   const [fieldPicks, setFieldPicks] = useState<Record<string, 'survivor' | 'loser'>>({})
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [editing, setEditing] = useState(false)
+  const [applyingVerify, setApplyingVerify] = useState(false)
+  const [pdfOpen, setPdfOpen] = useState(false)
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const pdfInputRef = useRef<HTMLInputElement>(null)
+
+  async function applyAuthoritativeVerify() {
+    if (!verifyItem?.remote_fields || applyingVerify) return
+    const rf = verifyItem.remote_fields
+    const patch: Record<string, string> = {}
+    if (rf.title) patch.title = rf.title
+    if (rf.authors && rf.authors.length > 0) patch.author = rf.authors.join(' and ')
+    if (rf.year) patch.year = rf.year
+    if (rf.venue) patch.venue = rf.venue
+    if (rf.doi) patch.doi = rf.doi
+    if (rf.url) patch.url = rf.url
+    if (Object.keys(patch).length === 0) return
+    setApplyingVerify(true)
+    try {
+      await libraryApi.editEntry(pid, entry.reference_id, patch)
+      onNotice('已根据权威核验结果更新文献元数据')
+      await onChanged()
+    } catch (e) {
+      onError(errText(e))
+    } finally {
+      setApplyingVerify(false)
+    }
+  }
 
   const run = async (fn: () => Promise<void>) => {
     setBusy(true)
@@ -176,6 +211,39 @@ export function EntryDetail({
           {entry.retraction.source && <span className="ml-1">（来源：{entry.retraction.source}）</span>}
         </div>
       )}
+      {verifyItem?.status === 'mismatch' && (
+        <div
+          className="mt-1 rounded border border-warning/40 bg-warning/10 p-1.5 text-xs"
+          data-testid={`library-verify-mismatch-${entry.citation_key}`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-medium text-warning">
+              权威核验发现字段差异（来源：{verifyItem.source ?? '未知'}）
+            </span>
+            {canEdit && verifyItem.remote_fields && Object.keys(verifyItem.remote_fields).length > 0 && (
+              <Button
+                type="button"
+                size="xs"
+                variant="outline"
+                disabled={applyingVerify || busy}
+                onClick={() => void applyAuthoritativeVerify()}
+                data-testid={`library-apply-verify-${entry.citation_key}`}
+              >
+                {applyingVerify ? '正在应用…' : '一键应用权威元数据'}
+              </Button>
+            )}
+          </div>
+          {verifyItem.diffs.length > 0 && (
+            <ul className="mt-1 space-y-0.5 text-fg-muted">
+              {verifyItem.diffs.map((d) => (
+                <li key={d.field}>
+                  <span className="font-medium">{d.field}</span>：本地「{d.local}」→ 权威「{d.remote}」
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
       {entry.raw_bibtex && (
         <details className="mt-1">
           <summary className="cursor-pointer text-fg-muted">原始 BibTeX</summary>
@@ -274,6 +342,70 @@ export function EntryDetail({
             <Button variant="ghost" size="xs" disabled={busy} onClick={() => setEditing((v) => !v)}>
               编辑
             </Button>
+          </>
+        )}
+        {entry.pdf?.has_pdf && (
+          <Button
+            variant="outline"
+            size="xs"
+            onClick={() => setPdfOpen(true)}
+            data-testid={`library-read-pdf-${entry.citation_key}`}
+          >
+            <FileText aria-hidden className="size-3" /> 阅读 PDF ({entry.pdf.pages}p)
+          </Button>
+        )}
+        {canEdit && (
+          <>
+            <input
+              ref={pdfInputRef}
+              type="file"
+              accept=".pdf,application/pdf"
+              className="hidden"
+              tabIndex={-1}
+              aria-hidden="true"
+              onChange={(ev) => {
+                const picked = ev.target.files?.[0]
+                ev.target.value = ''
+                if (!picked) return
+                setPdfBusy(true)
+                void libraryApi
+                  .uploadEntryPdf(pid, entry.reference_id, picked)
+                  .then(() => {
+                    onNotice('已归档文献 PDF 原文')
+                    return onChanged()
+                  })
+                  .catch((err) => onError(errText(err)))
+                  .finally(() => setPdfBusy(false))
+              }}
+            />
+            <Button
+              variant="ghost"
+              size="xs"
+              disabled={busy || pdfBusy}
+              onClick={() => pdfInputRef.current?.click()}
+              data-testid={`library-attach-pdf-${entry.citation_key}`}
+            >
+              <FileUp aria-hidden className="size-3" /> {pdfBusy ? '上传中…' : entry.pdf?.has_pdf ? '替换 PDF' : '附加 PDF'}
+            </Button>
+            {entry.pdf?.has_pdf && (
+              <Button
+                variant="ghost"
+                size="xs"
+                className="text-danger"
+                disabled={busy || pdfBusy}
+                onClick={() =>
+                  void libraryApi
+                    .deleteEntryPdf(pid, entry.reference_id)
+                    .then(() => {
+                      onNotice('已移除归档 PDF')
+                      return onChanged()
+                    })
+                    .catch((err) => onError(errText(err)))
+                }
+              >
+                移除 PDF
+              </Button>
+            )}
           </>
         )}
       </div>
@@ -496,6 +628,9 @@ export function EntryDetail({
         >
           <Trash2 aria-hidden className="size-3" /> 删除条目
         </Button>
+      )}
+      {entry.pdf?.has_pdf && (
+        <LibraryPdfDialog open={pdfOpen} onOpenChange={setPdfOpen} pid={pid} entry={entry} />
       )}
     </div>
   )

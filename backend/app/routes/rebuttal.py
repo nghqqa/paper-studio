@@ -13,11 +13,13 @@ GET  /rebuttal/export?format=         导出 Response Letter（viewer；无条�
 """
 
 import asyncio
+import json
 import os
 import urllib.parse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from app import auth, config
@@ -172,6 +174,63 @@ async def rebuttal_draft(
     except rb.RebuttalError as e:
         raise HTTPException(e.status, error_detail(e.kind, str(e), detail=UNIT))
     return {"item": item, "warnings": warnings}
+
+
+@router.post("/rebuttal/items/{item_id}/draft/stream", dependencies=[Depends(require_org_ai)])
+async def rebuttal_draft_stream(
+    pid: str, item_id: str, body: RebuttalDraftIn, request: Request, user: auth.CurrentUser = None
+):
+    """AI 起草单条回复建议（SSE 流式输出）；只写 ai_draft，绝不覆盖用户 response。"""
+    if config.AUTH_ON and user is None:
+        raise auth.login_required()
+    store = request.app.state.store
+    _paper_project(request, pid)
+    provider, _source = user_ai.resolve_provider(getattr(user, "id", None))
+    if provider is not None and provider.api_key:
+        ai_cli, _ = user_ai.resolve_ai_client(user)
+    elif config.AI_PROVIDER == "mock":
+        ai_cli = request.app.state.ai
+    else:
+        ai_cli, _ = user_ai.resolve_ai_client(user)
+    try:
+        project_dir, messages = rb.prepare_draft_context(store, pid, item_id, body.context)
+    except rb.RebuttalError as e:
+        raise HTTPException(e.status, error_detail(e.kind, str(e), detail=UNIT))
+
+    def _ev(name: str, data: dict) -> str:
+        return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+    async def event_iter():
+        from app.ai import client as ai_client
+
+        try:
+            try:
+                res = await ai_cli.chat(messages, "interactive", stream=True, project_dir=project_dir)
+            except TypeError:
+                res = await ai_cli.chat(messages, "interactive", project_dir=project_dir)
+            parts: list[str] = []
+            if hasattr(res, "__aiter__"):
+                async for chunk in res:
+                    if chunk:
+                        parts.append(chunk)
+                        yield _ev("delta", {"text": chunk})
+                chat_res = getattr(res, "result", None)
+                full_text = chat_res.text if chat_res is not None and getattr(chat_res, "text", None) else "".join(parts)
+            else:
+                full_text = str(getattr(res, "text", "") or "")
+                if full_text:
+                    yield _ev("delta", {"text": full_text})
+            resp, summ, warnings = rb._parse_draft_response(full_text)
+            item = rb.save_draft_result(project_dir, item_id, resp, summ)
+            yield _ev("done", {"item": item, "warnings": warnings})
+        except (ai_client.AiError, rb.RebuttalError) as e:
+            yield _ev("error", {"message": str(e)})
+
+    return StreamingResponse(
+        event_iter(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/rebuttal/export")

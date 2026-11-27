@@ -16,4 +16,14 @@ export const commentsApi = {
       method: 'POST',
       body: JSON.stringify({ resolved }),
     }),
+  promoteToIssue: (id: string, cid: string) =>
+    req<{ comment: Comment; issue?: { id: string }; issue_id?: string; already_linked: boolean }>(
+      `${P(id)}/comments/${encodeURIComponent(cid)}/promote-to-issue`,
+      { method: 'POST' },
+    ),
+  promoteToRebuttal: (id: string, cid: string) =>
+    req<{ comment: Comment; item?: { id: string }; item_id?: string; already_linked: boolean }>(
+      `${P(id)}/comments/${encodeURIComponent(cid)}/promote-to-rebuttal`,
+      { method: 'POST' },
+    ),
 }

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { extractJsonStreamField } from '@/components/paper/proposal/anchorUtils'
 import {
   rebuttalApi,
   type RebuttalExportFormat,
@@ -43,6 +44,8 @@ export function useRebuttalState({
 
   const [saving, setSaving] = useState(false)
   const [aiBusy, setAiBusy] = useState(false)
+  const [streamingDraft, setStreamingDraft] = useState<string | null>(null)
+  const draftAbortRef = useRef<AbortController | null>(null)
   const [exportFmt, setExportFmt] = useState<RebuttalExportFormat | null>(null)
   const [rounds, setRounds] = useState<RebuttalRoundSummary[]>([])
   const [viewRound, setViewRound] = useState<'current' | number>('current')
@@ -162,17 +165,36 @@ export function useRebuttalState({
     }
   }
 
+  const cancelDraft = useCallback(() => {
+    draftAbortRef.current?.abort()
+    draftAbortRef.current = null
+  }, [])
+
   const runDraft = async () => {
     if (!selected || !canEdit || !aiEnabled || aiBusy) return
+    draftAbortRef.current?.abort()
+    const ac = new AbortController()
+    draftAbortRef.current = ac
     setAiBusy(true)
     setBanner('')
+    setStreamingDraft('')
+    let raw = ''
     try {
-      const r = await rebuttalApi.draft(pid, selected.id)
+      const r = await rebuttalApi.draftStream(pid, selected.id, undefined, {
+        signal: ac.signal,
+        onDelta: (chunk) => {
+          raw += chunk
+          setStreamingDraft(extractJsonStreamField(raw, 'response'))
+        },
+      })
       setState((s) => (s ? { ...s, items: s.items.map((x) => (x.id === r.item.id ? r.item : x)) } : s))
       setNotice(r.warnings.length ? r.warnings.join('；') : null)
     } catch (e) {
-      setBanner(msgOf(e))
+      if (e instanceof DOMException && e.name === 'AbortError') setNotice('已停止生成回复草稿')
+      else setBanner(msgOf(e))
     } finally {
+      if (draftAbortRef.current === ac) draftAbortRef.current = null
+      setStreamingDraft(null)
       setAiBusy(false)
     }
   }
@@ -221,6 +243,7 @@ export function useRebuttalState({
     dirty,
     saving,
     aiBusy,
+    streamingDraft,
     exportFmt,
     rounds,
     viewRound,
@@ -242,6 +265,7 @@ export function useRebuttalState({
     saveItem,
     switchStatus,
     runDraft,
+    cancelDraft,
     adoptDraft,
     linkCursor,
     doExport,

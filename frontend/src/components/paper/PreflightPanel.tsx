@@ -3,11 +3,18 @@ import { Loader2, RefreshCw, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ApiError } from '@/lib/api/net'
 
+export interface PreflightLocation {
+  file: string
+  line: number | null
+  label?: string
+}
+
 export interface PreflightItemBase {
   rule_id: string
   status: 'pass' | 'warn' | 'unknown'
   evidence: string
   source: string
+  locations?: PreflightLocation[]
 }
 
 export interface PreflightReportBase {
@@ -52,6 +59,8 @@ export interface PreflightPanelProps<TRuleset extends string, TReport extends Pr
   renderMeta: (report: TReport) => ReactNode
   stalenessTrigger?: unknown
   isReportStale?: (report: TReport) => boolean
+  onJumpLocation?: (loc: PreflightLocation) => void
+  onAskAiFix?: (item: PreflightItemBase) => void
 }
 
 /** 投稿前检查公共面板（只读体检）：LaTeX 与 Word 共用乱序请求防护与统一渲染骨架。 */
@@ -72,6 +81,8 @@ export function PreflightPanel<TRuleset extends string, TReport extends Prefligh
   renderMeta,
   stalenessTrigger,
   isReportStale,
+  onJumpLocation,
+  onAskAiFix,
 }: PreflightPanelProps<TRuleset, TReport>) {
   const [ruleset, setRuleset] = useState<TRuleset>(defaultRuleset)
   const [report, setReport] = useState<TReport | null>(null)
@@ -195,7 +206,43 @@ export function PreflightPanel<TRuleset extends string, TReport extends Prefligh
                   <StatusBadge status={item.status} />
                 </div>
                 <p className="mt-0.5 text-fg-muted">{item.evidence}</p>
-                <p className="mt-0.5 text-fg-muted/70">依据：{item.source}</p>
+                {item.locations && item.locations.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {item.locations.map((loc, idx) => {
+                      const text = `${loc.label ? `${loc.label} · ` : ''}${loc.file}${loc.line != null ? `:${loc.line}` : ''}`
+                      return onJumpLocation ? (
+                        <button
+                          key={`${loc.file}:${loc.line ?? ''}:${idx}`}
+                          type="button"
+                          onClick={() => onJumpLocation(loc)}
+                          className="rounded border border-border bg-sunken px-1.5 py-0.5 text-xs text-fg hover:bg-surface"
+                          title="跳转到源码位置"
+                        >
+                          {text}
+                        </button>
+                      ) : (
+                        <span
+                          key={`${loc.file}:${loc.line ?? ''}:${idx}`}
+                          className="rounded bg-sunken px-1.5 py-0.5 text-xs text-fg-muted"
+                        >
+                          {text}
+                        </span>
+                      )
+                    })}
+                  </div>
+                )}
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <p className="text-fg-muted/70">依据：{item.source}</p>
+                  {item.status === 'warn' && onAskAiFix && canEdit && (
+                    <button
+                      type="button"
+                      onClick={() => onAskAiFix(item)}
+                      className="shrink-0 rounded border border-border px-1.5 py-0.5 text-xs text-fg hover:bg-sunken"
+                    >
+                      AI 修复建议
+                    </button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

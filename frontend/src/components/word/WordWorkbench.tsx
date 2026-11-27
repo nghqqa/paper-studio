@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { BookOpen, FileDown, History, Loader2, RefreshCw, Save, Sparkles, Upload, Users, MessageSquareQuote, MessageSquareText, ShieldCheck } from 'lucide-react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { BarChart3, BookA, BookOpen, FileDown, History, Loader2, Package, RefreshCw, RotateCcw, Save, Sparkles, Tag, Upload, Users, MessageSquareQuote, MessageSquareText, ShieldCheck } from 'lucide-react'
+import { NotificationBell } from '@/components/shell/NotificationBell'
+import { PresenceAvatars } from '@/components/shell/PresenceAvatars'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useProjectPresence } from '@/hooks/useProjectPresence'
 import { ApiError } from '@/lib/api/net'
-import { wordApi, type WordCitationStyle, type WordRenumberResult, type WordState } from '@/lib/api/word'
+import { wordApi, type WordCitationStyle, type WordRenumberResult, type WordState, type WordVersionDiff } from '@/lib/api/word'
 import { downloadFile } from '@/lib/download'
 import { selectCanManage, useStudio } from '@/store'
 import { loadOnlyOffice, type OnlyOfficeEditor } from './onlyoffice'
@@ -12,6 +16,10 @@ import { WordSidePanels } from './WordSidePanels'
 const errorText = (e: unknown) => e instanceof Error ? e.message : String(e)
 const formatTime = (value: string | undefined) => value ? new Date(value).toLocaleString('zh-CN') : '—'
 let editorId = 0
+
+const ScientificFigures = lazy(() =>
+  import('@/components/figures/ScientificFigures').then((m) => ({ default: m.ScientificFigures })),
+)
 
 export function WordWorkbench({ pid }: { pid: string }) {
   return <WordSession key={pid} pid={pid} />
@@ -38,9 +46,94 @@ function WordSession({ pid }: { pid: string }) {
   const [hasChanges, setHasChanges] = useState(false)
   const [busy, setBusy] = useState(false)
   const [versionsOpen, setVersionsOpen] = useState(false)
+  const [figuresOpen, setFiguresOpen] = useState(false)
+  const [labelEditing, setLabelEditing] = useState<{ id: string; text: string } | null>(null)
+  const [confirmRestoreId, setConfirmRestoreId] = useState<string | null>(null)
+  const [versionBusyId, setVersionBusyId] = useState<string | null>(null)
+  const [diffOpen, setDiffOpen] = useState(false)
+  const [diffLoading, setDiffLoading] = useState(false)
+  const [diffPair, setDiffPair] = useState<{ base: string; target: string }>({ base: '', target: '' })
+  const [diffData, setDiffData] = useState<WordVersionDiff | null>(null)
+  const [diffErr, setDiffErr] = useState('')
+  const [kitBusy, setKitBusy] = useState(false)
+  const presence = useProjectPresence({
+    pid,
+    file: state ? 'document.docx' : null,
+    mode: 'word',
+    enabled: phase === 'ready',
+  })
+
+  const handleSaveLabel = async (vid: string) => {
+    if (!labelEditing || versionBusyId) return
+    setVersionBusyId(vid); setActionError('')
+    try {
+      const next = await wordApi.labelVersion(pid, vid, labelEditing.text)
+      setState(next)
+      setLabelEditing(null)
+      setNotice(labelEditing.text.trim() ? '已更新版本里程碑标签' : '已清除版本标签')
+    } catch (e) {
+      setActionError(errorText(e))
+    } finally {
+      setVersionBusyId(null)
+    }
+  }
+
+  const handleRestoreVersion = async (vid: string) => {
+    if (versionBusyId) return
+    setVersionBusyId(vid); setActionError(''); setNotice('')
+    try {
+      const next = await wordApi.restoreVersion(pid, vid, state?.sha)
+      setState(next)
+      setConfirmRestoreId(null)
+      setNotice('已非破坏式恢复历史版本并生成最新记录；原版本均已完整保留')
+    } catch (e) {
+      setActionError(errorText(e))
+      void wordApi.state(pid).then((latest) => setState(latest)).catch(() => undefined)
+    } finally {
+      setVersionBusyId(null)
+    }
+  }
+
+  const loadDiffPair = async (baseVid: string, targetVid: string) => {
+    setDiffPair({ base: baseVid, target: targetVid })
+    setDiffOpen(true)
+    setDiffLoading(true)
+    setDiffErr('')
+    try {
+      const res = await wordApi.diffVersions(pid, baseVid, targetVid)
+      setDiffData(res)
+    } catch (e) {
+      setDiffData(null)
+      setDiffErr(errorText(e))
+    } finally {
+      setDiffLoading(false)
+    }
+  }
+
+  const handleExportRevisionKit = async () => {
+    if (kitBusy) return
+    setKitBusy(true); setActionError(''); setNotice('')
+    try {
+      const pairBody = diffPair.base && diffPair.target ? { base_vid: diffPair.base, target_vid: diffPair.target } : undefined
+      const blob = await wordApi.exportRevisionKit(pid, pairBody)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${title || pid}-word-revision-kit.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      setNotice('已导出 Word 返修包（ZIP）')
+    } catch (e) {
+      setActionError(errorText(e))
+    } finally {
+      setKitBusy(false)
+    }
+  }
   const [uploading, setUploading] = useState(false)
   const [renumberBusy, setRenumberBusy] = useState(false)
-  const [sidePanel, setSidePanel] = useState<'library' | 'proposals' | 'preflight' | 'rebuttal' | 'comments' | null>(null)
+  const [sidePanel, setSidePanel] = useState<'library' | 'glossary' | 'proposals' | 'preflight' | 'rebuttal' | 'comments' | null>(null)
   const [docKey, setDocKey] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
 
@@ -269,12 +362,18 @@ function WordSession({ pid }: { pid: string }) {
         }}>所有项目</a>
         <h1 className="min-w-0 flex-1 truncate text-sm font-semibold">{title}</h1>
         <span className="rounded-sm bg-sunken px-2 py-1 text-xs text-fg-muted">Word</span>
+        <PresenceAvatars peers={presence.peers} selfClientId={presence.clientId} />
+        <Button variant="outline" size="sm" onClick={() => setFiguresOpen(true)} data-testid="word-figures-toggle">
+          <BarChart3 aria-hidden /> 图表
+        </Button>
+        <NotificationBell />
         <Button variant="outline" size="sm" onClick={() => openCollabCenter('members')}><Users aria-hidden /> {canManage ? '邀请协作' : '协作者'}</Button>
         <Button variant="outline" size="sm" onClick={() => setVersionsOpen((v) => !v)} aria-expanded={versionsOpen}><History aria-hidden /> 版本</Button>
         <Button variant="outline" size="sm" disabled={phase !== 'ready' || !canSave || busy} onClick={() => void run('save')} data-testid="word-save"><Save aria-hidden /> 保存</Button>
         <Button variant="outline" size="sm" disabled={phase !== 'ready' || !canDownload || busy} onClick={() => void run('pdf')}><FileDown aria-hidden /> PDF</Button>
         <Button size="sm" disabled={phase !== 'ready' || !canDownload || busy} onClick={() => void run('download')} data-testid="word-download"><FileDown aria-hidden /> {canSave ? '保存并下载 Word' : '下载已保存 Word'}</Button>
         <Button variant={sidePanel === 'library' ? 'default' : 'outline'} size="sm" onClick={() => setSidePanel((v) => (v === 'library' ? null : 'library'))} aria-expanded={sidePanel === 'library'} data-testid="word-library-toggle"><BookOpen aria-hidden /> 文献</Button>
+        <Button variant={sidePanel === 'glossary' ? 'default' : 'outline'} size="sm" onClick={() => setSidePanel((v) => (v === 'glossary' ? null : 'glossary'))} aria-expanded={sidePanel === 'glossary'} data-testid="word-glossary-toggle"><BookA aria-hidden /> 术语</Button>
         <Button variant={sidePanel === 'proposals' ? 'default' : 'outline'} size="sm" onClick={() => setSidePanel((v) => (v === 'proposals' ? null : 'proposals'))} aria-expanded={sidePanel === 'proposals'} data-testid="word-proposals-toggle"><Sparkles aria-hidden /> 论文助手</Button>
         <Button variant={sidePanel === 'preflight' ? 'default' : 'outline'} size="sm" disabled={phase !== 'ready' || busy} onClick={() => setSidePanel((v) => (v === 'preflight' ? null : 'preflight'))} aria-expanded={sidePanel === 'preflight'} data-testid="word-preflight-toggle"><ShieldCheck aria-hidden /> 投稿检查</Button>
         <Button variant={sidePanel === 'rebuttal' ? 'default' : 'outline'} size="sm" disabled={phase !== 'ready' || busy} onClick={() => setSidePanel((v) => (v === 'rebuttal' ? null : 'rebuttal'))} aria-expanded={sidePanel === 'rebuttal'} data-testid="word-rebuttal-toggle"><MessageSquareQuote aria-hidden /> 回复信</Button>
@@ -322,9 +421,38 @@ function WordSession({ pid }: { pid: string }) {
             renumberBusy={renumberBusy}
           />
         )}
-        {versionsOpen && <aside className="w-72 max-w-[80vw] overflow-auto border-l border-border bg-panel p-3" aria-label="Word 已保存版本">
-          <h2 className="text-sm font-semibold">已保存版本</h2>
-          <p className="my-2 text-xs text-fg-muted">每次文件回传后记录版本。历史版本不包含尚未回传的修改，下载不会覆盖当前稿件，也不代表本次修改已保存。</p>
+        {versionsOpen && <aside className="w-80 max-w-[85vw] overflow-auto border-l border-border bg-panel p-3" aria-label="Word 已保存版本">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">已保存版本</h2>
+            {canDownload && !!state?.versions.length && (
+              <div className="flex items-center gap-1">
+                {state.versions.length >= 2 && (
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => {
+                      const vs = state.versions
+                      void loadDiffPair(vs[vs.length - 2].id, vs[vs.length - 1].id)
+                    }}
+                    data-testid="word-version-diff-btn"
+                  >
+                    文本对比
+                  </Button>
+                )}
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={kitBusy}
+                  onClick={() => void handleExportRevisionKit()}
+                  data-testid="word-export-revision-kit"
+                  title="导出终稿 .docx、版本差异 diff 与审稿回复信"
+                >
+                  <Package aria-hidden /> {kitBusy ? '打包中…' : '返修包'}
+                </Button>
+              </div>
+            )}
+          </div>
+          <p className="my-2 text-xs text-fg-muted">每次文件回传后记录版本。历史版本不包含尚未回传的修改，下载不会覆盖当前稿件，也不代表本次修改已保存；支持里程碑标签、文本对比与非破坏式恢复。</p>
           {canSave && <div className="space-y-1 border-b border-border pb-2">
             <Button size="xs" variant="outline" disabled={busy || uploading} onClick={() => uploadInput.current?.click()} data-testid="word-upload-version">
               <Upload aria-hidden /> {uploading ? '正在上传…' : '上传本地修改稿（.docx）'}
@@ -337,14 +465,152 @@ function WordSession({ pid }: { pid: string }) {
                 if (picked) void handleUploadFile(picked)
               }} />
           </div>}
-          {[...(state?.versions ?? [])].reverse().map((version, index) => <div key={version.id} className="space-y-1 border-b border-border py-2">
-            <p className="text-xs font-medium">版本 {(state?.versions.length ?? 0) - index}</p>
-            <p className="text-xs">{formatTime(version.created_at)}</p>
-            {canDownload && <Button size="xs" variant="outline" onClick={() => void downloadSaved(wordApi.versionDownloadUrl(pid, version.id), `${title}-${version.id}.docx`)}>下载此版本</Button>}
-          </div>)}
+          {[...(state?.versions ?? [])].reverse().map((version, index) => {
+            const versions = state?.versions ?? []
+            const verNo = versions.length - index
+            const prevVersion = verNo >= 2 ? versions[verNo - 2] : null
+            const editingThis = labelEditing?.id === version.id
+            const busyThis = versionBusyId === version.id
+            return (
+              <div key={version.id} className="space-y-1.5 border-b border-border py-2" data-testid={`word-version-item-${version.id}`}>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-xs font-medium">版本 {verNo}</span>
+                  {version.label && (
+                    <span className="rounded bg-sunken px-1.5 py-0.5 text-xs text-fg" data-testid={`word-version-label-${version.id}`}>
+                      {version.label}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-fg-muted">{formatTime(version.created_at)} · {version.source}</p>
+                {editingThis ? (
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      value={labelEditing.text}
+                      maxLength={80}
+                      placeholder="例如：一修定稿 / 送审版"
+                      onChange={(e) => setLabelEditing({ id: version.id, text: e.target.value })}
+                      onKeyDown={(e) => { if (e.key === 'Enter') void handleSaveLabel(version.id) }}
+                      className="min-w-0 flex-1 rounded border border-border bg-app px-2 py-1 text-xs"
+                      data-testid={`word-version-label-input-${version.id}`}
+                    />
+                    <Button size="xs" disabled={busyThis} onClick={() => void handleSaveLabel(version.id)} data-testid={`word-version-label-save-${version.id}`}>保存</Button>
+                    <Button size="xs" variant="ghost" onClick={() => setLabelEditing(null)}>取消</Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center gap-1">
+                    {canDownload && (
+                      <Button size="xs" variant="outline" onClick={() => void downloadSaved(wordApi.versionDownloadUrl(pid, version.id), `${title}-${version.id}.docx`)}>
+                        下载此版本
+                      </Button>
+                    )}
+                    {canDownload && prevVersion && (
+                      <Button size="xs" variant="outline" onClick={() => void loadDiffPair(prevVersion.id, version.id)} data-testid={`word-version-diff-${version.id}`}>
+                        对比上版
+                      </Button>
+                    )}
+                    {canSave && (
+                      <Button size="xs" variant="outline" onClick={() => setLabelEditing({ id: version.id, text: version.label ?? '' })} data-testid={`word-version-tag-${version.id}`}>
+                        <Tag aria-hidden /> {version.label ? '改标签' : '标里程碑'}
+                      </Button>
+                    )}
+                    {canSave && (confirmRestoreId === version.id ? (
+                      <>
+                        <Button size="xs" variant="default" disabled={busyThis} onClick={() => void handleRestoreVersion(version.id)} data-testid={`word-version-restore-confirm-${version.id}`}>
+                          <RotateCcw aria-hidden /> {busyThis ? '恢复中…' : '确认恢复'}
+                        </Button>
+                        <Button size="xs" variant="ghost" onClick={() => setConfirmRestoreId(null)}>取消</Button>
+                      </>
+                    ) : (
+                      <Button size="xs" variant="outline" onClick={() => setConfirmRestoreId(version.id)} data-testid={`word-version-restore-${version.id}`}>
+                        <RotateCcw aria-hidden /> 恢复
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
           {!state?.versions.length && <p className="text-xs text-fg-muted">暂无版本记录</p>}
         </aside>}
       </main>
+      <Dialog open={diffOpen} onOpenChange={setDiffOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-screen overflow-y-auto" data-testid="word-diff-dialog">
+          <DialogHeader>
+            <DialogTitle>Word 版本文本差异对比（.docx）</DialogTitle>
+          </DialogHeader>
+          {state && state.versions.length >= 2 && (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <label className="flex items-center gap-1">
+                <span>基准版本</span>
+                <select
+                  value={diffPair.base}
+                  onChange={(e) => void loadDiffPair(e.target.value, diffPair.target)}
+                  className="rounded border border-border bg-app px-2 py-1 text-xs"
+                  data-testid="word-diff-base-select"
+                >
+                  {state.versions.map((v, idx) => (
+                    <option key={v.id} value={v.id}>
+                      版本 {idx + 1}{v.label ? ` · ${v.label}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span>→</span>
+              <label className="flex items-center gap-1">
+                <span>目标版本</span>
+                <select
+                  value={diffPair.target}
+                  onChange={(e) => void loadDiffPair(diffPair.base, e.target.value)}
+                  className="rounded border border-border bg-app px-2 py-1 text-xs"
+                  data-testid="word-diff-target-select"
+                >
+                  {state.versions.map((v, idx) => (
+                    <option key={v.id} value={v.id}>
+                      版本 {idx + 1}{v.label ? ` · ${v.label}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {diffData && (
+                <span className="ml-auto text-fg-muted">
+                  新增 {diffData.added} 段 · 删除 {diffData.removed} 段{diffData.truncated ? '（仅展示前 3000 行）' : ''}
+                </span>
+              )}
+            </div>
+          )}
+          {diffLoading && <p className="py-4 text-xs text-fg-muted">正在解析文档文本对比…</p>}
+          {diffErr && <p className="py-2 text-xs text-danger-fg" role="alert">{diffErr}</p>}
+          {!diffLoading && diffData && (
+            diffData.unified_diff ? (
+              <pre className="max-h-96 overflow-auto rounded border border-border bg-app p-2 font-mono text-xs leading-5" data-testid="word-diff-output">
+                {diffData.unified_diff.split('\n').map((line, i) => {
+                  const cls = line.startsWith('+') && !line.startsWith('+++')
+                    ? 'block bg-ok/10 text-ok'
+                    : line.startsWith('-') && !line.startsWith('---')
+                      ? 'block bg-danger/10 text-danger'
+                      : line.startsWith('@@')
+                        ? 'block text-fg-muted font-medium'
+                        : 'block text-fg'
+                  return <code key={i} className={cls}>{line || ' '}</code>
+                })}
+              </pre>
+            ) : (
+              <p className="rounded border border-border bg-sunken p-3 text-xs text-fg-muted">两个版本段落与表格纯文本完全一致。</p>
+            )
+          )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={figuresOpen} onOpenChange={setFiguresOpen}>
+        <DialogContent className="sm:max-w-5xl max-h-screen overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>科研绘图与架构图工作台</DialogTitle>
+          </DialogHeader>
+          <Suspense fallback={<div className="p-6 text-center text-sm text-fg-muted">正在加载图表引擎…</div>}>
+            <ScientificFigures pid={pid} embedded />
+          </Suspense>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

@@ -15,7 +15,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from app import atomic, auth, config
-from app.domain import gbt7714, library, library_ops
+from app.domain import gbt7714, library, library_ops, library_pdf
 from app.domain.library import (
     KEY_RE,
     LibraryEntry,
@@ -68,10 +68,17 @@ async def get_library(pid: str, request: Request):
         index = await asyncio.to_thread(load_index, project.dir)
         diag = diagnostics(index, project)
         diag["parse_errors"] = []
+    pdfs = await asyncio.to_thread(library_pdf.attached_map, project.dir)
+    entries_out = []
+    for e in index.entries:
+        d = e.model_dump(mode="json")
+        if e.reference_id in pdfs:
+            d["pdf"] = pdfs[e.reference_id]
+        entries_out.append(d)
     return {
         "mode": mode,
         "schema_version": index.schema_version,
-        "entries": [e.model_dump(mode="json") for e in index.entries],
+        "entries": entries_out,
         "diagnostics": diag,
         "bib_files": bib_files(project) if mode == "bib" else [],
         "cite_style": detect_cite_style(project) if mode == "bib" else None,

@@ -1,4 +1,4 @@
-import { req } from './net'
+import { postSse, req, type SseOptions } from './net'
 
 /**
  * P1-1 审稿回复信（Rebuttal / Response Letter）API。后端 /api/projects/{pid}/rebuttal（仅 paper 项目）。
@@ -118,6 +118,13 @@ export const rebuttalApi = {
       method: 'POST',
       body: JSON.stringify({ context: context ?? null }),
     }),
+
+  draftStream: (pid: string, itemId: string, context?: string | null, opts?: SseOptions) =>
+    postSse<RebuttalDraftResult>(
+      `/api/projects/${enc(pid)}/rebuttal/items/${enc(itemId)}/draft/stream`,
+      { context: context ?? null },
+      opts,
+    ),
 
   /** 产物 URL 不 fetch，交给 downloadFile 触发浏览器下载（Content-Disposition 命名）。 */
   exportUrl: (pid: string, format: RebuttalExportFormat) =>

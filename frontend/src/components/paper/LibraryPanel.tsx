@@ -292,6 +292,7 @@ export function LibraryPanel({
                       onNotice={setNotice}
                       onError={setError}
                       entries={entries}
+                      verifyItem={verifyMap.get(e.reference_id)}
                     />
                   )}
                 </li>

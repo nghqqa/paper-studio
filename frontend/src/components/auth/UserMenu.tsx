@@ -1,7 +1,8 @@
-import { Building2, CircleUserRound, KeyRound, LogOut, ShieldCheck, UserRoundCog } from 'lucide-react'
+import { Building2, CircleUserRound, KeyRound, Languages, LogOut, ShieldCheck, UserRoundCog } from 'lucide-react'
 import { initialOf, labelText, userColor } from '@/lib/colors'
 import { Avatar } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown'
+import { useI18n } from '@/lib/i18n'
 import { FOCUS_RING, cn } from '@/lib/utils'
 import { useStudio } from '@/store'
 import { signOut } from './session'
@@ -16,6 +17,7 @@ import { signOut } from './session'
 export function UserMenu({ className }: { className?: string }) {
   const status = useStudio((s) => s.authStatus)
   const user = useStudio((s) => s.user)
+  const { toggleLocale, t } = useI18n()
   if (status === 'off' || status === 'unknown') return null
   if (status === 'anon' || !user) {
     return (
@@ -72,6 +74,10 @@ export function UserMenu({ className }: { className?: string }) {
         <DropdownMenuItem onSelect={() => { window.location.hash = '/account?tab=security' }} data-testid="user-menu-password">
           <KeyRound className="size-4 text-fg-muted" aria-hidden />
           修改密码…
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={() => toggleLocale()} data-testid="user-menu-locale">
+          <Languages className="size-4 text-fg-muted" aria-hidden />
+          {t('locale.menu_item')}
         </DropdownMenuItem>
         <DropdownMenuItem onSelect={() => void signOut()} data-testid="user-menu-logout">
           <LogOut className="size-4 text-fg-muted" aria-hidden />

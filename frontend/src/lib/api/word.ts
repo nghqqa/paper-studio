@@ -1,4 +1,4 @@
-import { P, req } from './net'
+import { handle, netFetch, P, req } from './net'
 import type { Settings } from '../types'
 
 export interface WordProjectCreated {
@@ -13,6 +13,18 @@ export interface WordVersion {
   sha: string
   created_at: string
   source: string
+  label?: string
+}
+
+export interface WordVersionDiff {
+  base_vid: string
+  target_vid: string
+  base_sha: string | null
+  target_sha: string | null
+  added: number
+  removed: number
+  truncated: boolean
+  unified_diff: string
 }
 
 export interface WordState {
@@ -134,6 +146,29 @@ export const wordApi = {
   renumberCitations: (pid: string, opts?: { style?: WordCitationStyle; expected_sha?: string }) =>
     req<WordRenumberResult>(`${P(pid)}/word/renumber-citations`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),
   exportPdf: (pid: string) => req<{ url: string; sha: string }>(`${P(pid)}/word/export/pdf`, { method: 'POST', body: '{}' }),
+  labelVersion: (pid: string, vid: string, label: string) =>
+    req<WordState>(`${P(pid)}/word/versions/${encodeURIComponent(vid)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ label }),
+    }),
+  restoreVersion: (pid: string, vid: string, expectedSha?: string | null) =>
+    req<WordState>(`${P(pid)}/word/versions/${encodeURIComponent(vid)}/restore`, {
+      method: 'POST',
+      body: JSON.stringify(expectedSha ? { expected_sha: expectedSha } : {}),
+    }),
+  diffVersions: (pid: string, baseVid: string, targetVid: string) => {
+    const q = new URLSearchParams({ base_vid: baseVid, target_vid: targetVid }).toString()
+    return req<WordVersionDiff>(`${P(pid)}/word/diff?${q}`)
+  },
+  exportRevisionKit: async (pid: string, body?: { base_vid?: string; target_vid?: string }) => {
+    const res = await netFetch(`${P(pid)}/word/export-revision-kit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body ?? {}),
+    })
+    if (!res.ok) await handle<never>(res)
+    return res.blob()
+  },
   /** ruleset 缺省 = jcip-preflight（后端空 body 语义一致，旧行为不变） */
   runPreflight: (pid: string, opts?: WordPreflightRunOptions) =>
     req<WordPreflightPost>(`${P(pid)}/word/preflight`, { method: 'POST', body: JSON.stringify(opts ?? {}) }),

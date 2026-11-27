@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { glossaryApi, type GlossaryEntry } from '@/lib/api/glossary'
 import { latexApi, type LatexBuildInfo, type LatexBuildOutcome, type LatexFileInfo } from '@/lib/api/latex'
 import { libraryApi } from '@/lib/api/library'
 import { errorKind } from '@/lib/api/net'
@@ -38,6 +39,15 @@ export function useLatexSession({
 
   const [files, setFiles] = useState<LatexFileInfo[]>([])
   const [active, setActive] = useState<string | null>(null)
+  const [openTabs, setOpenTabs] = useState<string[]>(() => {
+    try {
+      const raw = window.sessionStorage.getItem(`paper-latex-tabs:${pid}`)
+      const parsed = raw ? JSON.parse(raw) : null
+      return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+    } catch {
+      return []
+    }
+  })
   const [loadErr, setLoadErr] = useState('')
   const [autoBuild, setAutoBuild] = useState(true)
   const [snap, setSnap] = useState<ControllerSnapshot | null>(null)
@@ -52,6 +62,7 @@ export function useLatexSession({
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [configStamp, setConfigStamp] = useState(0)
   const [libraryStamp, setLibraryStamp] = useState(0)
+  const [glossaryStamp, setGlossaryStamp] = useState(0)
   const draftWriteTimer = useRef<number | undefined>(undefined)
 
   const draftStore = useMemo((): DraftStore => {
@@ -85,10 +96,29 @@ export function useLatexSession({
   }, [contentIndex])
 
   const citeDataRef = useRef<{ cites: CiteCandidate[] }>({ cites: [] })
+  const glossaryRef = useRef<GlossaryEntry[]>([])
   const onLibraryChanged = useCallback(() => {
     refreshIndex()
     setLibraryStamp((t) => t + 1)
   }, [refreshIndex])
+  const onGlossaryChanged = useCallback(() => {
+    setGlossaryStamp((t) => t + 1)
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    glossaryApi
+      .list(pid)
+      .then((r) => {
+        if (!cancelled) glossaryRef.current = r.entries
+      })
+      .catch(() => {
+        /* 术语表不可用时静默降级 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [pid, glossaryStamp])
 
   useEffect(() => {
     let cancelled = false
@@ -227,6 +257,21 @@ export function useLatexSession({
     [draftStore, pid, userScope],
   )
 
+  const trackTab = useCallback(
+    (rel: string) => {
+      setOpenTabs((prev) => {
+        const next = prev.includes(rel) ? prev : [...prev, rel]
+        try {
+          window.sessionStorage.setItem(`paper-latex-tabs:${pid}`, JSON.stringify(next))
+        } catch {
+          /* ignore */
+        }
+        return next
+      })
+    },
+    [pid],
+  )
+
   const openFile = useCallback(
     async (rel: string) => {
       try {
@@ -234,6 +279,7 @@ export function useLatexSession({
         ctrl.open(rel, read.content, read.sha)
         onFileLoadedRef.current?.(rel, read.content)
         setActive(rel)
+        trackTab(rel)
         setReloadTick((t) => t + 1)
         setDraftRestored(false)
         checkDraftAfterOpen(rel, read.content, () => false)
@@ -241,7 +287,7 @@ export function useLatexSession({
         setLoadErr(errText(e))
       }
     },
-    [pid, ctrl, checkDraftAfterOpen],
+    [pid, ctrl, checkDraftAfterOpen, trackTab],
   )
 
   const switchFile = useCallback(
@@ -251,6 +297,27 @@ export function useLatexSession({
       void openFile(rel)
     },
     [active, ctrl, openFile],
+  )
+
+  const closeTab = useCallback(
+    (rel: string) => {
+      if (rel === active && ctrl.isDirty() && !window.confirm('当前文件有未保存修改，放弃并关闭？')) return
+      setOpenTabs((prev) => {
+        const idx = prev.indexOf(rel)
+        const next = prev.filter((x) => x !== rel)
+        try {
+          window.sessionStorage.setItem(`paper-latex-tabs:${pid}`, JSON.stringify(next))
+        } catch {
+          /* ignore */
+        }
+        if (rel === active && next.length > 0) {
+          const fallback = next[Math.min(idx, next.length - 1)]
+          void openFile(fallback)
+        }
+        return next
+      })
+    },
+    [active, ctrl, openFile, pid],
   )
 
   const reloadFiles = useCallback(async () => {
@@ -296,6 +363,7 @@ export function useLatexSession({
           ctrl.open(first.path, read.content, read.sha)
           onFileLoadedRef.current?.(first.path, read.content)
           setActive(first.path)
+          trackTab(first.path)
           setReloadTick((t) => t + 1)
           checkDraftAfterOpen(first.path, read.content, () => cancelled)
         }
@@ -407,6 +475,18 @@ export function useLatexSession({
     }
   }, [active, ctrl, draftStore, openFile, pid, userScope])
 
+  const applyMergedConflict = useCallback(
+    (mergedContent: string, newSha: string) => {
+      if (!active) return
+      ctrl.open(active, mergedContent, newSha)
+      draftStore.removeDraft(userScope, pid, active)
+      setDraftRestored(false)
+      setReloadTick((t) => t + 1)
+      refreshIndex()
+    },
+    [active, ctrl, draftStore, pid, refreshIndex, userScope],
+  )
+
   // 当显式保存成功（draftPaused 解除），草稿恢复状态自然失效
   const effectiveDraftRestored = Boolean(draftRestored && !(snap && !snap.draftPaused && !snap.dirty && !snap.saving))
 
@@ -414,6 +494,7 @@ export function useLatexSession({
     ctrl,
     files,
     active,
+    openTabs,
     loadErr,
     setLoadErr,
     autoBuild,
@@ -435,11 +516,14 @@ export function useLatexSession({
     configStamp,
     contentIndex,
     citeDataRef,
+    glossaryRef,
     refreshIndex,
     refreshBuilds,
     onLibraryChanged,
+    onGlossaryChanged,
     openFile,
     switchFile,
+    closeTab,
     handleHistoryRestore,
     reloadFiles,
     applyBuildSettings,
@@ -448,5 +532,6 @@ export function useLatexSession({
     discardDraftProposal,
     dropRestoredDraft,
     reloadConflictFile,
+    applyMergedConflict,
   }
 }

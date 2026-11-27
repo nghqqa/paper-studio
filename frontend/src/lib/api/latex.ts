@@ -193,11 +193,18 @@ async function postBlobDownload(
   return { blob: await r.blob(), filename }
 }
 
+export interface LatexPreflightLocation {
+  file: string
+  line: number | null
+  label?: string
+}
+
 export interface LatexPreflightItem {
   rule_id: string
   status: 'pass' | 'warn' | 'unknown'
   evidence: string
   source: string
+  locations?: LatexPreflightLocation[]
 }
 
 export interface LatexPreflightReport {

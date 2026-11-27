@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   BookOpen,
   Eye,
   EyeOff,
@@ -12,8 +13,11 @@ import {
   Users,
   X,
 } from 'lucide-react'
+import { NotificationBell } from '@/components/shell/NotificationBell'
+import { PresenceAvatars } from '@/components/shell/PresenceAvatars'
 import { Button } from '@/components/ui/button'
 import type { LatexFileInfo } from '@/lib/api/latex'
+import type { PresencePeer } from '@/lib/api/presence'
 import { BRAND_NAME } from '@/lib/brand'
 
 export type LatexSideTab = 'comments' | 'library' | 'proposals' | 'rebuttal' | null
@@ -39,6 +43,9 @@ export function LatexTopBar({
   onCancelBuild,
   onToggleSettings,
   onApplySettings,
+  onOpenFigures,
+  peers = [],
+  selfClientId,
 }: {
   title: string
   engine: string
@@ -60,6 +67,9 @@ export function LatexTopBar({
   onCancelBuild: () => void
   onToggleSettings: () => void
   onApplySettings: (nextMain: string, nextEngine: string) => Promise<void>
+  onOpenFigures?: () => void
+  peers?: PresencePeer[]
+  selfClientId?: string
 }) {
   return (
     <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-2 border-b border-line px-3 py-2" data-testid="latex-topbar">
@@ -75,6 +85,20 @@ export function LatexTopBar({
         LaTeX · {engine} · {main}
       </span>
       <div className="ml-auto flex shrink-0 items-center gap-2">
+        <PresenceAvatars peers={peers} selfClientId={selfClientId} />
+        {onOpenFigures && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onOpenFigures}
+            data-testid="latex-figures-toggle"
+            title="科研绘图与方法图"
+          >
+            <BarChart3 aria-hidden className="size-4" />
+            图表
+          </Button>
+        )}
+        <NotificationBell />
         <Button
           variant="ghost"
           size="sm"

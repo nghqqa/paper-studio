@@ -89,6 +89,7 @@ jobs:
           uv run pytest tests/test_ai_polish.py -q
           uv run pytest tests/test_ai_quota.py -q
           uv run pytest tests/test_user_ai.py -q
+          uv run pytest tests/test_wave1_enhancements.py tests/test_wave2_features.py tests/test_wave3_features.py -q
       - name: Run ONLYOFFICE plugin tests
         run: |
           node --test backend/app/office_plugin/tests/*.test.cjs

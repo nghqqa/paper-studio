@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   PROPOSAL_ACTION_LABELS,
   assistantApi,
   paperProposalApi,
   type FixVerification,
+  type GenerateProposalInput,
   type PaperProposal,
   type ProposalAction,
 } from '@/lib/api/paperProposals'
 import type { AnchorLike, ApplyOutcome } from '../proposalApply'
-import { type SelectionSnapshot, errText, payloadFor, sectionRangeOf, sha256Hex, truncate } from './anchorUtils'
+import { type SelectionSnapshot, errText, extractJsonStreamField, payloadFor, sectionRangeOf, sha256Hex, truncate } from './anchorUtils'
+
+function isAbortError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === 'AbortError'
+}
 
 export function useProposalActions({
   pid,
@@ -41,6 +46,16 @@ export function useProposalActions({
   const [readingBusy, setReadingBusy] = useState(false)
   const [readingError, setReadingError] = useState('')
   const [verifyingId, setVerifyingId] = useState<string | null>(null)
+  const [streamingPreview, setStreamingPreview] = useState<string | null>(null)
+  const genAbortRef = useRef<AbortController | null>(null)
+  const readAbortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => {
+      genAbortRef.current?.abort()
+      readAbortRef.current?.abort()
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     try {
@@ -56,34 +71,80 @@ export function useProposalActions({
     void refresh()
   }, [refresh, reloadSignal])
 
+  const cancelGenerate = useCallback(() => {
+    genAbortRef.current?.abort()
+    genAbortRef.current = null
+  }, [])
+
+  const cancelReading = useCallback(() => {
+    readAbortRef.current?.abort()
+    readAbortRef.current = null
+  }, [])
+
+  const runGenerateRequest = useCallback(
+    async (payload: GenerateProposalInput, taskKey: string, label: string) => {
+      genAbortRef.current?.abort()
+      const ac = new AbortController()
+      genAbortRef.current = ac
+      setBusy(true)
+      setActiveTask(taskKey)
+      setError('')
+      setNotice('')
+      setStreamingPreview('')
+      let raw = ''
+      try {
+        const r = await paperProposalApi.generateStream(pid, payload, {
+          signal: ac.signal,
+          onDelta: (chunk) => {
+            raw += chunk
+            setStreamingPreview(extractJsonStreamField(raw, 'text'))
+          },
+        })
+        setNotice(`已生成提案（${label}），请在下方审阅`)
+        setExpanded(r.proposal.proposal_id)
+        await refresh()
+      } catch (e) {
+        if (isAbortError(e)) setNotice('已停止生成提案')
+        else setError(errText(e))
+      } finally {
+        if (genAbortRef.current === ac) genAbortRef.current = null
+        setStreamingPreview(null)
+        setBusy(false)
+        setActiveTask(null)
+      }
+    },
+    [pid, refresh],
+  )
+
   const generate = useCallback(
-    async (action: ProposalAction, instruction?: string, useSection = false) => {
+    async (
+      action: ProposalAction,
+      instruction?: string,
+      useSection = false,
+      contextOpts?: { useGlossary?: boolean; citeKeys?: string[] },
+    ) => {
       const sel = getSelection()
       if (action !== 'writing' && (!sel || !sel.text.trim())) {
         setNotice('请先在编辑器中选中要修改的文字')
         return
       }
       if (!activePath) return
-      setBusy(true)
-      setActiveTask(action)
-      setError('')
-      setNotice('')
-      try {
-        const insertMode = action === 'writing'
-        let text = sel ? sel.text : ''
-        if (!insertMode && useSection) {
-          const range = sectionRangeOf(sel!.doc, sel!.from)
-          if (range) text = sel!.doc.slice(range.from, range.to)
-        }
-        if (text.length > 8000) {
-          setError('选区过长（>8000 字符），请缩小范围（不支持外发整篇论文）')
-          return
-        }
-        const payloadSel = insertMode
-          ? { original_text: '', context_before: '', context_after: '' }
-          : payloadFor(sel!.doc, text)
-        const baseSha = await sha256Hex(sel ? sel.doc : '')
-        const r = await paperProposalApi.generate(pid, {
+      const insertMode = action === 'writing'
+      let text = sel ? sel.text : ''
+      if (!insertMode && useSection) {
+        const range = sectionRangeOf(sel!.doc, sel!.from)
+        if (range) text = sel!.doc.slice(range.from, range.to)
+      }
+      if (text.length > 8000) {
+        setError('选区过长（>8000 字符），请缩小范围（不支持外发整篇论文）')
+        return
+      }
+      const payloadSel = insertMode
+        ? { original_text: '', context_before: '', context_after: '' }
+        : payloadFor(sel!.doc, text)
+      const baseSha = await sha256Hex(sel ? sel.doc : '')
+      await runGenerateRequest(
+        {
           mode,
           file: activePath,
           base_sha: baseSha,
@@ -92,18 +153,39 @@ export function useProposalActions({
           context_after: payloadSel.context_after,
           action,
           instruction,
-        })
-        setNotice(`已生成提案（${PROPOSAL_ACTION_LABELS[action]}），请在下方审阅`)
-        setExpanded(r.proposal.proposal_id)
-        await refresh()
-      } catch (e) {
-        setError(errText(e))
-      } finally {
-        setBusy(false)
-        setActiveTask(null)
-      }
+          ...(contextOpts?.useGlossary ? { use_glossary: true } : {}),
+          ...(contextOpts?.citeKeys && contextOpts.citeKeys.length > 0 ? { cite_keys: contextOpts.citeKeys } : {}),
+        },
+        action,
+        PROPOSAL_ACTION_LABELS[action],
+      )
     },
-    [getSelection, pid, activePath, refresh, mode],
+    [getSelection, activePath, mode, runGenerateRequest],
+  )
+
+  const refine = useCallback(
+    async (base: PaperProposal, instruction: string) => {
+      const trimmed = instruction.trim()
+      if (!trimmed) return
+      const nextAction: ProposalAction = base.action === 'writing' ? 'custom' : base.action
+      await runGenerateRequest(
+        {
+          mode,
+          file: base.anchor.file,
+          base_sha: base.anchor.base_sha,
+          original_text: base.anchor.original_text,
+          context_before: base.anchor.context_before,
+          context_after: base.anchor.context_after,
+          action: nextAction,
+          instruction: trimmed,
+          parent_proposal_id: base.proposal_id,
+          previous_suggestion: base.suggested_text,
+        },
+        `refine:${base.proposal_id}`,
+        `${PROPOSAL_ACTION_LABELS[nextAction]}·微调`,
+      )
+    },
+    [mode, runGenerateRequest],
   )
 
   const runReading = useCallback(async () => {
@@ -117,15 +199,36 @@ export function useProposalActions({
       setReadingError('选区过长（>2 万字符），请缩小范围')
       return
     }
+    readAbortRef.current?.abort()
+    const ac = new AbortController()
+    readAbortRef.current = ac
     setReadingBusy(true)
     setReadingError('')
     setActiveTask('read')
+    setReading({ answer: '', model: '流式生成中' })
+    let acc = ''
     try {
-      const r = await assistantApi.read(pid, { mode, file: activePath, text: sel.text })
+      const r = await assistantApi.readStream(
+        pid,
+        { mode, file: activePath, text: sel.text },
+        {
+          signal: ac.signal,
+          onDelta: (chunk) => {
+            acc += chunk
+            setReading({ answer: acc, model: '流式生成中' })
+          },
+        },
+      )
       setReading({ answer: r.answer, model: r.model })
     } catch (e) {
-      setReadingError(errText(e))
+      if (isAbortError(e)) {
+        if (!acc) setReading(null)
+        else setReading((prev) => (prev ? { ...prev, model: '已停止' } : null))
+      } else {
+        setReadingError(errText(e))
+      }
     } finally {
+      if (readAbortRef.current === ac) readAbortRef.current = null
       setReadingBusy(false)
       setActiveTask(null)
     }
@@ -292,9 +395,13 @@ export function useProposalActions({
     readingBusy,
     readingError,
     verifyingId,
+    streamingPreview,
     refresh,
     generate,
+    refine,
+    cancelGenerate,
     runReading,
+    cancelReading,
     runVerify,
     doApply,
     doUndo,

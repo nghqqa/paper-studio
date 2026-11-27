@@ -39,6 +39,7 @@ export function LoginPage() {
   const register = useStudio((s) => s.register)
   const error = useStudio((s) => s.authError)
   const demoMode = useStudio((s) => s.demoMode)
+  const oidc = useStudio((s) => s.oidc)
   const registrationPolicy = useStudio((s) => s.registrationPolicy)
   const [demoBusy, setDemoBusy] = useState(false)
   const [mode, setMode] = useState<Mode>('login')
@@ -278,6 +279,18 @@ export function LoginPage() {
             <Button type="submit" size="xl" className="w-full" disabled={registrationClosed} loading={busy} loadingLabel="请稍候…" data-testid="login-submit">
               {mode === 'login' ? '登录' : '注册并登录'}
             </Button>
+            {oidc.enabled && (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                className="w-full"
+                onClick={() => window.location.assign('/api/auth/oidc/login')}
+                data-testid="login-oidc-btn"
+              >
+                {oidc.label || '机构单点登录 (SSO)'}
+              </Button>
+            )}
             {demoMode && (
               <Button
                 type="button"

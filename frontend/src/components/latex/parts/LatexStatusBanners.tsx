@@ -16,6 +16,7 @@ export function LatexStatusBanners({
   onDropRestoredDraft,
   onResolveOverwrite,
   onResolveReload,
+  onOpenConflictMerge,
 }: {
   canEdit: boolean
   saving: boolean
@@ -32,6 +33,7 @@ export function LatexStatusBanners({
   onDropRestoredDraft: () => void
   onResolveOverwrite: () => void
   onResolveReload: () => Promise<void>
+  onOpenConflictMerge?: () => void
 }) {
   return (
     <>
@@ -80,6 +82,11 @@ export function LatexStatusBanners({
           data-testid="latex-conflict"
         >
           <span className="min-w-0 flex-1 text-fg-strong">{error}</span>
+          {onOpenConflictMerge && (
+            <Button size="sm" variant="outline" data-testid="latex-conflict-merge" onClick={onOpenConflictMerge}>
+              对比合并
+            </Button>
+          )}
           <Button size="sm" data-testid="latex-conflict-overwrite" onClick={onResolveOverwrite}>
             以本地内容覆盖服务器
           </Button>

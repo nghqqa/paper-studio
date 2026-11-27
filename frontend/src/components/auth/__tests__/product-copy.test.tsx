@@ -1,14 +1,19 @@
 // @vitest-environment jsdom
+/// <reference types="node" />
 /**
  * 文案回归：落地页与 index.html 元信息统一为「研稿 · Paper Studio」论文写作与审阅定位。
  * 防旧品牌（「知撰」「专利撰写与协同平台」「协作办案」）与专利业务文案
  * （代理师/说明书/技术领域/本发明/权利要求/WK 案号）在主入口复现；
  * 防宣传未实现能力（AI 提案、任意模板导入、实时协同等）。
  */
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import indexHtml from '../../../../index.html?raw'
+import robotsTxt from '../../../../public/robots.txt?raw'
+import sitemapXml from '../../../../public/sitemap.xml?raw'
 import { AuthBrand } from '../AuthFrame'
 import { LoginPage } from '../LoginPage'
 import { LandingPage } from '../LandingPage'
@@ -90,6 +95,47 @@ describe('产品文案统一（研稿 · Paper Studio）', () => {
     for (const banned of ['AI 提案', '实时协同编辑', '模板市场']) {
       expect(allFaqText).not.toContain(banned)
     }
+  })
+
+  it('SEO 与社交卡片元数据完备且无重复标签', () => {
+    const doc = new DOMParser().parseFromString(indexHtml, 'text/html')
+    expect(doc.head.querySelectorAll('title')).toHaveLength(1)
+    expect(doc.head.querySelectorAll('meta[name="description"]')).toHaveLength(1)
+
+    const canonicals = [...doc.head.querySelectorAll('link[rel="canonical"]')]
+    const ogUrls = [...doc.head.querySelectorAll('meta[property="og:url"]')]
+    const ogImages = [...doc.head.querySelectorAll('meta[property="og:image"]')]
+    const twImages = [...doc.head.querySelectorAll('meta[name="twitter:image"]')]
+
+    expect(canonicals).toHaveLength(1)
+    expect(ogUrls).toHaveLength(1)
+    expect(ogImages).toHaveLength(1)
+    expect(twImages).toHaveLength(1)
+
+    expect(canonicals[0].getAttribute('href')).toBe('https://paper.nghqqa.cn/')
+    expect(ogUrls[0].getAttribute('content')).toBe('https://paper.nghqqa.cn/')
+    expect(ogImages[0].getAttribute('content')).toBe('https://paper.nghqqa.cn/og-image.jpg')
+    expect(twImages[0].getAttribute('content')).toBe('https://paper.nghqqa.cn/og-image.jpg')
+    expect(doc.head.querySelector('meta[property="og:image:width"]')?.getAttribute('content')).toBe('1200')
+    expect(doc.head.querySelector('meta[property="og:image:height"]')?.getAttribute('content')).toBe('630')
+    expect(existsSync(resolve(import.meta.dirname, '../../../../public/og-image.jpg'))).toBe(true)
+
+    const app = ldBlocks().find((b) => b['@type'] === 'SoftwareApplication') as Record<string, string>
+    expect(app?.url).toBe('https://paper.nghqqa.cn/')
+    expect(app?.codeRepository).toBe('https://github.com/nghqqa/paper-studio')
+    expect(app?.license).toBe('https://opensource.org/licenses/Apache-2.0')
+
+    const locs = [...sitemapXml.matchAll(/<loc>(.*?)<\/loc>/g)].map((m) => m[1].trim())
+    expect(locs.length).toBeGreaterThanOrEqual(1)
+    for (const loc of locs) {
+      expect(loc.startsWith('https://paper.nghqqa.cn/')).toBe(true)
+      expect(loc).not.toContain('#')
+    }
+
+    expect(robotsTxt).toContain('User-agent: *')
+    expect(robotsTxt).toContain('Allow: /')
+    expect(robotsTxt).toContain('Disallow: /api/')
+    expect(robotsTxt).toContain('Sitemap: https://paper.nghqqa.cn/sitemap.xml')
   })
 
   it('登录/注册页装饰样张与占位符：论文视角，无专利业务文案（E2E 实测缺陷回归）', async () => {

@@ -555,6 +555,42 @@ def update_item(project_dir: str, item_id: str, patch: dict) -> dict:
     return it
 
 
+def append_single_item(
+    project_dir: str,
+    *,
+    reviewer: str,
+    category: str,
+    text: str,
+    location: dict | None = None,
+    comment_ids: list[str] | None = None,
+) -> dict:
+    """将单条审稿意见/平台批注追加为当前轮 rebuttal 条目并返回新条目。"""
+    clean_text = (text or "").strip()
+    if not clean_text:
+        raise RebuttalError("意见内容不能为空")
+    safe_cids = [str(cid).strip() for cid in (comment_ids or []) if _COMMENT_ID_RE.match(str(cid).strip())]
+    with atomic.studio_lock(project_dir, "rebuttal"):
+        st = load_state(project_dir)
+        st["round"] = max(int(st.get("round") or 0), 1)
+        nxt = _next_seq(st["items"])
+        item = _norm_item(
+            {
+                "id": f"rb-{nxt}",
+                "reviewer": reviewer or "外部审阅",
+                "category": category if category in CATEGORIES else "major",
+                "text": clean_text,
+                "status": "todo",
+                "location": location,
+                "round": st["round"],
+                "comment_ids": safe_cids,
+            }
+        )
+        st["items"] = (st["items"] + [item])[:MAX_ITEMS]
+        st["updated_at"] = _now()
+        _write(project_dir, st)
+    return item
+
+
 # ---------------- AI 起草（建议，不覆盖用户回复）----------------
 
 _DRAFT_RULES = (
@@ -588,13 +624,22 @@ def _draft_messages(title: str, snap: dict, context: str | None) -> list[dict]:
     ]
 
 
-async def generate_draft(store, pid: str, ai, item_id: str, context: str | None = None) -> tuple[dict, list[str]]:
-    """AI 起草单条回复建议 → (条目, warnings)。
+def _parse_draft_response(raw_text: str) -> tuple[str, str, list[str]]:
+    warnings: list[str] = []
+    try:
+        data = ai_client.parse_json(raw_text, _DRAFT_SCHEMA)
+        resp = str(data.get("response") or "").strip()
+        summ = str(data.get("edits_summary") or "").strip()
+        if not resp:
+            raise ValueError("response 为空")
+    except ValueError as e:
+        resp = (raw_text or "").strip()
+        summ = ""
+        warnings.append(f"AI 输出未按约定 JSON 返回（{e}），已将原文保存为草稿建议")
+    return resp, summ, warnings
 
-    锁内读条目快照 → 锁外 await ai.chat（等待上游不持项目写锁）→ 重新加锁复核条目仍存在
-    （并发 replace 可能已删条 ⇒ 409）→ 写 ai_draft。
-    只写 ai_draft——用户手写的 response / edits_summary 一律不动，稿件文件零接触。
-    AiError → RebuttalError(kind="ai_<kind>", status=e.status)，路由层统一翻译。"""
+
+def prepare_draft_context(store, pid: str, item_id: str, context: str | None = None) -> tuple[str, list[dict]]:
     project = store.get(pid)
     d = project.dir
     with atomic.studio_lock(d, "rebuttal"):
@@ -606,22 +651,10 @@ async def generate_draft(store, pid: str, ai, item_id: str, context: str | None 
             "text": it["text"],
             "location": it.get("location"),
         }
-    warnings: list[str] = []
-    try:
-        r = await ai.chat(_draft_messages(project.title, snap, context), "interactive", project_dir=d)
-        try:
-            data = ai_client.parse_json(r.text, _DRAFT_SCHEMA)
-            resp = str(data.get("response") or "").strip()
-            summ = str(data.get("edits_summary") or "").strip()
-            if not resp:
-                raise ValueError("response 为空")
-        except ValueError as e:
-            # 诚实降级：非 JSON 输出原样作为草稿建议（作者确认采纳前不入 response）
-            resp = (r.text or "").strip()
-            summ = ""
-            warnings.append(f"AI 输出未按约定 JSON 返回（{e}），已将原文保存为草稿建议")
-    except ai_client.AiError as e:
-        raise RebuttalError(str(e), status=e.status, kind=f"ai_{e.kind}") from e
+    return d, _draft_messages(project.title, snap, context)
+
+
+def save_draft_result(d: str, item_id: str, resp: str, summ: str) -> dict:
     with atomic.studio_lock(d, "rebuttal"):
         st = load_state(d)
         it = _find(st, item_id)
@@ -629,6 +662,23 @@ async def generate_draft(store, pid: str, ai, item_id: str, context: str | None 
         it["updated_at"] = _now()
         st["updated_at"] = _now()
         _write(d, st)
+    return it
+
+
+async def generate_draft(store, pid: str, ai, item_id: str, context: str | None = None) -> tuple[dict, list[str]]:
+    """AI 起草单条回复建议 → (条目, warnings)。
+
+    锁内读条目快照 → 锁外 await ai.chat（等待上游不持项目写锁）→ 重新加锁复核条目仍存在
+    （并发 replace 可能已删条 ⇒ 409）→ 写 ai_draft。
+    只写 ai_draft——用户手写的 response / edits_summary 一律不动，稿件文件零接触。
+    AiError → RebuttalError(kind="ai_<kind>", status=e.status)，路由层统一翻译。"""
+    d, messages = prepare_draft_context(store, pid, item_id, context)
+    try:
+        r = await ai.chat(messages, "interactive", project_dir=d)
+        resp, summ, warnings = _parse_draft_response(r.text)
+    except ai_client.AiError as e:
+        raise RebuttalError(str(e), status=e.status, kind=f"ai_{e.kind}") from e
+    it = save_draft_result(d, item_id, resp, summ)
     return it, warnings
 
 

@@ -16,6 +16,7 @@ W5 notify-audit-backend（docs/plan/21 §2 R-ADM-02 / R-ADM-03 / R-AI-01 机构�
 fastapi-users / SQLAlchemy 只在成员 / 审计路由内惰性 import（off 下不得把 app.auth.db 拉进来）。
 """
 
+import asyncio
 import time
 import uuid
 
@@ -26,7 +27,7 @@ from pydantic import BaseModel, Field
 
 from app import config
 from app.auth import CurrentUser, login_required
-from app.domain import doctor, events, org, org_audit
+from app.domain import data_health, doctor, events, org, org_audit
 from app.domain.org import ORG_NAME_MAX, load_org, save_org
 from app.errors import error_detail, kind_error, not_implemented
 from app.schemas import AiProviderTestIn, AiUsageSummary, OrgAuditResponse, OrgSettings, OrgSettingsPatch
@@ -321,3 +322,29 @@ async def admin_doctor(user: CurrentUser):
     """平台部署健康诊断（超管只读；不返回任何密钥原文）。"""
     _require_superuser(user)
     return await doctor.run_doctor()
+
+
+@router.get("/data/health")
+async def admin_data_health(request: Request, user: CurrentUser):
+    """数据目录健康度、磁盘占用分布与 SQLite 完整性检查。"""
+    if config.AUTH_ON:
+        _require_superuser(user)
+    return await asyncio.to_thread(data_health.collect_data_health, request.app.state.store)
+
+
+@router.get("/data/backup")
+async def admin_data_backup(request: Request, user: CurrentUser, include_projects: bool = False):
+    """导出 SQLite 热备 + 平台设置（脱敏 Key）+ 共享资产备份 ZIP。"""
+    if config.AUTH_ON:
+        _require_superuser(user)
+    payload = await asyncio.to_thread(
+        data_health.build_platform_backup_zip,
+        request.app.state.store,
+        include_projects=include_projects,
+    )
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
+    return Response(
+        payload,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="paper-studio-backup-{stamp}.zip"'},
+    )

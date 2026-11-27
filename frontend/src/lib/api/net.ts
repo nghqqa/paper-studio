@@ -160,6 +160,88 @@ export async function handle<T>(r: Response, opts?: { expireOn401?: boolean }): 
 export const P = (id: string) => `/api/projects/${encodeURIComponent(id)}`
 export const PUB = (token: string) => `/api/public/${encodeURIComponent(token)}`
 
+export interface SseOptions {
+  onDelta?: (chunk: string) => void
+  signal?: AbortSignal
+  timeout?: number | false
+  expireOn401?: boolean
+}
+
+/** POST 并消费 text/event-stream；若响应非流式（如单测 mock JSON），自动降级为 handle<T>()。 */
+export async function postSse<T>(url: string, body: unknown, opts: SseOptions = {}): Promise<T> {
+  const { onDelta, signal, timeout = REQ_TIMEOUT_MS, expireOn401 } = opts
+  let r: Response
+  try {
+    r = await netFetch(url, {
+      method: 'POST',
+      signal: reqSignal(signal, timeout),
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify(body ?? {}),
+    })
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'TimeoutError') {
+      throw new ApiError(0, '请求超时，请检查网络后重试')
+    }
+    throw e
+  }
+  if (!r.ok) {
+    return await handle<T>(r, { expireOn401 })
+  }
+  const ct = r.headers.get('content-type') || ''
+  if (!ct.includes('text/event-stream') || !r.body) {
+    return await handle<T>(r, { expireOn401 })
+  }
+  const reader = r.body.getReader()
+  const decoder = new TextDecoder()
+  let buf = ''
+  let donePayload: T | undefined
+  let errMsg = ''
+  const processFrame = (frame: string) => {
+    const lines = frame.split(/\r?\n/)
+    let evName = 'message'
+    const dataLines: string[] = []
+    for (const line of lines) {
+      if (line.startsWith('event:')) evName = line.slice(6).trim()
+      else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart())
+    }
+    if (!dataLines.length) return
+    const raw = dataLines.join('\n')
+    let parsed: Record<string, unknown> | null = null
+    try {
+      parsed = JSON.parse(raw) as Record<string, unknown>
+    } catch {
+      parsed = null
+    }
+    if (evName === 'delta') {
+      const chunk = typeof parsed?.text === 'string' ? parsed.text : raw
+      if (chunk) onDelta?.(chunk)
+    } else if (evName === 'done') {
+      donePayload = (parsed ?? raw) as T
+    } else if (evName === 'error') {
+      errMsg = typeof parsed?.message === 'string' ? parsed.message : raw || '生成失败'
+    }
+  }
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const frames = buf.split(/\r?\n\r?\n/)
+    buf = frames.pop() ?? ''
+    for (const f of frames) {
+      if (f.trim()) processFrame(f)
+      if (errMsg) throw new ApiError(502, errMsg)
+    }
+  }
+  if (buf.trim()) {
+    processFrame(buf)
+    if (errMsg) throw new ApiError(502, errMsg)
+  }
+  if (donePayload === undefined) {
+    throw new ApiError(502, '流式响应未完整结束')
+  }
+  return donePayload
+}
+
 export function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

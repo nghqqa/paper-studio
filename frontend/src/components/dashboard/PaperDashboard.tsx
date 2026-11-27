@@ -1,17 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Archive, ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Columns3, Download, FileText, Filter, FolderOpen, Grid2X2, Image, Kanban, LayoutTemplate, List, Loader2, Pencil, Plus, Rows3, Search, Sparkles, Tag, Trash2, UserRound, Users, X } from 'lucide-react'
+import { Archive, ArrowDownUp, BookOpen, CalendarDays, Check, ChevronDown, Columns3, Download, FileText, Filter, FolderOpen, Grid2X2, Image, Kanban, LayoutTemplate, List, Loader2, Package, Pencil, Plus, Rows3, Search, Sparkles, Tag, Trash2, Upload, UserRound, Users, X } from 'lucide-react'
 import { UserMenu } from '@/components/auth/UserMenu'
 import { ScientificFigures } from '@/components/figures/ScientificFigures'
+import { LanguageToggle } from '@/components/shell/LanguageToggle'
 import { NewPaperProjectDialog } from '@/components/shell/NewPaperProjectDialog'
 import { NotificationBell } from '@/components/shell/NotificationBell'
 import { Toasts } from '@/components/shell/Toasts'
 import { ImportDialog } from '@/components/latex/ImportDialog'
+import { archiveApi } from '@/lib/api/archive'
+import { deadlinesApi } from '@/lib/api/deadlines'
+import { useI18n } from '@/lib/i18n'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { BRAND_NAME, pageTitle } from '@/lib/brand'
 import { csvDateStamp, downloadCsv, toCsv } from '@/lib/csv'
 import { downloadFile } from '@/lib/download'
+import { coreApi } from '@/lib/api/core'
 import { latexApi } from '@/lib/api/latex'
 import { wordApi } from '@/lib/api/word'
 import { fmtRelative, fmtRelativeWords, fmtFull } from '@/lib/format'
@@ -20,11 +25,13 @@ import type { ProjectSummary } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { useStudio, type DashScope } from '@/store'
 import { RowActions } from './RowActions'
+import { DeadlineCalendar } from './DeadlineCalendar'
 import { PaperProjectInfo } from './PaperProjectInfo'
-import { deadlineDays, formatLabel, groupPaperRows, PAPER_STAGES, paperOwner, paperOwnerKey, paperStage, paperTags, sortPaperRows, stageLabel, type PaperGroup, type PaperSort } from './paperProjects'
+import { SharedAssetsView } from './SharedAssetsView'
+import { deadlineDays, formatLabel, groupPaperRows, PAPER_STAGES, paperOwner, paperOwnerKey, paperStage, paperTags, sortPaperRows, stageLabel, type PaperGroup, type PaperSort, type PaperStage } from './paperProjects'
 import './paper-dashboard.css'
 
-type Area = 'projects' | 'venues' | 'figures'
+type Area = 'projects' | 'venues' | 'figures' | 'assets'
 type Quick = '' | 'soon' | 'overdue' | 'missing'
 const SCOPES: { id: DashScope; label: string; icon: typeof Grid2X2 }[] = [
   { id: 'all', label: '所有项目', icon: Grid2X2 }, { id: 'mine', label: '我的项目', icon: UserRound },
@@ -77,6 +84,8 @@ export function PaperDashboard() {
   const deleteProject = useStudio((s) => s.deleteProject)
   const density = useStudio((s) => s.density)
   const setDensity = useStudio((s) => s.setDensity)
+  const { t } = useI18n()
+  const archiveInput = useRef<HTMLInputElement>(null)
   const [area, setArea] = useState<Area>('projects')
   const [query, setQuery] = useState('')
   const [format, setFormat] = useState('all')
@@ -86,6 +95,7 @@ export function PaperDashboard() {
   const [quick, setQuick] = useState<Quick>('')
   const [sort, setSort] = useState<PaperSort>('recent')
   const [group, setGroup] = useState<PaperGroup>('none')
+  const [venueMode, setVenueMode] = useState<'list' | 'calendar'>('list')
   const [viewPref, setView] = useState<'list' | 'board'>('list')
   // 看板=写作生命周期管理，只对活水项目有意义；归档/回收站是死态平铺列表，强制列表视图
   const boardable = scope !== 'archived' && scope !== 'trash'
@@ -100,8 +110,35 @@ export function PaperDashboard() {
   const [busy, setBusy] = useState(false)
   const [importOpen, setImportOpen] = useState(false)
   const [editing, setEditing] = useState<ProjectSummary | null>(null)
+  const [dragProjectId, setDragProjectId] = useState<string | null>(null)
+  const [dragOverStage, setDragOverStage] = useState<PaperStage | null>(null)
+  const [stageSavingId, setStageSavingId] = useState<string | null>(null)
+
+  async function moveBoardStage(row: ProjectSummary, nextStage: PaperStage) {
+    if (!writable(row)) {
+      useStudio.getState().toast('需要编辑以上权限才能调整论文阶段', 'error')
+      return
+    }
+    if (paperStage(row) === nextStage || stageSavingId === row.id) return
+    setStageSavingId(row.id)
+    try {
+      await coreApi.saveSettings(row.id, {
+        title: row.title,
+        submission: {
+          ...row.submission,
+          stage: nextStage === 'unset' ? '' : nextStage,
+        },
+      })
+      await load()
+      useStudio.getState().toast(`已将「${row.title || row.id}」移至 ${stageLabel(nextStage)}`, 'info')
+    } catch (e) {
+      useStudio.getState().toast(e instanceof Error ? e.message : String(e), 'error')
+    } finally {
+      setStageSavingId(null)
+    }
+  }
   const search = useRef<HTMLInputElement>(null)
-  const title = area === 'venues' ? '投稿计划' : area === 'figures' ? '科研图表' : SCOPES.find((s) => s.id === scope)!.label
+  const title = area === 'venues' ? '投稿计划' : area === 'figures' ? '科研图表' : area === 'assets' ? '跨项目资产' : SCOPES.find((s) => s.id === scope)!.label
   useEffect(() => { void load() }, [load])
   useEffect(() => { document.title = pageTitle(title) }, [title])
   useEffect(() => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)) } catch { /* optional preferences */ } }, [prefs])
@@ -216,11 +253,25 @@ export function PaperDashboard() {
     } catch (e) { useStudio.getState().toast(e instanceof Error ? e.message : String(e), 'error') }
   }
 
+  async function handleImportArchiveFile(file: File) {
+    setBusy(true)
+    try {
+      const res = await archiveApi.importArchive(file)
+      await load()
+      useStudio.getState().toast(`${t('dash.import_archive_success')}：${res.project.title} (${res.restored_files} 个文件)`, 'success')
+    } catch (e) {
+      useStudio.getState().toast(e instanceof Error ? e.message : String(e), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function rowActions(row: ProjectSummary) {
     const state = row.list_state ?? 'active'
     return <div className="paper-row-actions">
       <button disabled={!writable(row)} onClick={() => setEditing(row)} aria-label={`编辑 ${row.title} 的项目信息`} title="项目信息"><Pencil aria-hidden /></button>
       <button disabled={busy} onClick={() => void downloadRow(row)} aria-label={row.source_format === 'docx' ? `下载 ${row.title} 的已保存 Word 版本` : `下载 ${row.title}`} title={row.source_format === 'docx' ? '下载服务器已保存的 Word 版本；不含其他窗口尚未保存的修改' : '下载最近编译的 PDF'}><Download aria-hidden /></button>
+      <button disabled={busy} onClick={() => void archiveApi.downloadArchive(row.id, row.title)} aria-label={`导出 ${row.title} 整档`} title="导出便携整档 (.zip)" data-testid={`row-export-archive-${row.id}`}><Package aria-hidden /></button>
       {scope !== 'archived' && scope !== 'trash' && state === 'active' && <button disabled={!writable(row)} onClick={() => void setListState(row.id, 'archived')} aria-label={`归档 ${row.title}`} title="归档"><Archive aria-hidden /></button>}
       {(scope === 'archived' || scope === 'trash') && <button disabled={!writable(row)} onClick={() => void setListState(row.id, scope === 'trash' ? 'active' : 'active')} aria-label={`恢复 ${row.title}`} title={scope === 'trash' ? '恢复到项目列表' : '取消归档'}><FolderOpen aria-hidden /></button>}
       {scope !== 'trash' && state === 'active' && <button disabled={!writable(row)} onClick={() => void setListState(row.id, 'trashed')} aria-label={`移到回收站 ${row.title}`} title="移到回收站"><Trash2 aria-hidden /></button>}
@@ -242,29 +293,66 @@ export function PaperDashboard() {
   return <div className="paper-dashboard" data-testid="paper-dashboard" data-compact={prefs.compact} data-area={area}>
     <a className="paper-skip" href="#/" onClick={(e) => { e.preventDefault(); document.getElementById('main-content')?.focus() }}>跳到主内容</a>
     <header className="paper-topbar">
-      <a href="#/" className="paper-brand"><img src="/logo-mark.svg" alt="" /><span>{BRAND_NAME}</span><span className="paper-brand-caption">科研工作空间</span></a>
+      <a href="#/" className="paper-brand"><img src="/logo-mark.svg" alt="" /><span>{BRAND_NAME}</span><span className="paper-brand-caption">{t('brand.caption')}</span></a>
       <nav className="paper-modules" aria-label="工作区功能">
-        <button aria-current={area === 'projects' ? 'page' : undefined} onClick={() => showArea('projects')}><FolderOpen aria-hidden />论文项目</button>
-        <button aria-current={area === 'venues' ? 'page' : undefined} onClick={() => showArea('venues')}><CalendarDays aria-hidden />投稿计划</button>
-        <button aria-current={area === 'figures' ? 'page' : undefined} onClick={() => showArea('figures')}><Image aria-hidden />科研图表</button>
-        {user?.is_superuser && <a href="#/admin?tab=templates" data-testid="paper-manage-templates"><LayoutTemplate aria-hidden />模板管理</a>}
+        <button aria-current={area === 'projects' ? 'page' : undefined} onClick={() => showArea('projects')}><FolderOpen aria-hidden />{t('nav.projects')}</button>
+        <button aria-current={area === 'venues' ? 'page' : undefined} onClick={() => showArea('venues')}><CalendarDays aria-hidden />{t('nav.venues')}</button>
+        <button aria-current={area === 'figures' ? 'page' : undefined} onClick={() => showArea('figures')}><Image aria-hidden />{t('nav.figures')}</button>
+        <button aria-current={area === 'assets' ? 'page' : undefined} onClick={() => showArea('assets')} data-testid="paper-nav-assets"><BookOpen aria-hidden />{t('nav.assets')}</button>
+        {user?.is_superuser && <a href="#/admin?tab=templates" data-testid="paper-manage-templates"><LayoutTemplate aria-hidden />{t('nav.templates')}</a>}
       </nav>
-      <div className="paper-topbar-end"><div className="paper-search"><Search aria-hidden /><input ref={search} aria-label="搜索项目" type="search" placeholder="搜索论文、投稿目标或标签…" value={query} onChange={(e) => { setQuery(e.target.value); if (area === 'figures') setArea('projects') }} /><kbd>/</kbd></div><div className="paper-user flex items-center gap-1">{authOff ? <span className="paper-local-user" title="本地工作区"><UserRound aria-hidden /></span> : <><NotificationBell /><UserMenu /></>}</div></div>
+      <div className="paper-topbar-end"><div className="paper-search"><Search aria-hidden /><input ref={search} aria-label="搜索项目" type="search" placeholder={t('dash.search_placeholder')} value={query} onChange={(e) => { setQuery(e.target.value); if (area === 'figures' || area === 'assets') setArea('projects') }} /><kbd>/</kbd></div><div className="paper-user flex items-center gap-1"><LanguageToggle />{authOff ? <span className="paper-local-user" title="本地工作区"><UserRound aria-hidden /></span> : <><NotificationBell /><UserMenu /></>}</div></div>
     </header>
     <div className="paper-body">
       <aside className="paper-sidebar" aria-label="项目范围与筛选">
         <div className="paper-nav-caption">项目空间</div>
-        <nav aria-label="项目范围" className="paper-scopes">{SCOPES.map(({ id, label, icon: Icon }) => <button key={id} aria-current={area !== 'figures' && scope === id ? 'page' : undefined} onClick={() => showScope(id)}><Icon aria-hidden />{label}<span>{paperScopeRows(projects, id, authOff).length}</span></button>)}</nav>
+        <nav aria-label="项目范围" className="paper-scopes">{SCOPES.map(({ id, label, icon: Icon }) => <button key={id} aria-current={area !== 'figures' && area !== 'assets' && scope === id ? 'page' : undefined} onClick={() => showScope(id)}><Icon aria-hidden />{label}<span>{paperScopeRows(projects, id, authOff).length}</span></button>)}</nav>
         <details className="paper-facet" open><summary><ChevronDown aria-hidden />写作阶段</summary><div>{PAPER_STAGES.filter((s) => base.some((r) => paperStage(r) === s.id) || stage === s.id).map((s) => <button key={s.id} aria-pressed={stage === s.id} onClick={() => { setStage(stage === s.id ? 'all' : s.id); setSelected([]) }}><span className="paper-stage" data-stage={s.id}>{s.label}</span><span className="paper-facet-count">{base.filter((r) => paperStage(r) === s.id).length}</span></button>)}{!base.length && <p>当前范围暂无项目</p>}</div></details>
         <details className="paper-facet" open><summary><ChevronDown aria-hidden />标签</summary><div>{tags.map((t) => <button key={t} aria-pressed={tag === t} onClick={() => { setTag(tag === t ? '' : t); setSelected([]) }}><Tag aria-hidden />{t}<span className="paper-facet-count">{base.filter((r) => paperTags(r).includes(t)).length}</span></button>)}{!tags.length && <p>在项目信息中添加标签</p>}</div></details>
         <details className="paper-facet"><summary><ChevronDown aria-hidden />负责人</summary><div>{owners.map((o) => <button key={o.key} aria-pressed={owner === o.key} onClick={() => setOwner(owner === o.key ? '' : o.key)}><UserRound aria-hidden />{o.label}</button>)}</div></details>
         <div className="paper-sidebar-note"><BookOpen aria-hidden /><span>专注研究，沉淀成果。<small>Word / LaTeX 论文写作</small></span></div>
       </aside>
       <main id="main-content" className="paper-main" tabIndex={-1}>
-        <div className="paper-page-heading"><div><p className="paper-eyebrow">工作空间 / {area === 'venues' ? '投稿计划' : area === 'figures' ? '科研图表' : '论文项目'}</p><h1>{title}<span>{area !== 'figures' && `${base.length} 篇`}</span></h1></div><div className="paper-heading-actions">{area !== 'figures' && boardable && <div className="paper-view-toggle" role="group" aria-label="项目视图"><button aria-pressed={view === 'list'} onClick={() => { setView('list'); setSelected([]) }}><List aria-hidden />列表</button><button aria-pressed={view === 'board'} onClick={() => { setView('board'); setSelected([]) }}><Kanban aria-hidden />看板</button></div>}<button className="paper-primary" onClick={() => openDialog('create')} data-testid="paper-create"><Plus aria-hidden />新建项目</button></div></div>
-        {area === 'figures' ? <div className="paper-figures-manage"><ScientificFigures /></div> : <>
+        <div className="paper-page-heading"><div><p className="paper-eyebrow">工作空间 / {area === 'venues' ? t('nav.venues') : area === 'figures' ? t('nav.figures') : area === 'assets' ? t('nav.assets') : t('nav.projects')}</p><h1>{title}<span>{area !== 'figures' && area !== 'assets' && `${base.length} 篇`}</span></h1></div><div className="paper-heading-actions">{area !== 'figures' && area !== 'assets' && boardable && <div className="paper-view-toggle" role="group" aria-label="项目视图"><button aria-pressed={view === 'list'} onClick={() => { setView('list'); setSelected([]) }}><List aria-hidden />{t('dash.view_list')}</button><button aria-pressed={view === 'board'} onClick={() => { setView('board'); setSelected([]) }}><Kanban aria-hidden />{t('dash.view_board')}</button></div>}<input ref={archiveInput} type="file" accept=".zip" className="hidden" data-testid="paper-import-archive-input" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void handleImportArchiveFile(f) }} /><button className="paper-secondary" disabled={busy} onClick={() => archiveInput.current?.click()} data-testid="paper-import-archive"><Upload aria-hidden />{t('dash.import_archive')}</button><button className="paper-primary" onClick={() => openDialog('create')} data-testid="paper-create"><Plus aria-hidden />{t('dash.new_project')}</button></div></div>
+        {area === 'figures' ? <div className="paper-figures-manage"><ScientificFigures /></div> : area === 'assets' ? <div className="paper-figures-manage"><SharedAssetsView /></div> : <>
           <div className="paper-today" aria-label="投稿概览"><span>近期关注</span>{(['overdue', 'soon', 'missing'] as const).map((q) => { const n = base.filter((r) => matchesQuick(r, q)).length; return n > 0 && <button key={q} aria-pressed={quick === q} data-tone={q} onClick={() => setQuick(quick === q ? '' : q)}>{q === 'overdue' ? '已过截止' : q === 'soon' ? '7 天内截止' : '待补投稿目标'}<strong>{n}</strong></button> })}{!base.some((r) => matchesQuick(r, 'overdue') || matchesQuick(r, 'soon')) && <span className="paper-today-clear"><Check aria-hidden />暂无临近投稿截止</span>}</div>
-          {area === 'venues' && <p className="paper-section-note">按期刊、会议和截止日期安排投稿。点击行尾的编辑按钮更新计划。</p>}
+          {area === 'venues' && (
+            <div className="paper-section-note flex flex-wrap items-center justify-between gap-2">
+              <span>按期刊、会议和截止日期安排投稿。点击行尾的编辑按钮更新计划。</span>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="xs"
+                  variant={venueMode === 'list' ? 'default' : 'outline'}
+                  onClick={() => setVenueMode('list')}
+                  data-testid="venues-mode-list"
+                >
+                  列表
+                </Button>
+                <Button
+                  size="xs"
+                  variant={venueMode === 'calendar' ? 'default' : 'outline'}
+                  onClick={() => setVenueMode('calendar')}
+                  data-testid="venues-mode-calendar"
+                >
+                  <CalendarDays aria-hidden className="size-3.5" />
+                  截稿月历
+                </Button>
+                <a
+                  href={deadlinesApi.icsUrl()}
+                  className="inline-flex h-6 items-center gap-1 rounded border border-border bg-panel px-2 text-2xs text-fg hover:bg-hover"
+                  download="paper-deadlines.ics"
+                  data-testid="venues-export-ics"
+                >
+                  <Download aria-hidden className="size-3" />
+                  导出 .ics
+                </a>
+              </div>
+            </div>
+          )}
+          {area === 'venues' && venueMode === 'calendar' ? (
+            <DeadlineCalendar projects={base} />
+          ) : (
+            <>
           <div className="paper-toolbar" role="toolbar" aria-label="项目列表工具">
             <label className="paper-tool-select"><span className="sr-only">分组方式</span><select aria-label="分组方式" value={group} disabled={view === 'board'} onChange={(e) => setGroup(e.target.value as PaperGroup)}><option value="none">不分组</option><option value="stage">按写作阶段</option><option value="venue">按投稿目标</option><option value="format">按文档类型</option></select></label>
             <Popover><PopoverTrigger><button className={cn('paper-tool', hasFilters && 'is-active')}><Filter aria-hidden />筛选{hasFilters && <span className="paper-filter-dot" />}</button></PopoverTrigger><PopoverContent className="paper-filter-popover w-64" aria-label="筛选论文项目"><label>写作阶段<select aria-label="筛选写作阶段" value={stage} onChange={(e) => setStage(e.target.value)}><option value="all">全部阶段</option>{PAPER_STAGES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}</select></label><label>负责人<select aria-label="筛选负责人" value={owner} onChange={(e) => setOwner(e.target.value)}><option value="">全部负责人</option>{owners.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}</select></label><label>标签<select aria-label="筛选标签" value={tag} onChange={(e) => setTag(e.target.value)}><option value="">全部标签</option>{tags.map((t) => <option key={t}>{t}</option>)}</select></label><button className="paper-tool" onClick={clearFilters}><X aria-hidden />清除筛选</button></PopoverContent></Popover>
@@ -278,10 +366,12 @@ export function PaperDashboard() {
           {error && rows.length > 0 && <p role="alert" className="paper-list-error">列表刷新失败：{error}<button onClick={() => void load()}>重试</button></p>}
           <div className="paper-content">
             {rows.length > 0 && view === 'list' && <div className="paper-table-wrap"><table className="paper-project-table" aria-label={title}><thead><tr><th className="paper-select-cell"><Checkbox aria-label="选择当前列表全部项目" checked={selectedRows.length === rows.length ? true : selectedRows.length ? 'indeterminate' : false} onCheckedChange={(on) => setSelected(on ? rows.map((r) => r.id) : [])} /></th><th className="paper-title-cell">论文名称</th>{columns.map((c) => <th key={c.id} data-column={c.id}>{c.id === 'modified' ? <button onClick={() => setSort(sort === 'oldest' ? 'recent' : 'oldest')} aria-label={sort === 'oldest' ? '按最近修改排序' : '按最早修改排序'}>{c.label}<ArrowDownUp aria-hidden /></button> : c.label}</th>)}<th className="paper-actions-cell">操作</th></tr></thead>{groupPaperRows(rows, group).map(([label, members]) => <tbody key={label}>{label && <tr className="paper-group-row"><th colSpan={columns.length + 3} scope="rowgroup"><ChevronDown aria-hidden />{label}<span>{members.length}</span></th></tr>}{members.map((row) => <tr key={row.id} data-testid={`paper-project-${row.id}`} data-selected={selected.includes(row.id) || undefined}><td className="paper-select-cell"><Checkbox aria-label={`选择 ${row.title}`} checked={selected.includes(row.id)} onCheckedChange={() => toggleSelected(row.id)} /></td><td className="paper-title-cell"><a href={`#${projectHash(row.id)}`} className="paper-project-title"><span className="paper-file-tile" aria-hidden><FileText /></span><span className="paper-title-stack"><strong title={row.title}>{row.title || row.id}</strong><Format row={row} /></span></a></td>{columns.map((c) => <td key={c.id} data-column={c.id}>{cell(row, c.id)}</td>)}<td className="paper-actions-cell">{rowActions(row)}</td></tr>)}</tbody>)}</table></div>}
-            {rows.length > 0 && view === 'board' && <div className="paper-board" aria-label="论文阶段看板">{PAPER_STAGES.filter((s) => rows.some((r) => paperStage(r) === s.id)).map((s) => <section key={s.id} className="paper-board-column" aria-label={s.label}><h2><span className="paper-stage" data-stage={s.id}>{s.label}</span><span>{rows.filter((r) => paperStage(r) === s.id).length}</span></h2>{rows.filter((r) => paperStage(r) === s.id).map((row) => <article className="paper-board-card" key={row.id} data-testid={`paper-project-${row.id}`}><div><Format row={row} />{rowActions(row)}</div><a href={`#${projectHash(row.id)}`}><strong>{row.title || row.id}</strong></a><p>{row.submission?.venue || '尚未设置投稿目标'}</p><footer><span><UserRound aria-hidden />{paperOwner(row, authOff)}</span><span>{row.submission?.deadline || fmtRelative(row.mtime * 1000)}</span></footer></article>)}</section>)}</div>}
+            {rows.length > 0 && view === 'board' && <div className="paper-board" aria-label="论文阶段看板">{PAPER_STAGES.filter((s) => dragProjectId !== null || rows.some((r) => paperStage(r) === s.id)).map((s) => <section key={s.id} className={cn('paper-board-column', dragOverStage === s.id && 'is-drop-target')} data-stage={s.id} aria-label={s.label} onDragOver={(e) => { if (!dragProjectId) return; e.preventDefault(); if (dragOverStage !== s.id) setDragOverStage(s.id) }} onDragLeave={() => setDragOverStage((v) => (v === s.id ? null : v))} onDrop={(e) => { e.preventDefault(); const droppedPid = dragProjectId || e.dataTransfer?.getData('text/plain') || ''; setDragProjectId(null); setDragOverStage(null); const row = rows.find((r) => r.id === droppedPid); if (row) void moveBoardStage(row, s.id) }}><h2><span className="paper-stage" data-stage={s.id}>{s.label}</span><span>{rows.filter((r) => paperStage(r) === s.id).length}</span></h2>{rows.filter((r) => paperStage(r) === s.id).map((row) => <article className={cn('paper-board-card', dragProjectId === row.id && 'is-dragging')} key={row.id} draggable={writable(row) && stageSavingId !== row.id} onDragStart={(e) => { if (!writable(row)) return; e.dataTransfer?.setData('text/plain', row.id); if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'; setDragProjectId(row.id) }} onDragEnd={() => { setDragProjectId(null); setDragOverStage(null) }} data-testid={`paper-project-${row.id}`}><div><Format row={row} />{rowActions(row)}</div><a href={`#${projectHash(row.id)}`}><strong>{row.title || row.id}</strong></a><p>{row.submission?.venue || '尚未设置投稿目标'}</p><footer><span><UserRound aria-hidden />{paperOwner(row, authOff)}</span><span>{row.submission?.deadline || fmtRelative(row.mtime * 1000)}</span></footer></article>)}</section>)}</div>}
             {!rows.length && <div className="paper-empty" role="status">{loading ? <><Loader2 className="animate-spin" />正在加载项目…</> : error ? <><h2>项目加载失败</h2><p>{error}</p><Button variant="outline" onClick={() => void load()}>重试</Button></> : <><img src="/paper-empty-art.png" alt="" width="160" height="128" loading="lazy" /><h2>{hasFilters ? '没有符合条件的论文' : scope === 'trash' ? '回收站是空的' : scope === 'archived' ? '还没有归档项目' : '从第一篇论文开始'}</h2><p>{hasFilters ? '调整关键词或筛选条件，继续寻找你的论文。' : '选择期刊模板、导入 Word / LaTeX 工程，或一键加载全功能演示论文。'}</p>{hasFilters ? <button className="paper-secondary" onClick={clearFilters}>清除筛选</button> : scope === 'all' && <div className="flex flex-wrap items-center justify-center gap-2"><button className="paper-primary" onClick={() => openDialog('create')}><Plus aria-hidden />新建项目</button><button className="paper-secondary" disabled={busy} data-testid="paper-create-showcase" onClick={async () => { try { const p = await latexApi.createShowcaseDemo(); useStudio.getState().toast('已创建全功能演示论文', 'success'); window.location.assign(`#${projectHash(p.id)}`) } catch (e) { useStudio.getState().toast((e as Error).message || '创建演示论文失败', 'error') } }}><Sparkles aria-hidden />加载演示论文</button></div>}</>}</div>}
           </div>
           <footer className="paper-list-footer"><span>{loading ? '正在刷新…' : `显示 ${rows.length} / ${base.length} 篇论文`}</span><span>{view === 'board' ? '在项目信息中设置写作阶段' : '点击论文名称继续写作'}</span></footer>
+            </>
+          )}
         </>}
       </main>
     </div>

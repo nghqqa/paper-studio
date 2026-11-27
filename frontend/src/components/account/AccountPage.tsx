@@ -1,29 +1,32 @@
-import { Bot, Building2, ChevronRight, ShieldCheck, UserRound } from 'lucide-react'
+import { Bot, Building2, ChevronRight, KeyRound, ShieldCheck, UserRound } from 'lucide-react'
 import { PageChrome } from '@/components/shell/PageChrome'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useIsDesktop } from '@/hooks/useMisc'
 import { useStudio } from '@/store'
+import { AccountTokensPanel } from './AccountTokensPanel'
 import { AppearanceSection } from './AppearanceSection'
 import { PasswordForm } from './PasswordForm'
 import { ProfileForm } from './ProfileForm'
 import { SubNav, useHashTab, type SubNavItem } from './SubNav'
 import { UserAiPanel } from './UserAiPanel'
 
-export type AccountTab = 'profile' | 'security' | 'ai'
-export const ACCOUNT_TABS: readonly AccountTab[] = ['profile', 'security', 'ai']
+export type AccountTab = 'profile' | 'security' | 'ai' | 'tokens'
+export const ACCOUNT_TABS: readonly AccountTab[] = ['profile', 'security', 'ai', 'tokens']
 
 const NAV: readonly SubNavItem<AccountTab>[] = [
   { value: 'profile', label: '资料', icon: <UserRound aria-hidden />, href: '#/account?tab=profile', 'data-testid': 'account-tab-profile' },
   { value: 'security', label: '安全', icon: <ShieldCheck aria-hidden />, href: '#/account?tab=security', 'data-testid': 'account-tab-security' },
   { value: 'ai', label: 'AI 接入', icon: <Bot aria-hidden />, href: '#/account?tab=ai', 'data-testid': 'account-tab-ai' },
+  { value: 'tokens', label: 'API 令牌 & MCP', icon: <KeyRound aria-hidden />, href: '#/account?tab=tokens', 'data-testid': 'account-mcp-tokens' },
 ]
 
 const TITLE: Record<AccountTab, { h: string; p: string }> = {
   profile: { h: '资料', p: '显示名、头衔与头像色会出现在成员列表与批注署名；外观设置只影响本浏览器。' },
   security: { h: '安全', p: '修改登录密码；改密后所有设备（含本会话）需重新登录。' },
   ai: { h: 'AI 接入', p: '配置你自己的 OpenAI 兼容模型接入；优先于团队配置，未配置时回退团队接入。' },
+  tokens: { h: 'API 令牌 & MCP', p: '签发 Bearer PAT 令牌，供 Claude Code / Cursor 等 MCP 客户端以只读+提案安全契约连接你的论文项目。' },
 }
 
 /**
@@ -95,6 +98,7 @@ export function AccountPage() {
             )}
             {tab === 'security' && <PasswordForm saving={saving} unavailable={unavailable} onSave={saveMe} />}
             {tab === 'ai' && <UserAiPanel />}
+            {tab === 'tokens' && <AccountTokensPanel />}
             {!desktop && user.is_superuser && (
               <a
                 href="#/admin"

@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { AlertTriangle, CheckCircle2, CircleMinus, Loader2, RefreshCw, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, CircleMinus, Database, Download, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { accountApi, type DoctorCheck, type DoctorReport } from '@/lib/api/account'
+import { accountApi, type DataHealthReport, type DoctorCheck, type DoctorReport } from '@/lib/api/account'
 import { cn } from '@/lib/utils'
+
+function fmtMb(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 MB'
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
 
 const STATUS_META: Record<DoctorCheck['status'], { label: string; cls: string; Icon: typeof CheckCircle2 }> = {
   ok: { label: '正常', cls: 'bg-ok/10 text-ok border-ok/20', Icon: CheckCircle2 },
@@ -13,6 +19,7 @@ const STATUS_META: Record<DoctorCheck['status'], { label: string; cls: string; I
 
 export function DoctorPanel() {
   const [report, setReport] = useState<DoctorReport | null>(null)
+  const [dataHealth, setDataHealth] = useState<DataHealthReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -20,8 +27,12 @@ export function DoctorPanel() {
     setLoading(true)
     setError('')
     try {
-      const r = await accountApi.doctor()
+      const [r, dh] = await Promise.all([
+        accountApi.doctor(),
+        accountApi.dataHealth().catch(() => null),
+      ])
       setReport(r)
+      setDataHealth(dh)
     } catch (e) {
       setError((e as Error).message || '系统诊断执行失败')
     } finally {
@@ -87,6 +98,67 @@ export function DoctorPanel() {
             )
           })}
         </ul>
+      )}
+
+      {dataHealth && (
+        <section className="space-y-3 rounded-lg border border-border bg-panel p-4" data-testid="admin-data-health">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold text-fg-strong">
+              <Database className="size-4 text-primary" aria-hidden />
+              数据存储健康与平台备份
+              <span className={cn('rounded border px-1.5 py-0.5 text-xs font-normal', dataHealth.db.ok ? 'border-ok/20 bg-ok/10 text-ok' : 'border-danger/30 bg-danger/10 text-danger')}>
+                SQLite: {dataHealth.db.ok ? '完整正常' : dataHealth.db.message}
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <a
+                href={accountApi.dataBackupUrl(false)}
+                download="paper-studio-backup.zip"
+                className="inline-flex h-7 items-center gap-1 rounded border border-border bg-app px-2.5 text-xs text-fg hover:bg-hover"
+                data-testid="admin-data-backup-btn"
+              >
+                <Download aria-hidden className="size-3.5" /> 下载核心备份 (.zip)
+              </a>
+              <a
+                href={accountApi.dataBackupUrl(true)}
+                download="paper-studio-full-backup.zip"
+                className="inline-flex h-7 items-center gap-1 rounded border border-border bg-app px-2.5 text-xs text-fg hover:bg-hover"
+                data-testid="admin-data-full-backup-btn"
+              >
+                <Download aria-hidden className="size-3.5" /> 全量备份（含项目）
+              </a>
+            </div>
+          </div>
+          <div className="grid gap-2 text-xs text-fg sm:grid-cols-4">
+            <div className="rounded border border-border bg-app p-2">
+              <div className="text-fg-muted">项目总数</div>
+              <div className="mt-0.5 font-semibold text-fg-strong">
+                {dataHealth.project_count} 篇
+                <span className="ml-1 font-normal text-fg-muted">
+                  (LaTeX {dataHealth.formats.latex ?? 0} / Word {dataHealth.formats.docx ?? 0})
+                </span>
+              </div>
+            </div>
+            <div className="rounded border border-border bg-app p-2">
+              <div className="text-fg-muted">总占用空间</div>
+              <div className="mt-0.5 font-semibold text-fg-strong">{fmtMb(dataHealth.storage.total_bytes)}</div>
+            </div>
+            <div className="rounded border border-border bg-app p-2">
+              <div className="text-fg-muted">编译与预览缓存</div>
+              <div className="mt-0.5 font-semibold text-fg-strong">{fmtMb(dataHealth.storage.build_cache_bytes)}</div>
+            </div>
+            <div className="rounded border border-border bg-app p-2">
+              <div className="text-fg-muted">磁盘剩余空间</div>
+              <div className="mt-0.5 font-semibold text-fg-strong">{fmtMb(dataHealth.disk.free_bytes)}</div>
+            </div>
+          </div>
+          {dataHealth.top_projects.length > 0 && (
+            <div className="text-xs text-fg-muted">
+              占用前五项目：
+              {dataHealth.top_projects.slice(0, 5).map((p) => `${p.title} (${fmtMb(p.total_bytes)})`).join(' · ')}
+            </div>
+          )}
+        </section>
       )}
     </div>
   )

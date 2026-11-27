@@ -39,11 +39,15 @@ function QuickTaskCard({
 
 function ReadingOutput({
   reading,
+  readingBusy,
   readingError,
+  onStop,
   onClear,
 }: {
   reading: { answer: string; model: string } | null
+  readingBusy: boolean
   readingError: string
+  onStop(): void
   onClear(): void
 }) {
   if (!reading && !readingError) return null
@@ -55,12 +59,26 @@ function ReadingOutput({
         </span>
         <span className="font-semibold text-fg-strong">精读分析</span>
         {reading && <span className="text-2xs text-fg-muted">· {reading.model}</span>}
-        <button className="ml-auto rounded p-0.5 text-fg-muted transition-colors hover:bg-hover hover:text-fg" onClick={onClear} aria-label="收起精读">
+        {readingBusy && (
+          <button
+            type="button"
+            className="ml-auto rounded border border-line px-1.5 py-0.5 text-2xs text-fg-muted hover:bg-hover hover:text-fg"
+            onClick={onStop}
+            data-testid="assistant-reading-stop"
+          >
+            停止
+          </button>
+        )}
+        <button
+          className={`${readingBusy ? 'ml-1' : 'ml-auto'} rounded p-0.5 text-fg-muted transition-colors hover:bg-hover hover:text-fg`}
+          onClick={onClear}
+          aria-label="收起精读"
+        >
           <X aria-hidden className="size-3" />
         </button>
       </div>
       {readingError && <div role="alert" className="px-2 py-1.5 text-xs text-danger">{readingError}</div>}
-      {reading && <div className="max-h-72 overflow-auto whitespace-pre-wrap px-2.5 py-2 text-xs leading-5">{reading.answer}</div>}
+      {reading && <div className="max-h-72 overflow-auto whitespace-pre-wrap px-2.5 py-2 text-xs leading-5">{reading.answer || '思考中…'}</div>}
     </div>
   )
 }
@@ -75,6 +93,7 @@ export function AssistantQuickActions({
   reading,
   readingError,
   onRunReading,
+  onStopReading,
   onStartWriting,
   onGenerate,
   onClearReading,
@@ -88,6 +107,7 @@ export function AssistantQuickActions({
   reading: { answer: string; model: string } | null
   readingError: string
   onRunReading: () => void
+  onStopReading: () => void
   onStartWriting: () => void
   onGenerate: (action: ProposalAction) => void
   onClearReading: () => void
@@ -143,24 +163,47 @@ export function AssistantQuickActions({
         />
       </div>
       {!hideSectionOption && (
-        <div className="mt-1.5 flex items-center gap-1 px-0.5 text-2xs text-fg-muted">
-          <span className="shrink-0">学术改写</span>
-          {(['academic', 'condense', 'expand'] as ProposalAction[]).map((a) => (
-            <button
-              key={a}
-              type="button"
-              className="rounded px-1.5 py-0.5 text-2xs text-fg-muted transition-colors hover:bg-hover hover:text-fg-strong disabled:opacity-50"
-              disabled={busy || readingBusy}
-              onClick={() => onGenerate(a)}
-              data-testid={`proposal-gen-${a}`}
-            >
-              {activeTask === a && <Loader2 aria-hidden className="mr-0.5 inline size-3 animate-spin" />}
-              {PROPOSAL_ACTION_LABELS[a]}
-            </button>
-          ))}
+        <div className="mt-1.5 space-y-1 px-0.5 text-2xs text-fg-muted">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="shrink-0">学术改写</span>
+            {(['academic', 'condense', 'expand'] as ProposalAction[]).map((a) => (
+              <button
+                key={a}
+                type="button"
+                className="rounded px-1.5 py-0.5 text-2xs text-fg-muted transition-colors hover:bg-hover hover:text-fg-strong disabled:opacity-50"
+                disabled={busy || readingBusy}
+                onClick={() => onGenerate(a)}
+                data-testid={`proposal-gen-${a}`}
+              >
+                {activeTask === a && <Loader2 aria-hidden className="mr-0.5 inline size-3 animate-spin" />}
+                {PROPOSAL_ACTION_LABELS[a]}
+              </button>
+            ))}
+            <span className="mx-0.5 text-line">|</span>
+            <span className="shrink-0">双语互译</span>
+            {(['translate_en', 'translate_zh'] as ProposalAction[]).map((a) => (
+              <button
+                key={a}
+                type="button"
+                className="rounded px-1.5 py-0.5 text-2xs text-fg-muted transition-colors hover:bg-hover hover:text-fg-strong disabled:opacity-50"
+                disabled={busy || readingBusy}
+                onClick={() => onGenerate(a)}
+                data-testid={`proposal-gen-${a}`}
+              >
+                {activeTask === a && <Loader2 aria-hidden className="mr-0.5 inline size-3 animate-spin" />}
+                {PROPOSAL_ACTION_LABELS[a]}
+              </button>
+            ))}
+          </div>
         </div>
       )}
-      <ReadingOutput reading={reading} readingError={readingError} onClear={onClearReading} />
+      <ReadingOutput
+        reading={reading}
+        readingBusy={readingBusy}
+        readingError={readingError}
+        onStop={onStopReading}
+        onClear={onClearReading}
+      />
     </div>
   )
 }

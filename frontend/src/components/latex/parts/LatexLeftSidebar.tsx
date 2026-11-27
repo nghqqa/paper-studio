@@ -1,5 +1,6 @@
 import type { RefObject } from 'react'
 import { Download, FolderInput, Plus, Upload } from 'lucide-react'
+import { GlossaryPanel } from '@/components/paper/GlossaryPanel'
 import { latexApi, type LatexDiagnostic, type LatexFileInfo } from '@/lib/api/latex'
 import { cn } from '@/lib/utils'
 import { LatexFileTree } from '../LatexFileTree'
@@ -8,7 +9,7 @@ import { LatexHistory } from '../LatexHistory'
 import { LatexIssues } from '../LatexIssues'
 import { LatexPreflight } from '../LatexPreflight'
 
-export type LatexLeftSideView = 'files' | 'outline' | 'issues' | 'preflight' | 'history' | 'git'
+export type LatexLeftSideView = 'files' | 'outline' | 'issues' | 'preflight' | 'glossary' | 'history' | 'git'
 
 export function LatexLeftSidebar({
   pid,
@@ -39,6 +40,8 @@ export function LatexLeftSidebar({
   onProposeFixFromDiag,
   onRestoreHistory,
   onPulled,
+  onInsertAtCursor,
+  onGlossaryChanged,
 }: {
   pid: string
   sideView: LatexLeftSideView
@@ -68,6 +71,8 @@ export function LatexLeftSidebar({
   onProposeFixFromDiag?: (diag: LatexDiagnostic) => void
   onRestoreHistory: (sha: string) => Promise<string | null>
   onPulled: () => void
+  onInsertAtCursor?: (text: string) => void
+  onGlossaryChanged?: () => void
 }) {
   return (
     <nav aria-label="工程文件" className="hidden w-72 shrink-0 flex-col border-r border-line bg-app md:flex" data-testid="latex-files">
@@ -78,6 +83,7 @@ export function LatexLeftSidebar({
             ['outline', '大纲', 'latex-tab-outline'],
             ['issues', 'Issues', 'latex-tab-issues'],
             ['preflight', '检查', 'latex-tab-preflight'],
+            ['glossary', '术语', 'latex-tab-glossary'],
             ['history', '历史', 'latex-tab-history'],
             ['git', '同步', 'latex-tab-git'],
           ] as const
@@ -243,7 +249,33 @@ export function LatexLeftSidebar({
           }}
         />
       ) : sideView === 'preflight' ? (
-        <LatexPreflight pid={pid} canEdit={canEdit} />
+        <LatexPreflight
+          pid={pid}
+          canEdit={canEdit}
+          onJumpLocation={(loc) => {
+            if (loc.line != null && loc.file === active) {
+              onJump(loc.file, loc.line)
+            } else if (loc.line != null) {
+              void onOpenFile(loc.file).then(() => onJump(loc.file, loc.line!))
+            } else {
+              void onOpenFile(loc.file)
+            }
+          }}
+          onAskAiFix={
+            onProposeFixFromDiag
+              ? (item) => {
+                  const first = item.locations?.[0]
+                  onProposeFixFromDiag({
+                    file: first?.file || active || '',
+                    line: first?.line ?? null,
+                    message: `[${item.rule_id}] ${item.evidence}`,
+                  })
+                }
+              : undefined
+          }
+        />
+      ) : sideView === 'glossary' ? (
+        <GlossaryPanel pid={pid} canEdit={canEdit} onInsertText={onInsertAtCursor} onChanged={onGlossaryChanged} />
       ) : sideView === 'history' ? (
         <LatexHistory pid={pid} canEdit={canEdit} onRestore={onRestoreHistory} />
       ) : (

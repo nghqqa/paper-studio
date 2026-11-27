@@ -60,3 +60,27 @@ export function sectionRangeOf(doc: string, pos: number): { from: number; to: nu
   if (start === -1) return null
   return { from: startOffset, to: endOffset }
 }
+
+/** 从 SSE 流式累积文本中提取可读预览（兼容 JSON `{"<key>": "..."}` 或纯文本流）。 */
+export function extractJsonStreamField(raw: string, field = 'text'): string {
+  const m = new RegExp(`"${field}"\\s*:\\s*"`).exec(raw)
+  if (!m) return raw.replace(/^```(?:json)?\s*/i, '').trimStart()
+  let out = ''
+  let i = m.index + m[0].length
+  while (i < raw.length) {
+    const ch = raw[i]
+    if (ch === '\\' && i + 1 < raw.length) {
+      const nxt = raw[i + 1]
+      if (nxt === 'n') out += '\n'
+      else if (nxt === 't') out += '\t'
+      else if (nxt === 'r') out += ''
+      else out += nxt
+      i += 2
+      continue
+    }
+    if (ch === '"') break
+    out += ch
+    i += 1
+  }
+  return out
+}

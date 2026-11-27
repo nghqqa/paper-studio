@@ -62,6 +62,8 @@ EventKind = Literal[
     "deliver.filed",
     "export.downloaded",
     "word.version_uploaded",
+    "word.version_labeled",
+    "word.version_restored",
     "word.citations_renumbered",
     "ai.sent",
     "ai.proposal",

@@ -1,4 +1,5 @@
-import { BookOpen, Loader2, MessageSquareQuote, MessageSquareText, Plug, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { BookA, BookOpen, Loader2, MessageSquareQuote, MessageSquareText, Plug, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { GlossaryPanel } from '@/components/paper/GlossaryPanel'
 import { LibraryPanel, type CitationStyle } from '@/components/paper/LibraryPanel'
 import { ProposalPanel } from '@/components/paper/ProposalPanel'
 import { RebuttalPanel } from '@/components/rebuttal/RebuttalPanel'
@@ -10,7 +11,7 @@ import { WordPreflightPanel } from './WordPreflightPanel'
 
 export { compressCitationNumbers, mergeCitationBrackets }
 
-type Tab = 'library' | 'proposals' | 'preflight' | 'rebuttal' | 'comments'
+type Tab = 'library' | 'glossary' | 'proposals' | 'preflight' | 'rebuttal' | 'comments'
 
 interface Props {
   pid: string
@@ -45,6 +46,8 @@ export function WordSidePanels({
         <span className="inline-flex items-center gap-1 text-xs font-medium text-fg-strong" data-testid="word-panel-title">
           {open === 'library' ? (
             <><BookOpen aria-hidden className="size-3.5" />文献</>
+          ) : open === 'glossary' ? (
+            <><BookA aria-hidden className="size-3.5" />术语表</>
           ) : open === 'preflight' ? (
             <><ShieldCheck aria-hidden className="size-3.5" />投稿检查</>
           ) : open === 'rebuttal' ? (
@@ -151,6 +154,8 @@ export function WordSidePanels({
           renumberBusy={renumberBusy}
         />
       )}
+
+      {open === 'glossary' && <GlossaryPanel pid={pid} canEdit={canEdit} />}
 
       {open === 'preflight' && <WordPreflightPanel pid={pid} canEdit={canEdit} saving={saving} stateSha={stateSha} stateVersion={stateVersion} />}
 

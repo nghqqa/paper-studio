@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Circle, MessageSquarePlus, RotateCw } from 'lucide-react'
+import { CheckCircle2, Circle, ListTodo, MessageSquarePlus, Reply, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { commentsApi } from '@/lib/api/comments'
@@ -30,6 +30,8 @@ export interface LatexCommentItem {
   author: { id: string | null; name: string }
   created_at: number
   source?: string
+  linked_issue_id?: string | null
+  linked_rebuttal_id?: string | null
   replies: Array<{ id: string; body: string; author: { name: string }; created_at: number }>
 }
 
@@ -41,6 +43,7 @@ interface Props {
   dirty: boolean
   /** 当前光标行（创建锚点用）；null 时创建按钮禁用 */
   currentLine: number | null
+  canEdit?: boolean
   onJump(file: string, line: number): void
   onJumpPage?(page: number): void
   reloadSignal: number
@@ -50,7 +53,7 @@ function timeOf(ts: number): string {
   return new Date(ts * 1000).toLocaleString()
 }
 
-export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine, onJump, onJumpPage, reloadSignal }: Props) {
+export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine, canEdit = true, onJump, onJumpPage, reloadSignal }: Props) {
   const [comments, setComments] = useState<LatexCommentItem[] | null>(null)
   const [scope, setScope] = useState<'current' | 'all'>('current')
   const [status, setStatus] = useState<'open' | 'resolved' | 'all'>('open')
@@ -136,6 +139,38 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
       setError('')
       try {
         await commentsApi.resolveComment(pid, cid, resolved)
+        await refresh()
+      } catch (e) {
+        setError(errTextLocal(e))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [pid, refresh],
+  )
+
+  const promoteIssue = useCallback(
+    async (cid: string) => {
+      setBusy(true)
+      setError('')
+      try {
+        await commentsApi.promoteToIssue(pid, cid)
+        await refresh()
+      } catch (e) {
+        setError(errTextLocal(e))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [pid, refresh],
+  )
+
+  const promoteRebuttal = useCallback(
+    async (cid: string) => {
+      setBusy(true)
+      setError('')
+      try {
+        await commentsApi.promoteToRebuttal(pid, cid)
         await refresh()
       } catch (e) {
         setError(errTextLocal(e))
@@ -282,7 +317,21 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
                   ))}
                 </ul>
               )}
-              <div className="mt-1.5 flex items-center gap-1">
+              {(c.linked_issue_id || c.linked_rebuttal_id) && (
+                <div className="mt-1 flex flex-wrap items-center gap-1.5 text-2xs">
+                  {c.linked_issue_id && (
+                    <span className="rounded bg-sunken px-1.5 py-0.5 text-primary" data-testid={`latex-comment-linked-issue-${c.id}`}>
+                      已转待办 #{c.linked_issue_id}
+                    </span>
+                  )}
+                  {c.linked_rebuttal_id && (
+                    <span className="rounded bg-sunken px-1.5 py-0.5 text-ok" data-testid={`latex-comment-linked-rebuttal-${c.id}`}>
+                      已入回复信 {c.linked_rebuttal_id}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="mt-1.5 flex flex-wrap items-center gap-1">
                 {replyFor !== c.id && (
                   <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setReplyFor(c.id)} data-testid={`latex-comment-reply-${c.id}`}>
                     回复
@@ -300,6 +349,38 @@ export function CommentsSidebar({ pid, activePath, savedSha, dirty, currentLine,
                     <Button size="sm" className="h-6 px-1.5" onClick={() => void reply(c.id)} disabled={busy || !replyBody.trim()} data-testid={`latex-comment-reply-send-${c.id}`}>
                       发送
                     </Button>
+                  </>
+                )}
+                {canEdit && replyFor !== c.id && (
+                  <>
+                    {!c.linked_issue_id && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-fg-muted hover:text-fg"
+                        onClick={() => void promoteIssue(c.id)}
+                        disabled={busy}
+                        title="转为待办 Issue"
+                        data-testid={`latex-comment-to-issue-${c.id}`}
+                      >
+                        <ListTodo aria-hidden className="size-3" />
+                        转待办
+                      </Button>
+                    )}
+                    {!c.linked_rebuttal_id && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-1.5 text-fg-muted hover:text-fg"
+                        onClick={() => void promoteRebuttal(c.id)}
+                        disabled={busy}
+                        title="纳入审稿回复信"
+                        data-testid={`latex-comment-to-rebuttal-${c.id}`}
+                      >
+                        <Reply aria-hidden className="size-3" />
+                        转回复信
+                      </Button>
+                    )}
                   </>
                 )}
                 <Button

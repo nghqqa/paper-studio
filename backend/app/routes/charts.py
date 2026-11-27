@@ -8,23 +8,30 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import math
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
-from fastapi import APIRouter  # noqa: E402
-from pydantic import BaseModel, Field, field_validator, model_validator  # noqa: E402
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile  # noqa: E402
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator  # noqa: E402
 
-from app import config  # noqa: E402
+from app import auth, config  # noqa: E402
+from app.ai import client as ai_client  # noqa: E402
 from app.auth import CurrentUser  # noqa: E402
+from app.domain import user_ai  # noqa: E402
+from app.domain.org import require_org_ai  # noqa: E402
+from app.errors import error_detail  # noqa: E402
 
 router = APIRouter(prefix="/api/charts", tags=["charts"])
 
-CHART_TYPES = ("line", "bar", "scatter", "pie", "heatmap", "boxplot")
+CHART_TYPES = ("line", "bar", "scatter", "pie", "heatmap", "boxplot", "radar", "violin", "forest", "grouped_bar")
+_VISION_MAX_BYTES = 8 * 1024 * 1024
+_VISION_MIMES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 MAX_CATEGORIES = 50
 MAX_SERIES = 6
 MAX_POINTS = 200
@@ -134,13 +141,88 @@ def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dp
 
     effective_dpi = dpi if dpi is not None else body.dpi
     colors = PALETTES.get(body.palette)
-    fig, ax = plt.subplots(figsize=(8, 4.5), dpi=effective_dpi)
+    if body.type == "radar":
+        fig, ax = plt.subplots(figsize=(7, 5), dpi=effective_dpi, subplot_kw={"polar": True})
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4.5), dpi=effective_dpi)
     cats = body.categories
     xs = list(range(len(cats)))
     if body.type == "pie":
         pie_colors = list(colors[: len(cats)]) if colors else None
         ax.pie(body.series[0].values, labels=cats, autopct="%1.1f%%", startangle=90, colors=pie_colors)
         ax.axis("equal")
+    elif body.type == "radar":
+        n = max(len(cats), 1)
+        angles = [2 * math.pi * i / n for i in range(n)] + [0.0]
+        ax.set_theta_offset(math.pi / 2)
+        ax.set_theta_direction(-1)
+        ax.set_xticks(angles[:-1])
+        ax.set_xticklabels(cats)
+        for i, s in enumerate(body.series):
+            color = colors[i % len(colors)] if colors else None
+            ls = _GRAY_LINESTYLES[i % len(_GRAY_LINESTYLES)] if body.palette == "grayscale" else "-"
+            vals = list(s.values) + [s.values[0]]
+            ax.plot(angles, vals, linewidth=1.7, linestyle=ls, label=s.name, color=color, marker="o", markersize=4)
+            ax.fill(angles, vals, color=color, alpha=0.14)
+        if body.show_values and len(body.series) == 1:
+            for ang, val in zip(angles[:-1], body.series[0].values):
+                ax.annotate(f"{val:g}", (ang, val), textcoords="offset points", xytext=(0, 5), ha="center", fontsize=8)
+    elif body.type == "violin":
+        data = [list(s.values) if len(s.values) >= 2 else [s.values[0], s.values[0]] for s in body.series]
+        vp = ax.violinplot(data, showmeans=True, showmedians=True)
+        for i, pc in enumerate(vp["bodies"]):
+            c = colors[i % len(colors)] if colors else "#4c72b0"
+            pc.set_facecolor(c)
+            pc.set_edgecolor("#222222")
+            pc.set_alpha(0.72)
+        for part_key in ("cmeans", "cmedians", "cbars", "cmins", "cmaxes"):
+            if part_key in vp:
+                vp[part_key].set_color("#111111")
+                vp[part_key].set_linewidth(1.2)
+        ax.set_xticks(list(range(1, len(body.series) + 1)))
+        ax.set_xticklabels([s.name for s in body.series])
+        if body.show_values:
+            for i, vals in enumerate(data, 1):
+                mean_v = sum(vals) / len(vals)
+                ax.annotate(f"{mean_v:g}", (i, mean_v), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
+    elif body.type == "forest":
+        n_s = len(body.series)
+        spread = 0.55 / n_s if n_s > 1 else 0.0
+        ref_x = 0.0 if any(v <= 0 for s in body.series for v in s.values) else 1.0
+        ax.axvline(ref_x, linestyle="--", color="#7f7f7f", linewidth=1.0)
+        for i, s in enumerate(body.series):
+            color = colors[i % len(colors)] if colors else None
+            marker = _GRAY_MARKERS[i % len(_GRAY_MARKERS)] if body.palette == "grayscale" else "o"
+            offset = (i - (n_s - 1) / 2) * spread if n_s > 1 else 0.0
+            ys = [y + offset for y in xs]
+            ax.errorbar(
+                s.values,
+                ys,
+                xerr=s.errors,
+                fmt=marker,
+                capsize=3,
+                elinewidth=1.2,
+                markersize=5,
+                label=s.name,
+                color=color,
+            )
+            if body.show_values:
+                for x_v, y_v in zip(s.values, ys):
+                    ax.annotate(f"{x_v:g}", (x_v, y_v), textcoords="offset points", xytext=(0, 6), ha="center", fontsize=8)
+        ax.set_yticks(xs)
+        ax.set_yticklabels(cats)
+        ax.invert_yaxis()
+    elif body.type == "grouped_bar":
+        height = 0.8 / len(body.series)
+        for i, s in enumerate(body.series):
+            color = colors[i % len(colors)] if colors else None
+            bar_kw = {"xerr": s.errors, "capsize": 3, "error_kw": {"elinewidth": 1.1, "ecolor": "#333333"}} if s.errors else {}
+            bars = ax.barh([y + i * height for y in xs], s.values, height=height, label=s.name, color=color, **bar_kw)
+            if body.show_values:
+                ax.bar_label(bars, fmt="%.3g", padding=3, fontsize=8)
+        ax.set_yticks([y + 0.4 - height / 2 for y in xs] if len(body.series) > 1 else xs)
+        ax.set_yticklabels(cats)
+        ax.invert_yaxis()
     elif body.type == "heatmap":
         matrix = [s.values for s in body.series]
         flat = [v for row in matrix for v in row]
@@ -226,19 +308,20 @@ def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dp
         ax.set_xticks(xs)
         ax.set_xticklabels(cats)
 
-    if body.type not in ("pie", "heatmap"):
+    if body.type not in ("pie", "heatmap", "radar"):
         ax.spines["top"].set_visible(False)
         ax.spines["right"].set_visible(False)
     if body.title:
-        ax.set_title(body.title)
-    if body.x_label:
+        ax.set_title(body.title, pad=14 if body.type == "radar" else None)
+    if body.x_label and body.type not in ("radar",):
         ax.set_xlabel(body.x_label)
-    if body.y_label:
+    if body.y_label and body.type not in ("radar",):
         ax.set_ylabel(body.y_label)
-    if body.type not in ("pie", "heatmap", "boxplot") and len(body.series) > 1:
+    if body.type not in ("pie", "heatmap", "boxplot", "violin") and len(body.series) > 1:
         ax.legend(fontsize=9, frameon=False)
-    if body.type not in ("pie", "heatmap"):
-        ax.grid(axis="y", linestyle="--", alpha=0.35)
+    if body.type not in ("pie", "heatmap", "radar"):
+        axis_dir = "x" if body.type in ("forest", "grouped_bar") else "y"
+        ax.grid(axis=axis_dir, linestyle="--", alpha=0.35)
 
     buf = io.BytesIO()
     fig.tight_layout()
@@ -277,3 +360,58 @@ async def render(body: ChartIn, user: CurrentUser) -> dict:
         "height_px": height_px,
         "sha256": hashlib.sha256(png).hexdigest(),
     }
+
+
+@router.post("/from-image", dependencies=[Depends(auth.require_login), Depends(require_org_ai)])
+async def chart_from_image(
+    user: CurrentUser,
+    file: Annotated[UploadFile, File()],
+    hint: Annotated[str, Form()] = "",
+) -> dict:
+    """借助多模态 Vision 模型从科研图表/实验表格截图中还原结构化 ChartIn 数据。"""
+    fname = (file.filename or "").lower()
+    ext = os.path.splitext(fname)[1]
+    mime = _VISION_MIMES.get(ext) or (file.content_type if (file.content_type or "").startswith("image/") else None)
+    if not mime or mime == "image/svg+xml":
+        raise HTTPException(422, error_detail("validation", "仅支持 PNG / JPG / WebP 图表或表格截图"))
+    raw = await file.read(_VISION_MAX_BYTES + 1)
+    if len(raw) > _VISION_MAX_BYTES:
+        raise HTTPException(413, error_detail("file", "图片过大（上限 8 MB）"))
+    if not raw:
+        raise HTTPException(422, error_detail("validation", "上传的图片为空"))
+
+    client, _provider = user_ai.resolve_ai_client(user)
+    b64 = base64.b64encode(raw).decode("ascii")
+    allowed = "/".join(CHART_TYPES)
+    sys_msg = (
+        "[paper-studio:charts] 你是科研数据提取助手。"
+        "请仔细读取上传图片中的图表或数据表格，提取类别、系列名与真实数值，严格输出单个 JSON 对象，"
+        '结构为 {"type": "bar", "title": "...", "x_label": "...", "y_label": "...", '
+        '"categories": ["A", "B"], "series": [{"name": "Baseline", "values": [1.0, 2.0]}]}。'
+        f"type 必须是 {allowed} 之一；所有系列 values 长度须等于 categories 长度；禁止编造图像中不存在的数据。"
+    )
+    user_text = f"补充要求：{hint.strip()[:300]}" if hint.strip() else "请识别并提取图中数据为标准 Chart JSON。"
+    messages = [
+        {"role": "system", "content": sys_msg},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_text},
+                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}},
+            ],
+        },
+    ]
+    try:
+        res = await client.chat(messages, "interactive", max_tokens=2048, temperature=0.1)
+    except ai_client.AiError as exc:
+        raise HTTPException(exc.status, error_detail(exc.kind, str(exc))) from exc
+
+    try:
+        parsed = ai_client.parse_json(res.text, {"required": ["categories", "series"]})
+        if parsed.get("type") not in CHART_TYPES:
+            parsed["type"] = "bar"
+        validated = ChartIn.model_validate(parsed)
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(502, error_detail("format", f"图片识别结果未能通过数据结构校验：{exc}")) from exc
+
+    return {"chart": validated.model_dump(mode="json"), "model": res.model}

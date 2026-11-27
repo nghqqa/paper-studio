@@ -10,6 +10,7 @@ import time
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from app import auth, config
@@ -492,3 +493,77 @@ async def extract_pdf_references(
         "total_blocks": total_blocks,
         "files": file_reports,
     }
+
+
+@router.post("/library/entries/{rid}/pdf")
+async def upload_entry_pdf(
+    pid: str,
+    rid: str,
+    request: Request,
+    file: Annotated[UploadFile | None, File()] = None,
+):
+    if not RID_RE.match(rid):
+        raise kind_error("validation", "reference_id 不合法", detail=rid)
+    if file is None:
+        raise kind_error("validation", "请上传 PDF 文件", detail="file")
+    project, _store = _project(request, pid)
+    _require_paperish(project)
+    index = await _current_index(project)
+    if not any(e.reference_id == rid for e in index.entries):
+        raise kind_error("not_found", "文献条目不存在", detail=rid)
+    raw = await read_bounded(file, "PDF", library_pdf.PDF_MAX_BYTES)
+    try:
+        meta = await asyncio.to_thread(library_pdf.attach_pdf, project.dir, rid, raw, file.filename or f"{rid}.pdf")
+    except ValueError as e:
+        raise kind_error("validation", str(e), detail=rid)
+    return {"pdf": meta}
+
+
+@router.get("/library/entries/{rid}/pdf")
+async def get_entry_pdf(pid: str, rid: str, request: Request):
+    if not RID_RE.match(rid):
+        raise kind_error("validation", "reference_id 不合法", detail=rid)
+    project, _store = _project(request, pid)
+    _require_paperish(project)
+    try:
+        pdf_path, fname = await asyncio.to_thread(library_pdf.get_pdf_path, project.dir, rid)
+    except FileNotFoundError as e:
+        raise kind_error("not_found", str(e), detail=rid)
+    return FileResponse(pdf_path, media_type="application/pdf", filename=fname, content_disposition_type="inline")
+
+
+@router.get("/library/entries/{rid}/pdf/text")
+async def get_entry_pdf_text(pid: str, rid: str, request: Request):
+    if not RID_RE.match(rid):
+        raise kind_error("validation", "reference_id 不合法", detail=rid)
+    project, _store = _project(request, pid)
+    _require_paperish(project)
+    index = await _current_index(project)
+    entry = next((e for e in index.entries if e.reference_id == rid), None)
+    if entry is None:
+        raise kind_error("not_found", "文献条目不存在", detail=rid)
+    try:
+        info = await asyncio.to_thread(library_pdf.get_pdf_text, project.dir, rid)
+    except FileNotFoundError as e:
+        raise kind_error("not_found", str(e), detail=rid)
+    return {
+        **info,
+        "reference_id": entry.reference_id,
+        "citation_key": entry.citation_key,
+        "title": entry.title,
+        "authors": entry.authors,
+        "year": entry.year,
+        "venue": entry.venue,
+    }
+
+
+@router.delete("/library/entries/{rid}/pdf")
+async def delete_entry_pdf(pid: str, rid: str, request: Request):
+    if not RID_RE.match(rid):
+        raise kind_error("validation", "reference_id 不合法", detail=rid)
+    project, _store = _project(request, pid)
+    _require_paperish(project)
+    removed = await asyncio.to_thread(library_pdf.delete_pdf, project.dir, rid)
+    if not removed:
+        raise kind_error("not_found", "该文献尚未附加 PDF 原文", detail=rid)
+    return {"ok": True}

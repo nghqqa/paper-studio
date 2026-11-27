@@ -17,6 +17,7 @@ from app import atomic, auth, config
 from app.ai import client as ai_client
 from app.auth import project_access
 from app.auth.invites import router as invites_router
+from app.auth.oidc import router as oidc_router
 from app.auth.router import router as auth_router
 from app.auth.routes_access import router as access_router
 from app.auth.routes_admin import router as admin_router
@@ -26,9 +27,12 @@ from app.domain import notifications as notifications_domain
 from app.domain.projects import ProjectError, ProjectStore
 from app.errors import error_detail
 from app.routes.ai import router as ai_router
+from app.routes.archive import router as archive_router
 from app.routes.cases import router as cases_router
 from app.routes.charts import router as charts_router
 from app.routes.comments import router as comments_router
+from app.routes.deadlines import router as deadlines_router
+from app.routes.glossary import router as glossary_router
 from app.routes.latex import router as latex_router
 from app.routes.latex_exports import demo_router as latex_exports_demo_router
 from app.routes.latex_exports import router as latex_exports_router
@@ -40,14 +44,18 @@ from app.routes.latex_sync import router as latex_sync_router
 from app.routes.library import router as library_router
 from app.routes.library_entries import router as library_entries_router
 from app.routes.library_zotero import router as library_zotero_router
+from app.routes.mcp_server import router as mcp_router
 from app.routes.notifications import router as notifications_router
 from app.routes.office_refs import router as office_refs_router
 from app.routes.paper_proposals import router as paper_proposals_router
 from app.routes.paper_templates import author_router as paper_templates_author_router
 from app.routes.paper_templates import router as paper_templates_router
+from app.routes.pat import router as pat_router
+from app.routes.presence import router as presence_router
 from app.routes.project_figures import router as project_figures_router
 from app.routes.public import router as public_router
 from app.routes.rebuttal import router as rebuttal_router
+from app.routes.shared_assets import router as shared_assets_router
 from app.routes.word_editor import router as word_editor_router
 from app.routes.word_preflight import router as word_preflight_router
 from app.routes.zotero_account import router as zotero_account_router
@@ -85,6 +93,7 @@ events.subscribe("case.created", _on_case_created)
 
 # 认证 / 权限 / 机构管理
 app.include_router(auth_router)
+app.include_router(oidc_router)
 app.include_router(access_router)
 app.include_router(invites_router)
 app.include_router(users_me_router)
@@ -115,8 +124,15 @@ app.include_router(library_zotero_router)
 app.include_router(library_entries_router)
 app.include_router(zotero_account_router)
 app.include_router(paper_proposals_router)
+app.include_router(glossary_router)
 app.include_router(rebuttal_router)
 app.include_router(office_refs_router)
+app.include_router(pat_router)
+app.include_router(mcp_router)
+app.include_router(shared_assets_router)
+app.include_router(deadlines_router)
+app.include_router(presence_router)
+app.include_router(archive_router)
 
 # ONLYOFFICE 本地插件静态目录
 app.mount(
@@ -320,6 +336,7 @@ async def meta():
         "word_editor": config.WORD_EDITOR_ON,
         "word_editor_ready": word_documents.ready(),
         "demo_mode": config.DEMO_MODE,
+        "oidc": {"enabled": config.OIDC_ENABLED, "label": config.OIDC_LABEL},
         "registration": org.registration_public_info(),
         "contact": {
             "email": config.CONTACT_EMAIL,

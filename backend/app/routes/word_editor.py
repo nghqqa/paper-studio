@@ -6,8 +6,8 @@ import os
 import re
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from app import atomic, auth, config
@@ -346,3 +346,66 @@ async def charts_plugin_config(request: Request):
     data["variations"][0]["url"] = "index.html"
     data["baseUrl"] = config.PUBLIC_ORIGIN + "/api/office-charts/"
     return data
+
+
+class WordVersionLabelIn(BaseModel):
+    label: str = Field(default="", max_length=80)
+
+
+class WordVersionRestoreIn(BaseModel):
+    expected_sha: str | None = Field(default=None, max_length=128)
+
+
+class WordRevisionKitIn(BaseModel):
+    base_vid: str | None = Field(default=None, max_length=64)
+    target_vid: str | None = Field(default=None, max_length=64)
+
+
+@router.patch("/api/projects/{pid}/word/versions/{vid}", dependencies=[Depends(auth.require_role("editor"))])
+async def label_word_version(pid: str, vid: str, body: WordVersionLabelIn, request: Request,
+                             user: auth.CurrentUser = None):
+    p = _project(request, pid)
+    state = await asyncio.to_thread(word.label_version, p.dir, vid, body.label)
+    events.emit("word.version_labeled", pid=pid, actor=events.actor_of(user),
+                data={"vid": vid, "label": body.label.strip()[:80]})
+    return state
+
+
+@router.post("/api/projects/{pid}/word/versions/{vid}/restore", dependencies=[Depends(auth.require_role("editor"))])
+async def restore_word_version(pid: str, vid: str, request: Request,
+                               body: WordVersionRestoreIn | None = None,
+                               user: auth.CurrentUser = None):
+    p = _project(request, pid)
+    expected_sha = body.expected_sha if body is not None else None
+    state = await asyncio.to_thread(word.restore_version, p.dir, vid, expected_sha=expected_sha)
+    events.emit("word.version_restored", pid=pid, actor=events.actor_of(user),
+                data={"from_vid": vid, "version": state.get("version"), "sha": state.get("sha")})
+    return state
+
+
+@router.get("/api/projects/{pid}/word/diff")
+async def diff_word_versions(pid: str, request: Request,
+                             base_vid: str = Query(..., min_length=1, max_length=64),
+                             target_vid: str = Query(..., min_length=1, max_length=64)):
+    p = _project(request, pid)
+    return await asyncio.to_thread(word.diff_versions, p.dir, base_vid, target_vid)
+
+
+@router.post("/api/projects/{pid}/word/export-revision-kit")
+async def export_word_revision_kit(pid: str, request: Request,
+                                   body: WordRevisionKitIn | None = None):
+    await _download_allowed(pid)
+    p = _project(request, pid)
+    b_vid = body.base_vid if body is not None else None
+    t_vid = body.target_vid if body is not None else None
+    zip_bytes, filename = await asyncio.to_thread(
+        word.build_word_revision_kit_zip, p, base_vid=b_vid, target_vid=t_vid
+    )
+    return Response(
+        content=zip_bytes,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{filename}",
+            "Cache-Control": "no-store",
+        },
+    )

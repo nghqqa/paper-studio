@@ -156,6 +156,8 @@ def _compare_entry(entry: LibraryEntry, cand: dict[str, Any]) -> dict[str, Any]:
     r_year = str(fields.get("year") or "").strip()
     r_authors = list(fields.get("authors") or [])
     r_doi = str(fields.get("doi") or "").strip()
+    r_venue = str(fields.get("venue") or "").strip()
+    r_url = str(fields.get("url") or "").strip()
     source = str(cand.get("source") or "unknown")
 
     sim = _title_similarity(entry.title or "", r_title)
@@ -188,6 +190,22 @@ def _compare_entry(entry: LibraryEntry, cand: dict[str, Any]) -> dict[str, Any]:
         status = "verified"
         reason = f"已通过权威源（{source}）核验，标题/年份/第一作者一致"
 
+    remote_fields: dict[str, Any] = {}
+    if r_title:
+        remote_fields["title"] = r_title
+    if r_year:
+        remote_fields["year"] = r_year
+    if r_authors:
+        clean_authors = [str(a).strip() for a in r_authors if str(a).strip()]
+        if clean_authors:
+            remote_fields["authors"] = clean_authors
+    if r_venue:
+        remote_fields["venue"] = r_venue
+    if r_doi:
+        remote_fields["doi"] = r_doi
+    if r_url:
+        remote_fields["url"] = r_url
+
     return {
         "reference_id": entry.reference_id,
         "citation_key": entry.citation_key,
@@ -197,6 +215,7 @@ def _compare_entry(entry: LibraryEntry, cand: dict[str, Any]) -> dict[str, Any]:
         "matched_title": r_title,
         "matched_year": r_year,
         "matched_doi": r_doi,
+        "remote_fields": remote_fields,
         "retraction_status": retraction.get("status") or "unknown",
         "diffs": diffs,
         "reason": reason,

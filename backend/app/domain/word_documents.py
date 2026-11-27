@@ -6,6 +6,7 @@ and is replaced after the last editor's final-save callback.
 """
 
 import base64
+import difflib
 import hashlib
 import hmac
 import io
@@ -575,3 +576,160 @@ def export_pdf(project) -> dict:
             raise ProjectError(f"ONLYOFFICE PDF 转换失败（错误 {result.get('error', 'unknown')}）", 502)
         atomic.write_bytes(path, fetch_document(result["fileUrl"], pdf=True))
     return {"url": f"/api/projects/{quote(project.id)}/word/pdf/{sha}.pdf", "sha": sha}
+
+
+def label_version(d: str, vid: str, label: str) -> dict:
+    """为指定已保存 Word 版本设置或清空里程碑标签（<=80 字符）。"""
+    clean = str(label or "").strip()[:80]
+    with atomic.studio_lock(d, "word"):
+        s = _load(d)
+        target = next((v for v in s["versions"] if v["id"] == vid), None)
+        if target is None:
+            raise ProjectError("Word 版本不存在", 404)
+        if clean:
+            target["label"] = clean
+        else:
+            target.pop("label", None)
+        atomic.write_json(_state_path(d), s)
+        return _public_state(s)
+
+
+def restore_version(d: str, vid: str, *, expected_sha: str | None = None) -> dict:
+    """非破坏式恢复历史版本为最新当前稿（生成新版本 + 轮换 doc_key + 乐观锁校验）。"""
+    with atomic.studio_lock(d, "word"):
+        s = _load(d)
+        if s.get("saving"):
+            raise ProjectError("Word 正在保存，请等待保存完成后再恢复版本", 409)
+        if expected_sha and s.get("sha") != expected_sha:
+            raise ProjectError("文档已更新，当前快照已过期（409），请刷新后重试", 409)
+        target = next((v for v in s["versions"] if v["id"] == vid), None)
+        if target is None:
+            raise ProjectError("Word 版本不存在", 404)
+        vpath = os.path.join(_base(d), "versions", vid + ".docx")
+        if not os.path.isfile(vpath):
+            raise ProjectError("Word 版本文件缺失", 404)
+        with open(vpath, "rb") as f:
+            data = f.read()
+        validate_docx(data)
+        s.update(key=secrets.token_hex(20), closed=False)
+        s = _persist(d, s, data, f"restore:{vid}")
+        src_label = target.get("label") or vid[:12]
+        s["versions"][-1]["label"] = f"恢复自 {src_label}"[:80]
+        atomic.write_json(_state_path(d), s)
+        return _public_state(s)
+
+
+def _extract_docx_lines(path: str) -> list[str]:
+    doc = Document(path)
+    out = [p.text for p in doc.paragraphs]
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [c.text.replace("\n", " ").strip() for c in row.cells]
+            out.append("[表格] " + " | ".join(cells))
+    return out
+
+
+def diff_versions(d: str, base_vid: str, target_vid: str) -> dict:
+    """比较两个已保存 Word 版本的正文与表格文本差异，输出 unified diff。"""
+    with atomic.studio_lock(d, "word"):
+        s = _load(d)
+        base_v = next((v for v in s["versions"] if v["id"] == base_vid), None)
+        target_v = next((v for v in s["versions"] if v["id"] == target_vid), None)
+        if base_v is None or target_v is None:
+            raise ProjectError("指定的对比 Word 版本不存在", 404)
+    base_path = os.path.join(_base(d), "versions", base_vid + ".docx")
+    target_path = os.path.join(_base(d), "versions", target_vid + ".docx")
+    if not os.path.isfile(base_path) or not os.path.isfile(target_path):
+        raise ProjectError("Word 版本文件缺失", 404)
+
+    base_lines = _extract_docx_lines(base_path)
+    target_lines = _extract_docx_lines(target_path)
+    from_lbl = str(base_v.get("label") or base_vid)
+    to_lbl = str(target_v.get("label") or target_vid)
+    raw_diff = list(difflib.unified_diff(base_lines, target_lines, fromfile=from_lbl, tofile=to_lbl, lineterm="", n=3))
+    added = sum(1 for ln in raw_diff if ln.startswith("+") and not ln.startswith("+++"))
+    removed = sum(1 for ln in raw_diff if ln.startswith("-") and not ln.startswith("---"))
+    max_lines = 3000
+    truncated = len(raw_diff) > max_lines
+    shown = raw_diff[:max_lines]
+    return {
+        "base_vid": base_vid,
+        "target_vid": target_vid,
+        "base_sha": base_v.get("sha"),
+        "target_sha": target_v.get("sha"),
+        "added": added,
+        "removed": removed,
+        "truncated": truncated,
+        "unified_diff": "\n".join(shown),
+    }
+
+
+def build_word_revision_kit_zip(project, *, base_vid: str | None = None, target_vid: str | None = None) -> tuple[bytes, str]:
+    """打包 Word 返修包 ZIP（当前终稿 .docx / 版本文本对比 diff / 审稿回复信 / README）。"""
+    import re
+
+    from app.domain import rebuttal
+
+    with atomic.studio_lock(project.dir, "word"):
+        s = _load(project.dir)
+        if s.get("saving"):
+            raise ProjectError("Word 正在保存，请等待保存完成后再导出返修包", 409)
+        versions = list(s.get("versions") or [])
+    if not versions:
+        raise ProjectError("当前工程尚无已保存 Word 版本，无法生成返修包", 409)
+
+    entries: list[tuple[str, bytes]] = []
+    included: list[str] = []
+    notes: list[str] = []
+
+    latest = versions[-1]
+    latest_path = version_path(project.dir, latest["id"])
+    with open(latest_path, "rb") as f:
+        entries.append(("01-manuscript-current.docx", f.read()))
+    included.append(f"01-manuscript-current.docx (version {len(versions)}, id {latest['id']})")
+
+    b_vid, t_vid = base_vid, target_vid
+    if (not b_vid or not t_vid) and len(versions) >= 2:
+        b_vid, t_vid = versions[-2]["id"], versions[-1]["id"]
+    if b_vid and t_vid:
+        dres = diff_versions(project.dir, b_vid, t_vid)
+        diff_body = dres["unified_diff"] or "两个版本段落与表格文本完全一致，无差异。"
+        entries.append(("02-version-diff.txt", (diff_body + "\n").encode("utf-8")))
+        included.append(f"02-version-diff.txt ({b_vid} -> {t_vid}, +{dres['added']}/-{dres['removed']})")
+    else:
+        notes.append("02-version-diff.txt：当前仅有单个版本且未指定对比范围")
+
+    project_dict = {"id": project.id, "title": project.title, "dir": project.dir}
+    try:
+        reb_state = rebuttal.load_state(project.dir)
+        items = reb_state.get("items") or []
+        if items and rebuttal._has_exportable(items):
+            round_no = max(int(reb_state.get("round") or 0), 1)
+            for fmt in ("md", "docx"):
+                content = rebuttal.export_letter(project_dict, reb_state, fmt)
+                arcname = f"03-response-letter.{fmt}"
+                entries.append((arcname, content))
+                included.append(f"{arcname} (round {round_no})")
+        else:
+            notes.append("03-response-letter.*：审稿回复信暂无已撰写内容")
+    except rebuttal.RebuttalError as exc:
+        notes.append(f"03-response-letter.*：{exc}")
+
+    readme_lines = [
+        f"Paper Studio Word Revision Kit - {project.title or project.id}",
+        f"Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        "",
+        "Included files:",
+        *[f"  - {line}" for line in included],
+    ]
+    if notes:
+        readme_lines.extend(["", "Skipped / Notes:", *[f"  - {line}" for line in notes]])
+    entries.append(("README-revision-kit.txt", ("\n".join(readme_lines) + "\n").encode("utf-8")))
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, content in entries:
+            zf.writestr(name, content)
+
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", project.title or project.id).strip("-") or project.id
+    return buf.getvalue(), quote(f"{base}-word-revision-kit.zip")

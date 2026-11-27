@@ -32,6 +32,7 @@ vi.mock('@/lib/api/rebuttal', async (importOriginal) => {
       parseFile: vi.fn(),
       updateItem: vi.fn(),
       draft: vi.fn(),
+      draftStream: vi.fn(),
     },
   }
 })
@@ -152,12 +153,12 @@ describe('RebuttalPanel', () => {
     const drafted = item({ ai_draft: { response_draft: 'We thank R1.', edits_summary_draft: 'Added Y.', created_at: '2026-11-17T00:00:00Z' } })
     await mount(<RebuttalPanel pid="p1" canEdit activeFile={null} cursorLine={null} onJump={() => {}} />)
     await openItem()
-    vi.mocked(rebuttalApi.draft).mockResolvedValueOnce({ item: drafted, warnings: [] })
+    vi.mocked(rebuttalApi.draftStream).mockResolvedValueOnce({ item: drafted, warnings: [] })
     await act(async () => {
       btn('rebuttal-ai-draft')!.click()
       await Promise.resolve()
     })
-    expect(vi.mocked(rebuttalApi.draft)).toHaveBeenCalledWith('p1', 'rb-1')
+    expect(vi.mocked(rebuttalApi.draftStream)).toHaveBeenCalledWith('p1', 'rb-1', undefined, expect.objectContaining({ onDelta: expect.any(Function) }))
     expect(q('[data-testid="rebuttal-ai-preview"]')?.textContent).toContain('We thank R1.')
     await act(async () => {
       btn('rebuttal-adopt-ai')!.click()

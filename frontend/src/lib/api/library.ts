@@ -1,4 +1,4 @@
-import { req } from './net'
+import { handle, netFetch, req } from './net'
 
 /**
  * 智能文献管理 API（v0.4）。
@@ -53,8 +53,18 @@ export interface LibraryEntry {
   suggested?: Record<string, string>
   suggested_model?: string | null
   origin?: string
+  pdf?: EntryPdfMeta
   created_at: number
   updated_at: number
+}
+
+export interface EntryPdfMeta {
+  has_pdf: boolean
+  filename: string
+  pages: number
+  size: number
+  text_chars: number
+  uploaded_at: number
 }
 
 export interface LibraryDiagnostics {
@@ -193,6 +203,15 @@ export interface CitationVerifyDiff {
   remote: string
 }
 
+export interface CitationVerifyRemoteFields {
+  title?: string
+  year?: string
+  authors?: string[]
+  venue?: string
+  doi?: string
+  url?: string
+}
+
 export interface CitationVerifyItem {
   reference_id: string
   citation_key: string
@@ -202,6 +221,7 @@ export interface CitationVerifyItem {
   matched_title: string
   matched_year: string
   matched_doi: string
+  remote_fields?: CitationVerifyRemoteFields
   retraction_status: string
   diffs: CitationVerifyDiff[]
   reason: string
@@ -334,4 +354,32 @@ export const libraryApi = {
       method: 'POST',
       body: JSON.stringify({ reference_ids: referenceIds ?? null }),
     }),
+  uploadEntryPdf: (pid: string, rid: string, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return req<{ pdf: EntryPdfMeta }>(`/api/projects/${enc(pid)}/library/entries/${enc(rid)}/pdf`, {
+      method: 'POST',
+      body: fd,
+    })
+  },
+  entryPdfUrl: (pid: string, rid: string) =>
+    `/api/projects/${enc(pid)}/library/entries/${enc(rid)}/pdf`,
+  entryPdfText: (pid: string, rid: string) =>
+    req<{
+      filename: string
+      pages: number
+      text: string
+      reference_id: string
+      citation_key: string
+      title: string
+      authors: string[]
+      year: string | null
+      venue: string | null
+    }>(`/api/projects/${enc(pid)}/library/entries/${enc(rid)}/pdf/text`),
+  deleteEntryPdf: async (pid: string, rid: string) => {
+    const res = await netFetch(`/api/projects/${enc(pid)}/library/entries/${enc(rid)}/pdf`, {
+      method: 'DELETE',
+    })
+    return handle<{ ok: boolean }>(res)
+  },
 }

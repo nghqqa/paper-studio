@@ -142,6 +142,54 @@
   background: var(--primary);
   color: var(--primary-foreground);
 }
+.cm-tok-meta { color: var(--fg-muted); }
+.cm-tok-keyword { color: var(--violet-fg); font-weight: 500; }
+.cm-tok-atom { color: var(--info-fg); }
+.cm-tok-literal { color: var(--ok-fg); }
+.cm-tok-string { color: var(--danger-fg); }
+.cm-tok-escape { color: var(--orange-fg); }
+.cm-tok-var { color: var(--info-fg); }
+.cm-tok-type { color: var(--teal-fg); }
+.cm-tok-macro { color: var(--primary); }
+.cm-tok-comment { color: var(--fg-subtle); font-style: italic; }
+.cm-tok-invalid { color: var(--danger-dot); text-decoration: underline wavy var(--danger-dot); }
+
+/* 可选暗色源码画布（保持 PDF 预览与工作台主栏干净，编辑器主体切换护眼深色） */
+.latex-editor-dark .cm-editor {
+  background: var(--g11);
+  color: var(--g1);
+}
+.latex-editor-dark .cm-gutters {
+  background: var(--g10);
+  color: var(--g5);
+  border-right: 1px solid var(--g9);
+}
+.latex-editor-dark .cm-activeLine {
+  background: oklch(0.26 0.015 255 / 0.55);
+}
+.latex-editor-dark .cm-activeLineGutter {
+  background: var(--g9);
+  color: var(--g1);
+}
+.latex-editor-dark .cm-selectionBackground,
+.latex-editor-dark .cm-content ::selection {
+  background: oklch(0.45 0.14 255 / 0.45);
+}
+.latex-editor-dark .cm-cursor {
+  border-left-color: var(--g0);
+}
+.latex-editor-dark .cm-tok-meta { color: oklch(0.75 0.02 255); }
+.latex-editor-dark .cm-tok-keyword { color: oklch(0.78 0.14 300); }
+.latex-editor-dark .cm-tok-atom { color: oklch(0.78 0.13 250); }
+.latex-editor-dark .cm-tok-literal { color: oklch(0.78 0.14 152); }
+.latex-editor-dark .cm-tok-string { color: oklch(0.78 0.15 30); }
+.latex-editor-dark .cm-tok-escape { color: oklch(0.80 0.14 60); }
+.latex-editor-dark .cm-tok-var { color: oklch(0.82 0.11 220); }
+.latex-editor-dark .cm-tok-type { color: oklch(0.78 0.11 185); }
+.latex-editor-dark .cm-tok-macro { color: oklch(0.78 0.14 155); }
+.latex-editor-dark .cm-tok-comment { color: oklch(0.64 0.02 255); }
+.latex-editor-dark .cm-tok-invalid { color: oklch(0.76 0.18 25); }
+
 @media (max-width: 1200px) {
   .latex-workspace [data-testid="latex-files"] { width: 256px; }
 }

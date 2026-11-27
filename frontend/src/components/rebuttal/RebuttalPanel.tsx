@@ -108,6 +108,7 @@ export function RebuttalPanel({
             cursorLine={cursorLine}
             aiEnabled={rb.aiEnabled}
             aiBusy={rb.aiBusy}
+            streamingDraft={rb.streamingDraft}
             dirty={rb.dirty}
             saving={rb.saving}
             onBack={() => rb.setActiveId(null)}
@@ -116,6 +117,7 @@ export function RebuttalPanel({
             onSwitchStatus={(st) => void rb.switchStatus(st)}
             onLinkCursor={rb.linkCursor}
             onRunDraft={() => void rb.runDraft()}
+            onCancelDraft={rb.cancelDraft}
             onAdoptDraft={rb.adoptDraft}
             onSaveItem={() => void rb.saveItem()}
             onReload={() => void rb.load()}

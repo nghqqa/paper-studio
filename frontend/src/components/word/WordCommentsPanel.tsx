@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { CheckCircle2, Circle, RotateCw } from 'lucide-react'
+import { CheckCircle2, Circle, Reply, RotateCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { commentsApi } from '@/lib/api/comments'
 import type { Comment } from '@/lib/types'
@@ -58,6 +58,22 @@ export function WordCommentsPanel({ pid, canEdit }: { pid: string; canEdit: bool
       setError('')
       try {
         await commentsApi.resolveComment(pid, cid, resolved)
+        await refresh()
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setBusy(false)
+      }
+    },
+    [pid, refresh],
+  )
+
+  const promoteRebuttal = useCallback(
+    async (cid: string) => {
+      setBusy(true)
+      setError('')
+      try {
+        await commentsApi.promoteToRebuttal(pid, cid)
         await refresh()
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e))
@@ -134,12 +150,34 @@ export function WordCommentsPanel({ pid, canEdit }: { pid: string; canEdit: bool
                     ))}
                   </ul>
                 )}
+                {c.linked_rebuttal_id && (
+                  <div className="mt-1 text-2xs">
+                    <span className="rounded bg-sunken px-1.5 py-0.5 text-ok" data-testid={`word-comment-linked-rebuttal-${c.id}`}>
+                      已入回复信 {c.linked_rebuttal_id}
+                    </span>
+                  </div>
+                )}
                 {canEdit && (
-                  <div className="mt-1.5 flex items-center gap-1">
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     {replyFor !== c.id ? (
-                      <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setReplyFor(c.id)} data-testid={`word-comment-reply-${c.id}`}>
-                        回复
-                      </Button>
+                      <>
+                        <Button variant="ghost" size="sm" className="h-6 px-1.5" onClick={() => setReplyFor(c.id)} data-testid={`word-comment-reply-${c.id}`}>
+                          回复
+                        </Button>
+                        {!c.linked_rebuttal_id && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-1.5 text-fg-muted hover:text-fg"
+                            onClick={() => void promoteRebuttal(c.id)}
+                            disabled={busy}
+                            data-testid={`word-comment-to-rebuttal-${c.id}`}
+                          >
+                            <Reply aria-hidden className="size-3" />
+                            转回复信
+                          </Button>
+                        )}
+                      </>
                     ) : (
                       <>
                         <input

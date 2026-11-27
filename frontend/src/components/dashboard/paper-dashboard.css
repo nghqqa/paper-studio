@@ -162,9 +162,12 @@
 .paper-empty h2 { font-size: 16px; font-weight: 600; color: var(--fg); }
 .paper-empty p { font-size: 12px; max-width: 32em; }
 .paper-board { display: flex; align-items: flex-start; gap: 15px; padding: 20px 24px; min-width: fit-content; }
-.paper-board-column { width: 260px; flex-shrink: 0; padding: 10px; border-radius: 6px; background: var(--bg-sunken); border: 1px solid var(--border); }
+.paper-board-column { width: 260px; flex-shrink: 0; padding: 10px; border-radius: 6px; background: var(--bg-sunken); border: 1px solid var(--border); transition: border-color .15s, background-color .15s; }
+.paper-board-column.is-drop-target { border-color: var(--primary, var(--fg)); background: var(--bg-panel, var(--bg-sunken)); }
 .paper-board-column h2 { display: flex; align-items: center; justify-content: space-between; padding: 3px 4px 12px; color: var(--fg-muted); font-size: 11px; }
 .paper-board-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 5px; margin-bottom: 9px; padding: 13px; box-shadow: 0 1px 2px oklch(0 0 0 / .06); }
+.paper-board-card[draggable="true"] { cursor: grab; }
+.paper-board-card.is-dragging { opacity: 0.55; cursor: grabbing; }
 .paper-board-card:last-child { margin-bottom: 0; }
 .paper-board-card > div { display: flex; justify-content: space-between; align-items: center; margin: -5px 0 10px; }
 .paper-board-card .paper-format { margin-right: auto; }

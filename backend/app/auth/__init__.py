@@ -29,6 +29,8 @@ METHOD_ROLE = {"GET": "viewer", "HEAD": "viewer", "OPTIONS": "viewer"}
 ROUTE_ROLE = {
     "/api/projects/{pid}/word/save": "reviewer",
     "/api/projects/{pid}/word/export/pdf": "viewer",
+    "/api/projects/{pid}/word/diff": "viewer",
+    "/api/projects/{pid}/word/export-revision-kit": "viewer",
     "/api/projects/{pid}/latex/build": "viewer",  # 编译只写 .studio/latex-builds，不改源码
     "/api/projects/{pid}/latex/diffs": "viewer",
     "/api/projects/{pid}/latex/diffs/{diff_id}/pdf": "viewer",
@@ -71,9 +73,14 @@ ROUTE_ROLE = {
     # 论文 AI 修改提案
     "/api/projects/{pid}/paper-proposals": "viewer",
     "/api/projects/{pid}/paper-proposals/generate": "viewer",
+    "/api/projects/{pid}/paper-proposals/generate/stream": "viewer",
     "/api/projects/{pid}/paper-proposals/disclosure": "viewer",
     "/api/projects/{pid}/paper-proposals/{proposal_id}": "viewer",
     "/api/projects/{pid}/paper-proposals/{proposal_id}/status": "reviewer",
+    "/api/projects/{pid}/paper-assistant/read": "viewer",
+    "/api/projects/{pid}/paper-assistant/read/stream": "viewer",
+    "/api/projects/{pid}/presence": "viewer",
+    "/api/projects/{pid}/archive/export": "viewer",
 }
 
 # 免登录路径前缀（公开客户审阅；路由内以 token 校验 scope / 过期 / 撤销）；auth 中间件与前端 hash 路由 #/c/<token> 对应
@@ -105,6 +112,29 @@ def forbidden(need: str):
 
 
 async def _resolve_user(request: Request):
+    auth_hdr = request.headers.get("authorization") or ""
+    if auth_hdr.startswith("Bearer ps_pat_"):
+        import uuid
+
+        from app.auth import db as auth_db
+        from app.auth.models import User
+        from app.domain import pat as pat_mod
+
+        rec = pat_mod.verify_token(auth_hdr[7:].strip())
+        if not rec:
+            return None
+        uid = str(rec.get("user_id") or "")
+        try:
+            uid_obj = uuid.UUID(uid)
+        except ValueError:
+            return None
+        await auth_db.init_db()
+        async with auth_db.SessionLocal() as session:
+            u = await session.get(User, uid_obj)
+        if u is None or not u.is_active:
+            return None
+        return u
+
     from app.auth.users import read_cookie_user
 
     return await read_cookie_user(request)

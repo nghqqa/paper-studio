@@ -16,6 +16,7 @@ export function RebuttalItemDetail({
   cursorLine,
   aiEnabled,
   aiBusy,
+  streamingDraft,
   dirty,
   saving,
   onBack,
@@ -24,6 +25,7 @@ export function RebuttalItemDetail({
   onSwitchStatus,
   onLinkCursor,
   onRunDraft,
+  onCancelDraft,
   onAdoptDraft,
   onSaveItem,
   onReload,
@@ -37,6 +39,7 @@ export function RebuttalItemDetail({
   cursorLine: number | null
   aiEnabled: boolean
   aiBusy: boolean
+  streamingDraft?: string | null
   dirty: boolean
   saving: boolean
   onBack: () => void
@@ -45,6 +48,7 @@ export function RebuttalItemDetail({
   onSwitchStatus: (st: RebuttalStatus) => void
   onLinkCursor: () => void
   onRunDraft: () => void
+  onCancelDraft?: () => void
   onAdoptDraft: () => void
   onSaveItem: () => void
   onReload: () => void
@@ -176,8 +180,18 @@ export function RebuttalItemDetail({
             {aiBusy ? <Loader2 aria-hidden className="size-3.5 animate-spin" /> : <Sparkles aria-hidden className="size-3.5" />}
             AI 起草回复
           </Button>
+          {aiBusy && onCancelDraft && (
+            <Button variant="ghost" size="xs" onClick={onCancelDraft} data-testid="rebuttal-ai-stop">
+              停止
+            </Button>
+          )}
           {!aiEnabled && <span className="text-2xs text-fg-muted">团队已禁用 AI</span>}
         </div>
+        {aiBusy && streamingDraft !== null && streamingDraft !== undefined && (
+          <p className="whitespace-pre-wrap rounded-md bg-sunken p-2 leading-5 text-fg-muted" data-testid="rebuttal-ai-streaming">
+            {streamingDraft || '正在起草回复…'}
+          </p>
+        )}
         {selected.ai_draft && (
           <div className="space-y-1">
             <p className="whitespace-pre-wrap rounded-md bg-sunken p-2 leading-5 text-fg-muted" data-testid="rebuttal-ai-preview">

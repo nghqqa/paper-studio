@@ -16,7 +16,7 @@ export function PublishLatexDialog({ pid, figure, onClose, onPublished }: {
   pid: string
   figure: ProjectFigure
   onClose: () => void
-  onPublished: (path: string) => void
+  onPublished: (path: string, snippet?: string) => void
 }) {
   const isChart = figure.kind !== 'diagram'
   const initial = useMemo(() => sanitizeStem(figure.name, figure.id), [figure])
@@ -39,7 +39,7 @@ export function PublishLatexDialog({ pid, figure, onClose, onPublished }: {
       const reply = await figuresApi.publishLatex(pid, figure.id, payload)
       setSnippet(reply.snippet)
       setPublishedPath(reply.path)
-      onPublished(reply.path)
+      onPublished(reply.path, reply.snippet)
     } catch (error) {
       setErr(errorText(error))
     } finally {

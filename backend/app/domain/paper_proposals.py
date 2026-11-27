@@ -35,7 +35,17 @@ DIR = os.path.join(".studio", "paper-proposals")
 PID_RE = re.compile(r"^pp_[0-9a-f]{12}$")
 
 ProposalStatus = Literal["generating", "pending", "applied", "rejected", "stale", "failed", "undone"]
-Action = Literal["polish", "academic", "condense", "expand", "custom", "deai", "writing"]
+Action = Literal[
+    "polish",
+    "academic",
+    "condense",
+    "expand",
+    "custom",
+    "deai",
+    "writing",
+    "translate_en",
+    "translate_zh",
+]
 
 # 合法迁移表（from → 允许的 to 集合）
 TRANSITIONS: dict[str, set[str]] = {
@@ -56,6 +66,8 @@ ACTION_LABELS = {
     "custom": "自定义修改",
     "deai": "去AI味",
     "writing": "写作",
+    "translate_en": "中译英",
+    "translate_zh": "英译中",
 }
 
 ACTION_LABELS_EN = {
@@ -66,6 +78,8 @@ ACTION_LABELS_EN = {
     "custom": "custom revision",
     "deai": "natural phrasing refinement",
     "writing": "draft assistance",
+    "translate_en": "Chinese-to-English academic translation",
+    "translate_zh": "English-to-Chinese academic translation",
 }
 
 PROTECTION_LABELS = {
@@ -139,6 +153,7 @@ class Proposal(BaseModel):
     error_context: ErrorContext | None = None
     linked_issue_id: str | None = None
     verifications: list[FixVerification] = Field(default_factory=list)
+    parent_proposal_id: str | None = None
 
 
 # ---------------------------------------------------------------- 存储 ----
@@ -409,7 +424,17 @@ def build_disclosure(
         "generated_at": generated_at,
     }
 
-    action_order = ("polish", "academic", "condense", "expand", "deai", "writing", "custom")
+    action_order = (
+        "polish",
+        "academic",
+        "condense",
+        "expand",
+        "deai",
+        "writing",
+        "translate_en",
+        "translate_zh",
+        "custom",
+    )
     if lang == "zh":
         action_parts = [f"{ACTION_LABELS[a]}（{by_action[a]} 条）" for a in action_order if by_action.get(a)]
         model_str = "、".join(models_seen) if models_seen else "未记录模型名称"

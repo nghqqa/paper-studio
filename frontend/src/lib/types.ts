@@ -127,6 +127,8 @@ export interface Comment {
   resolved: boolean
   replies: CommentReply[]
   source?: 'human' | 'ai' | 'client'
+  linked_issue_id?: string | null
+  linked_rebuttal_id?: string | null
 }
 
 export interface Health {

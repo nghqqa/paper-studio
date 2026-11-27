@@ -1,7 +1,11 @@
-import { useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { SplitPane } from '@/components/shell/SplitPane'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useProjectPresence } from '@/hooks/useProjectPresence'
 import { useStudio } from '@/store'
 import { CrossFileSearch } from './CrossFileSearch'
+import { LatexConflictDialog } from './LatexConflictDialog'
+import { LatexQuickOpenDialog } from './LatexQuickOpenDialog'
 import { useLatexEditorState } from './hooks/useLatexEditorState'
 import { useLatexFileOps } from './hooks/useLatexFileOps'
 import { useLatexReviewActions } from './hooks/useLatexReviewActions'
@@ -18,6 +22,10 @@ import { type LatexSideTab, LatexTopBar } from './parts/LatexTopBar'
 import { SourcePreviewOverlay } from './parts/SourcePreviewOverlay'
 import 'katex/dist/katex.min.css'
 import './latex-workbench.css'
+
+const ScientificFigures = lazy(() =>
+  import('@/components/figures/ScientificFigures').then((m) => ({ default: m.ScientificFigures })),
+)
 
 /**
  * 原生 LaTeX 论文工作台编排壳：
@@ -48,6 +56,20 @@ export function LatexWorkbench({ pid }: { pid: string }) {
   const [preview, setPreview] = useState<{ path: string; kind: 'image' | 'pdf' } | null>(null)
   const [symbolsOpen, setSymbolsOpen] = useState(false)
   const [searchSignal, setSearchSignal] = useState(0)
+  const [quickOpen, setQuickOpen] = useState(false)
+  const [conflictMergeOpen, setConflictMergeOpen] = useState(false)
+  const [figuresOpen, setFiguresOpen] = useState(false)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
+        e.preventDefault()
+        setQuickOpen(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   const wordExportRef = useRefPlaceholder<((rel: string, content: string) => void) | null>(null)
   const session = useLatexSession({
@@ -75,6 +97,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
     diagList,
     openFile: session.openFile,
     citeDataRef: session.citeDataRef,
+    glossaryRef: session.glossaryRef,
     contentIndex: session.contentIndex,
     onSearchOpen: () => setSearchSignal((t) => t + 1),
     onLocateFlash: (msg) => syncTexRef.current?.(msg),
@@ -126,6 +149,12 @@ export function LatexWorkbench({ pid }: { pid: string }) {
     onShowProposals: () => setSideTab('proposals'),
   })
   proposeFixRef.current = canEdit ? (d) => { void review.proposeFixFromDiag(d) } : null
+  const presence = useProjectPresence({
+    pid,
+    file: session.active,
+    line: editor.cursorLine,
+    mode: 'latex',
+  })
 
   const pdfUrl = session.previewBuildId
     ? `/api/projects/${encodeURIComponent(pid)}/latex/builds/${session.previewBuildId}/artifacts/pdf`
@@ -172,6 +201,9 @@ export function LatexWorkbench({ pid }: { pid: string }) {
         onCancelBuild={() => session.ctrl.cancelBuild()}
         onToggleSettings={() => session.setSettingsOpen((v) => !v)}
         onApplySettings={session.applyBuildSettings}
+        onOpenFigures={() => setFiguresOpen(true)}
+        peers={presence.peers}
+        selfClientId={presence.clientId}
       />
 
       <LatexStatusBanners
@@ -190,6 +222,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
         onDropRestoredDraft={session.dropRestoredDraft}
         onResolveOverwrite={() => session.ctrl.resolveOverwrite()}
         onResolveReload={session.reloadConflictFile}
+        onOpenConflictMerge={() => setConflictMergeOpen(true)}
       />
 
       <div className="flex min-h-0 flex-1">
@@ -224,6 +257,8 @@ export function LatexWorkbench({ pid }: { pid: string }) {
           onProposeFixFromDiag={canEdit ? (d) => void review.proposeFixFromDiag(d) : undefined}
           onRestoreHistory={session.handleHistoryRestore}
           onPulled={session.onPulled}
+          onInsertAtCursor={editor.insertAtCursor}
+          onGlossaryChanged={session.onGlossaryChanged}
         />
 
         <div className="min-h-0 min-w-0 flex-1">
@@ -234,8 +269,10 @@ export function LatexWorkbench({ pid }: { pid: string }) {
               <LatexEditorPane
                 pid={pid}
                 active={session.active}
+                openTabs={session.openTabs}
                 files={session.files}
                 docStats={editor.docStats}
+                wholeDocStats={editor.wholeDocStats}
                 canEdit={canEdit}
                 saving={saving}
                 dirty={dirty}
@@ -249,6 +286,9 @@ export function LatexWorkbench({ pid }: { pid: string }) {
                 st={editor.st}
                 viewRef={editor.viewRef}
                 mathPreview={editor.mathPreview}
+                onSwitchTab={session.switchFile}
+                onCloseTab={session.closeTab}
+                onOpenQuickSwitch={() => setQuickOpen(true)}
                 onOpenCrossFileSearch={() => setSearchSignal((t) => t + 1)}
                 onToggleSymbols={() => setSymbolsOpen((v) => !v)}
                 onInsertSymbol={editor.insertAtCursor}
@@ -305,6 +345,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
             cursorLine={editor.cursorLine}
             reloadTick={session.reloadTick}
             proposalTick={review.proposalTick}
+            onClose={() => setSideTab(null)}
             onOpenFile={session.openFile}
             onJump={editor.jumpTo}
             onJumpPage={(p) => syncTex.setPreviewScroll({ page: p, nonce: Date.now() })}
@@ -320,6 +361,44 @@ export function LatexWorkbench({ pid }: { pid: string }) {
       </div>
 
       {preview && <SourcePreviewOverlay pid={pid} preview={preview} onClose={() => setPreview(null)} />}
+      <LatexQuickOpenDialog
+        open={quickOpen}
+        files={session.files}
+        active={session.active}
+        onOpenChange={setQuickOpen}
+        onPick={session.switchFile}
+      />
+      {conflictMergeOpen && session.active && (
+        <LatexConflictDialog
+          pid={pid}
+          file={session.active}
+          localContent={session.ctrl.getContent()}
+          open={conflictMergeOpen}
+          onOpenChange={setConflictMergeOpen}
+          onMerged={session.applyMergedConflict}
+        />
+      )}
+      <Dialog open={figuresOpen} onOpenChange={setFiguresOpen}>
+        <DialogContent className="sm:max-w-5xl max-h-screen overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>科研绘图与架构图工作台</DialogTitle>
+          </DialogHeader>
+          <Suspense fallback={<div className="p-6 text-center text-sm text-fg-muted">正在加载图表引擎…</div>}>
+            <ScientificFigures
+              pid={pid}
+              embedded
+              onPublishedLatex={(_path, snippet) => {
+                setFiguresOpen(false)
+                void session.reloadFiles()
+                void session.refreshIndex()
+                if (snippet && canEdit && session.active && /\.(tex|ltx)$/i.test(session.active)) {
+                  editor.insertAtCursor(`\n${snippet}\n`)
+                }
+              }}
+            />
+          </Suspense>
+        </DialogContent>
+      </Dialog>
       <CrossFileSearch index={session.contentIndex} openSignal={searchSignal} onPick={editor.jumpToSearchHit} />
       <LatexStatusBar
         active={session.active}

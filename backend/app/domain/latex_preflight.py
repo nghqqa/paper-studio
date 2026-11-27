@@ -54,6 +54,7 @@ _LATEX_GENERAL_RULE_IDS = (
     "latex-open-issues",
     "latex-unused-figures",
     "latex-acronym-consistency",
+    "latex-glossary-consistency",
 )
 _LATEX_BLIND_RULE_IDS = ("blind-author-block", "blind-author-terms", "blind-funding-terms")
 _SUBMISSION_READINESS_RULE_IDS = (
@@ -62,6 +63,7 @@ _SUBMISSION_READINESS_RULE_IDS = (
     "sub-unused-figures",
     "sub-uncited-bib",
     "sub-acronym-consistency",
+    "sub-glossary-consistency",
 )
 
 RULESETS: dict[str, dict] = {
@@ -87,6 +89,7 @@ RULESETS: dict[str, dict] = {
 
 _SRC_UNUSED_FIG = "源码 \\includegraphics 与浮动体 \\label{fig:/tab:}"
 _SRC_ACRONYM = "缩略语展开与连字符拼写一致性"
+_SRC_GLOSSARY = "项目术语表（glossary.json）启用条目一致性"
 _SRC_SUBMISSION = "最新编译 PDF/.bbl 与源码投稿就绪检查"
 
 _COMMON_ACRONYMS = frozenset({
@@ -108,6 +111,26 @@ _INLINE_MATH_RE = re.compile(r"\$\$[\s\S]*?\$\$|\$[^$]*\$|\\\[[\s\S]*?\\\]|\\\([
 _HYPHEN_PAIR_RE = re.compile(r"\b([A-Za-z]{3,})-([A-Za-z]{3,})\b")
 _BIB_ENTRY_KEY_RE = re.compile(r"^\s*@\s*(?!comment\b|string\b|preamble\b)[A-Za-z]+\s*[({]\s*([^,\s]+)\s*,", re.MULTILINE)
 _ANY_CITE_KEYS_RE = re.compile(r"\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?(?:\s*\[[^\]]*\])*\s*\{([^}]+)\}")
+
+
+def _dedup_locations(locs: list[dict], limit: int = 10) -> list[dict]:
+    seen: set[tuple[str, int | None, str]] = set()
+    out: list[dict] = []
+    for loc in locs:
+        f = str(loc.get("file") or "")
+        ln = loc.get("line")
+        lbl = str(loc.get("label") or "")
+        key = (f, int(ln) if ln is not None else None, lbl)
+        if not f or key in seen:
+            continue
+        seen.add(key)
+        entry: dict = {"file": f, "line": int(ln) if ln is not None else None}
+        if lbl:
+            entry["label"] = lbl
+        out.append(entry)
+        if len(out) >= limit:
+            break
+    return out
 
 
 def _check_unused_figures(project, lines: dict[str, list[tuple[int, str]]], rule_id: str = "latex-unused-figures") -> dict:
@@ -136,26 +159,48 @@ def _check_unused_figures(project, lines: dict[str, list[tuple[int, str]]], rule
     unused_labels = sorted(lbl for lbl in float_labels if lbl not in referenced_labels)
 
     issues: list[str] = []
+    locs: list[dict] = []
     if unused_media:
         issues.append(f"未引用的图片文件（{len(unused_media)}）：" + "、".join(unused_media[:3]))
+        for r in unused_media:
+            locs.append({"file": r, "line": None, "label": f"未引用图片 {os.path.basename(r)}"})
     if unused_labels:
         sample = [f"{lbl} ({float_labels[lbl][0]}:{float_labels[lbl][1]})" for lbl in unused_labels[:3]]
         issues.append(f"未在正文引用的图表标签（{len(unused_labels)}）：" + "、".join(sample))
-    return {
+        for lbl in unused_labels:
+            locs.append({"file": float_labels[lbl][0], "line": float_labels[lbl][1], "label": lbl})
+    item: dict = {
         "rule_id": rule_id,
         "status": "warn" if issues else "pass",
         "evidence": "；".join(issues) if issues else "工程图片文件与图表标签均已在正文引用",
         "source": _SRC_UNUSED_FIG,
     }
+    if locs:
+        item["locations"] = _dedup_locations(locs)
+    return item
 
 
 def _check_acronyms_and_consistency(lines: dict[str, list[tuple[int, str]]], rule_id: str = "latex-acronym-consistency") -> dict:
     prose_chunks: list[str] = []
+    body_rows: list[tuple[str, int, str]] = []
     for rel, rows in lines.items():
         if not rel.lower().endswith(".tex"):
             continue
         raw_tex = "\n".join(code for _ln, code in rows)
-        if "\\begin{document}" in raw_tex:
+        has_begin_doc = "\\begin{document}" in raw_tex
+        in_body = not has_begin_doc
+        for lineno, code in rows:
+            if not in_body:
+                if "\\begin{document}" in code:
+                    in_body = True
+                    tail = code.split("\\begin{document}", 1)[1]
+                    if tail.strip():
+                        cleaned_row = re.sub(r"\\[A-Za-z@]+\*?", " ", _INLINE_MATH_RE.sub(" ", _STRIP_CMD_ARG_RE.sub(" ", tail)))
+                        body_rows.append((rel, lineno, cleaned_row))
+                continue
+            cleaned_row = re.sub(r"\\[A-Za-z@]+\*?", " ", _INLINE_MATH_RE.sub(" ", _STRIP_CMD_ARG_RE.sub(" ", code)))
+            body_rows.append((rel, lineno, cleaned_row))
+        if has_begin_doc:
             raw_tex = raw_tex.split("\\begin{document}", 1)[1]
         cleaned = _STRIP_CMD_ARG_RE.sub(" ", raw_tex)
         cleaned = _INLINE_MATH_RE.sub(" ", cleaned)
@@ -181,6 +226,7 @@ def _check_acronyms_and_consistency(lines: dict[str, list[tuple[int, str]]], rul
     undefined_repeats = sorted(k for k, cnt in acro_counts.items() if cnt >= 2)
 
     hyphen_hits: list[str] = []
+    hyphen_pairs: list[tuple[str, str]] = []
     seen_pairs: set[tuple[str, str]] = set()
     for hm in _HYPHEN_PAIR_RE.finditer(prose):
         a, b = hm.group(1), hm.group(2)
@@ -192,20 +238,78 @@ def _check_acronyms_and_consistency(lines: dict[str, list[tuple[int, str]]], rul
         alt_joined = re.search(rf"\b{re.escape(a)}{re.escape(b)}\b", prose, re.IGNORECASE)
         if alt_space:
             hyphen_hits.append(f"{a}-{b} / {alt_space.group(0)}")
+            hyphen_pairs.append((a, b))
         elif alt_joined:
             hyphen_hits.append(f"{a}-{b} / {alt_joined.group(0)}")
+            hyphen_pairs.append((a, b))
+
+    locs: list[dict] = []
+    for tok in undefined_repeats:
+        pat = re.compile(rf"\b{re.escape(tok)}\b")
+        for rel, lineno, cleaned_row in body_rows:
+            if pat.search(cleaned_row):
+                locs.append({"file": rel, "line": lineno, "label": tok})
+                break
+    for a, b in hyphen_pairs:
+        pat = re.compile(rf"\b{re.escape(a)}-{re.escape(b)}\b", re.IGNORECASE)
+        for rel, lineno, cleaned_row in body_rows:
+            if pat.search(cleaned_row):
+                locs.append({"file": rel, "line": lineno, "label": f"{a}-{b}"})
+                break
 
     warnings: list[str] = []
     if undefined_repeats:
         warnings.append("疑似未展开的大写缩略语：" + "、".join(undefined_repeats[:4]))
     if hyphen_hits:
         warnings.append("复合词连字符写法不统一：" + "；".join(hyphen_hits[:3]))
-    return {
+    item: dict = {
         "rule_id": rule_id,
         "status": "warn" if warnings else "pass",
         "evidence": "；".join(warnings) if warnings else "缩略语展开与复合词连字符写法一致",
         "source": _SRC_ACRONYM,
     }
+    if locs:
+        item["locations"] = _dedup_locations(locs)
+    return item
+
+
+def _check_glossary_consistency(project, lines: dict[str, list[tuple[int, str]]], rule_id: str) -> dict:
+    from app.domain import glossary
+
+    entries = [e for e in glossary.list_entries(project.dir) if e.get("enforce") and e.get("aliases")]
+    if not entries:
+        return {
+            "rule_id": rule_id,
+            "status": "pass",
+            "evidence": "未配置需强制核对别名的术语条目",
+            "source": _SRC_GLOSSARY,
+        }
+    hits: list[str] = []
+    locs: list[dict] = []
+    for entry in entries:
+        term = str(entry.get("term") or "")
+        for alias in entry.get("aliases") or []:
+            alias = str(alias).strip()
+            if not alias:
+                continue
+            pat = re.compile(rf"\b{re.escape(alias)}\b") if alias.isascii() else re.compile(re.escape(alias))
+            for rel, rows in lines.items():
+                if not rel.lower().endswith(".tex"):
+                    continue
+                for lineno, code in rows:
+                    if pat.search(code):
+                        hits.append(f"{rel}:{lineno}「{alias}」建议统一为「{term}」")
+                        locs.append({"file": rel, "line": lineno, "label": f"{alias} → {term}"})
+                        break
+    item: dict = {
+        "rule_id": rule_id,
+        "status": "warn" if hits else "pass",
+        "evidence": ("命中术语表弃用别名：" + "；".join(hits[:4])) if hits else f"已核对 {len(entries)} 条术语规范，未命中弃用别名",
+        "source": _SRC_GLOSSARY,
+    }
+    if locs:
+        item["locations"] = _dedup_locations(locs)
+    return item
 
 
 def resolve_ruleset(ruleset: str | None) -> tuple[str, dict]:
@@ -307,19 +411,24 @@ def run_latex_general(project, blind_terms=()) -> dict:
 
     # --- 待办/高亮残留（非注释行） ---
     hits = []
+    todo_locs: list[dict] = []
     for rel, rows in lines.items():
         for lineno, code in rows:
             m = _RESIDUE_RE.search(code)
             if m:
                 frag = code[max(0, m.start() - 10):m.start() + 34].strip()
                 hits.append(f"{rel}:{lineno}「…{frag}…」")
-    items.append({
+                todo_locs.append({"file": rel, "line": lineno, "label": m.group(0).strip()[:32]})
+    todo_item: dict = {
         "rule_id": "latex-todo-residue",
         "status": "pass" if not hits else "warn",
         "evidence": ("残留待办/未解析标记：" + "；".join(hits[:4])) if hits
         else "非注释行未发现 TODO/FIXME/\\hl/?? 残留",
         "source": _SRC_GENERAL_RESIDUE,
-    })
+    }
+    if todo_locs:
+        todo_item["locations"] = _dedup_locations(todo_locs)
+    items.append(todo_item)
 
     # --- 未定义 \cite/\ref（工程源码索引对账） ---
     try:
@@ -349,19 +458,23 @@ def run_latex_general(project, blind_terms=()) -> dict:
                         if key:
                             used_ref.append((rel, lineno, key))
         missing = []
-        for rel, lineno, key in used_cite + used_ref:
-            if key not in defined:
-                missing.append(f"{key}（{rel}:{lineno}）")
-        # 按键去重（同一键多处引用只报首处），最多列 8 个
+        ref_locs: list[dict] = []
         seen: set[str] = set()
-        uniq = [x for x in missing if not (x.split("（")[0] in seen or seen.add(x.split("（")[0]))]
-        items.append({
+        for rel, lineno, key in used_cite + used_ref:
+            if key not in defined and key not in seen:
+                seen.add(key)
+                missing.append(f"{key}（{rel}:{lineno}）")
+                ref_locs.append({"file": rel, "line": lineno, "label": key})
+        ref_item: dict = {
             "rule_id": "latex-undefined-refs",
-            "status": "warn" if uniq else "pass",
-            "evidence": ("存在未定义引用键：" + "；".join(uniq[:8])) if uniq
+            "status": "warn" if missing else "pass",
+            "evidence": ("存在未定义引用键：" + "；".join(missing[:8])) if missing
             else f"引用/标签对账一致：\\cite {len(used_cite)} 处、\\ref {len(used_ref)} 处、定义键 {len(defined)} 个",
             "source": _SRC_GENERAL_REFS,
-        })
+        }
+        if ref_locs:
+            ref_item["locations"] = _dedup_locations(ref_locs)
+        items.append(ref_item)
     except Exception as e:  # noqa: BLE001 — 子检查失败→该条 unknown，不连坐全报告
         items.append({"rule_id": "latex-undefined-refs", "status": "unknown",
                       "evidence": f"引用对账检查异常：{e}", "source": _SRC_GENERAL_REFS})
@@ -370,7 +483,11 @@ def run_latex_general(project, blind_terms=()) -> dict:
     try:
         issues = latex_issues.list_issues(project)
         open_issues = [r for r in issues if r.get("status") != "resolved"]
-        items.append({
+        issue_locs = [
+            {"file": r["file"], "line": r.get("line"), "label": (r.get("message") or "未解决 Issue")[:32]}
+            for r in open_issues if r.get("file")
+        ]
+        issue_item: dict = {
             "rule_id": "latex-open-issues",
             "status": "warn" if open_issues else "pass",
             "evidence": ("存在未解决的手动 Issue：" + "；".join(
@@ -378,7 +495,10 @@ def run_latex_general(project, blind_terms=()) -> dict:
                 + (f" 等共 {len(open_issues)} 条" if len(open_issues) > 3 else ""))
             if open_issues else "无未解决的手动 Issue",
             "source": _SRC_GENERAL_ISSUES,
-        })
+        }
+        if issue_locs:
+            issue_item["locations"] = _dedup_locations(issue_locs)
+        items.append(issue_item)
     except Exception as e:  # noqa: BLE001
         items.append({"rule_id": "latex-open-issues", "status": "unknown",
                       "evidence": f"Issue 读取异常：{e}", "source": _SRC_GENERAL_ISSUES})
@@ -390,6 +510,7 @@ def run_latex_general(project, blind_terms=()) -> dict:
                       "evidence": f"图片引用核对异常：{e}", "source": _SRC_UNUSED_FIG})
 
     items.append(_check_acronyms_and_consistency(lines, "latex-acronym-consistency"))
+    items.append(_check_glossary_consistency(project, lines, "latex-glossary-consistency"))
     return _body(digest, items, error)
 
 
@@ -406,24 +527,32 @@ def run_latex_double_blind(project, blind_terms=()) -> dict:
 
     # --- 作者块结构标记（\author 非空内容 / \thanks / \affiliation / Acknowledgments） ---
     hits = []
+    block_locs: list[dict] = []
     for rel, rows in lines.items():
         for lineno, code in rows:
             m = _AUTHOR_RE.search(code)
             if m and m.group(1).strip():
                 hits.append(f"{rel}:{lineno} \\author{{…{m.group(1).strip()[:24]}…}}")
+                block_locs.append({"file": rel, "line": lineno, "label": "\\author"})
             if _THANKS_RE.search(code):
                 hits.append(f"{rel}:{lineno} \\thanks{{…}}")
+                block_locs.append({"file": rel, "line": lineno, "label": "\\thanks"})
             if _AFFIL_RE.search(code):
                 hits.append(f"{rel}:{lineno} \\affil/\\affiliation")
+                block_locs.append({"file": rel, "line": lineno, "label": "\\affiliation"})
             if _ACK_RE.search(code):
                 hits.append(f"{rel}:{lineno} Acknowledgments（致谢）")
-    items.append({
+                block_locs.append({"file": rel, "line": lineno, "label": "Acknowledgments"})
+    block_item: dict = {
         "rule_id": "blind-author-block",
         "status": "warn" if hits else "pass",
         "evidence": ("命中作者块/致谢结构标记：" + "；".join(hits[:4])) if hits
         else "非注释行未发现 \\author/\\thanks/\\affiliation/Acknowledgments 标记",
         "source": _SRC_BLIND,
-    })
+    }
+    if block_locs:
+        block_item["locations"] = _dedup_locations(block_locs)
+    items.append(block_item)
 
     # --- 屏蔽词（无词 → unknown，绝不假 pass） ---
     if not terms:
@@ -435,34 +564,44 @@ def run_latex_double_blind(project, blind_terms=()) -> dict:
         })
     else:
         hits = []
+        term_locs: list[dict] = []
         for rel, rows in lines.items():
             for lineno, code in rows:
                 for term in terms:
                     idx = code.lower().find(term.lower())
                     if idx >= 0:
                         hits.append(f"{rel}:{lineno}「{term}」…{code[max(0, idx - 6):idx + 30].strip()}…")
-        items.append({
+                        term_locs.append({"file": rel, "line": lineno, "label": term[:32]})
+        term_item: dict = {
             "rule_id": "blind-author-terms",
             "status": "warn" if hits else "pass",
             "evidence": ("命中屏蔽词：" + "；".join(hits[:3])) if hits
             else f".tex 非注释行未命中屏蔽词（{len(terms)} 词）",
             "source": _SRC_BLIND,
-        })
+        }
+        if term_locs:
+            term_item["locations"] = _dedup_locations(term_locs)
+        items.append(term_item)
 
     # --- 资助基金关键词 ---
     hits = []
+    fund_locs: list[dict] = []
     for rel, rows in lines.items():
         for lineno, code in rows:
             m = _FUNDING_RE.search(code)
             if m:
                 hits.append(f"{rel}:{lineno}「…{code[max(0, m.start() - 8):m.start() + 30].strip()}…」")
-    items.append({
+                fund_locs.append({"file": rel, "line": lineno, "label": m.group(0).strip()[:32]})
+    fund_item: dict = {
         "rule_id": "blind-funding-terms",
         "status": "warn" if hits else "pass",
         "evidence": ("命中资助/基金表述：" + "；".join(hits[:3])) if hits
         else "非注释行未发现基金或资助表述",
         "source": _SRC_BLIND,
-    })
+    }
+    if fund_locs:
+        fund_item["locations"] = _dedup_locations(fund_locs)
+    items.append(fund_item)
 
     return _body(digest, items, error)
 
@@ -548,9 +687,15 @@ def run_submission_readiness(project, blind_terms=()) -> dict:
     items.append(_check_unused_figures(project, lines, "sub-unused-figures"))
 
     defined_bib: list[str] = []
+    bib_locs: dict[str, tuple[str, int]] = {}
     for rel, rows in lines.items():
         if not rel.lower().endswith(".bib"):
             continue
+        for lineno, code in rows:
+            for km in _BIB_ENTRY_KEY_RE.finditer(code):
+                k = km.group(1).strip()
+                if k:
+                    bib_locs.setdefault(k, (rel, lineno))
         bib_txt = "\n".join(c for _l, c in rows)
         for km in _BIB_ENTRY_KEY_RE.finditer(bib_txt):
             k = km.group(1).strip()
@@ -573,12 +718,19 @@ def run_submission_readiness(project, blind_terms=()) -> dict:
             "source": _SRC_SUBMISSION,
         })
     elif uncited:
-        items.append({
+        uncited_locs = [
+            {"file": bib_locs[k][0], "line": bib_locs[k][1], "label": k}
+            for k in uncited if k in bib_locs
+        ]
+        sub_bib_item: dict = {
             "rule_id": "sub-uncited-bib",
             "status": "warn",
             "evidence": f"共有 {len(uncited)} 条 .bib 文献未在正文引用：" + "、".join(uncited[:5]),
             "source": _SRC_SUBMISSION,
-        })
+        }
+        if uncited_locs:
+            sub_bib_item["locations"] = _dedup_locations(uncited_locs)
+        items.append(sub_bib_item)
     else:
         items.append({
             "rule_id": "sub-uncited-bib",
@@ -588,5 +740,6 @@ def run_submission_readiness(project, blind_terms=()) -> dict:
         })
 
     items.append(_check_acronyms_and_consistency(lines, "sub-acronym-consistency"))
+    items.append(_check_glossary_consistency(project, lines, "sub-glossary-consistency"))
 
     return _body(digest, items, error)

@@ -1,21 +1,28 @@
 import { type MutableRefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { autocompletion, type CompletionContext } from '@codemirror/autocomplete'
+import { autocompletion, closeBrackets, closeBracketsKeymap, type CompletionContext } from '@codemirror/autocomplete'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
-import { bracketMatching, defaultHighlightStyle, StreamLanguage, type StreamParser, syntaxHighlighting } from '@codemirror/language'
+import { bracketMatching, foldGutter, foldKeymap, StreamLanguage, type StreamParser, syntaxHighlighting } from '@codemirror/language'
 import { stexMath } from '@codemirror/legacy-modes/mode/stex'
 import { search, searchKeymap } from '@codemirror/search'
 import { EditorState } from '@codemirror/state'
 import { drawSelection, EditorView as EV, EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view'
 import { applyToView, type AnchorLike, locateAnchor, revertInView } from '@/components/paper/proposalApply'
+import type { GlossaryEntry } from '@/lib/api/glossary'
 import type { LatexDiagnostic, LatexFileInfo } from '@/lib/api/latex'
 import { type CiteCandidate, makeCiteSource, makeRefSource } from '../citeCompletions'
 import {
+  computeWholeDocStats,
   diagnosticsField,
   diagnosticsHoverExtension,
   extractMathAtCursor,
+  latexFoldService,
+  latexHighlightStyle,
   latexHoverTooltipExtension,
+  makeGlossarySource,
+  makeLatexCommandSource,
   type MathPreview,
   setDiagnosticsEffect,
+  toggleLatexComment,
   wrapSelectionCommand,
 } from '../editorEnhancements'
 import type { ProjectContentIndex } from '../editorSearch'
@@ -32,6 +39,7 @@ export function useLatexEditorState({
   diagList,
   openFile,
   citeDataRef,
+  glossaryRef,
   contentIndex,
   onSearchOpen,
   onLocateFlash,
@@ -47,6 +55,7 @@ export function useLatexEditorState({
   diagList: LatexDiagnostic[]
   openFile: (rel: string) => Promise<void>
   citeDataRef: MutableRefObject<{ cites: CiteCandidate[] }>
+  glossaryRef?: MutableRefObject<GlossaryEntry[]>
   contentIndex: ProjectContentIndex
   onSearchOpen: () => void
   onLocateFlash: (msg: string) => void
@@ -76,13 +85,16 @@ export function useLatexEditorState({
         doc: ctrl.getContent(),
         extensions: [
           lineNumbers(),
+          foldGutter(),
+          latexFoldService,
           history(),
           drawSelection(),
           highlightActiveLine(),
           bracketMatching(),
+          closeBrackets(),
           EV.lineWrapping,
           StreamLanguage.define(stexMath as unknown as StreamParser<unknown>),
-          syntaxHighlighting(defaultHighlightStyle),
+          syntaxHighlighting(latexHighlightStyle),
           keymap.of([
             {
               key: 'Mod-Shift-f',
@@ -91,8 +103,11 @@ export function useLatexEditorState({
                 return true
               },
             },
+            { key: 'Mod-/', run: toggleLatexComment },
             { key: 'Mod-b', run: wrapSelectionCommand('\\textbf{', '}') },
             { key: 'Mod-i', run: wrapSelectionCommand('\\textit{', '}') },
+            ...closeBracketsKeymap,
+            ...foldKeymap,
             ...defaultKeymap,
             ...historyKeymap,
             ...searchKeymap,
@@ -101,7 +116,7 @@ export function useLatexEditorState({
           search({ top: true }),
           diagnosticsField,
           diagnosticsHoverExtension(canEdit, onProposeFixRef),
-          latexHoverTooltipExtension({ pid, activeRef, citeDataRef, contentIndex, filesRef }),
+          latexHoverTooltipExtension({ pid, activeRef, citeDataRef, contentIndex, filesRef, glossaryRef }),
           ...(canEdit
             ? [
                 autocompletion({
@@ -109,6 +124,8 @@ export function useLatexEditorState({
                     (ctx: CompletionContext) => makeCiteSource(citeDataRef.current.cites)(ctx),
                     (ctx: CompletionContext) =>
                       makeRefSource(contentIndex.ready ? contentIndex.collectLabels() : [])(ctx),
+                    makeLatexCommandSource(),
+                    ...(glossaryRef ? [makeGlossarySource(glossaryRef)] : []),
                   ],
                   icons: false,
                 }),
@@ -264,6 +281,13 @@ export function useLatexEditorState({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [st, activeRev])
 
+  const wholeDocStats = useMemo(() => {
+    const doc = activeRev > 0 ? (viewRef.current?.state.doc ?? st?.doc) : st?.doc
+    if (!doc || !main) return null
+    return computeWholeDocStats(main, contentIndex, active, doc.toString())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [st, active, main, activeRev, files])
+
   const outlineItems = useMemo(() => {
     const doc = activeRev > 0 ? (viewRef.current?.state.doc ?? st?.doc) : st?.doc
     const liveOverrides: Record<string, string> = {}
@@ -306,6 +330,7 @@ export function useLatexEditorState({
     doRevertProposal,
     locateProposal,
     docStats,
+    wholeDocStats,
     outlineItems,
   }
 }

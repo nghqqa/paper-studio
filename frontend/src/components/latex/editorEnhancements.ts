@@ -1,7 +1,10 @@
 import type { MutableRefObject } from 'react'
-import { EditorSelection, StateEffect, StateField, type Range } from '@codemirror/state'
+import type { CompletionContext, CompletionResult } from '@codemirror/autocomplete'
+import { defaultHighlightStyle, foldService, HighlightStyle } from '@codemirror/language'
+import { EditorSelection, StateEffect, StateField, type ChangeSpec, type Range } from '@codemirror/state'
 import { Decoration, EditorView, hoverTooltip, type DecorationSet } from '@codemirror/view'
 import katex from 'katex'
+import type { GlossaryEntry } from '@/lib/api/glossary'
 import type { LatexDiagnostic, LatexFileInfo } from '@/lib/api/latex'
 import type { CiteCandidate } from './citeCompletions'
 import type { ProjectContentIndex } from './editorSearch'
@@ -189,6 +192,256 @@ export function wrapSelectionCommand(prefix: string, suffix: string) {
     view.dispatch(tr)
     return true
   }
+}
+
+/** 切换所选行（或当前行）的 LaTeX `% ` 行注释（Mod-/）。 */
+export function toggleLatexComment(view: EditorView): boolean {
+  if (view.state.readOnly) return false
+  const doc = view.state.doc
+  const lineNums = new Set<number>()
+  for (const range of view.state.selection.ranges) {
+    const startLine = doc.lineAt(range.from).number
+    const endPos = range.to > range.from && doc.lineAt(range.to).from === range.to ? range.to - 1 : range.to
+    const endLine = doc.lineAt(endPos).number
+    for (let ln = startLine; ln <= endLine; ln++) lineNums.add(ln)
+  }
+  const ordered = [...lineNums].sort((a, b) => a - b)
+  const nonBlank = ordered.map((ln) => doc.line(ln)).filter((l) => l.text.trim().length > 0)
+  if (nonBlank.length === 0) return false
+  const allCommented = nonBlank.every((l) => /^\s*%/.test(l.text))
+  const changes: ChangeSpec[] = []
+  if (allCommented) {
+    for (const l of nonBlank) {
+      const m = /^(\s*)%\s?/.exec(l.text)
+      if (m) {
+        const delFrom = l.from + m[1].length
+        changes.push({ from: delFrom, to: l.from + m[0].length, insert: '' })
+      }
+    }
+  } else {
+    for (const l of ordered.map((ln) => doc.line(ln))) {
+      const indent = /^\s*/.exec(l.text)?.[0] ?? ''
+      if (l.text.trim().length === 0 && nonBlank.length > 1) continue
+      changes.push({ from: l.from + indent.length, to: l.from + indent.length, insert: '% ' })
+    }
+  }
+  if (!changes.length) return false
+  view.dispatch({ changes })
+  return true
+}
+
+const FOLD_HEADING_RANK: Record<string, number> = {
+  part: 0,
+  chapter: 1,
+  section: 2,
+  subsection: 3,
+  subsubsection: 4,
+}
+
+/** LaTeX 结构折叠：\begin{env}...\end{env} 与 \chapter/\section/\subsection 区块折叠。 */
+export const latexFoldService = foldService.of((state, lineStart) => {
+  const doc = state.doc
+  const startLine = doc.lineAt(lineStart)
+  const text = stripCommentInLine(startLine.text)
+
+  const beginMatch = /^\s*\\begin\{([A-Za-z0-9_*]+)\}/.exec(text)
+  if (beginMatch && beginMatch[1] !== 'document') {
+    const env = beginMatch[1]
+    const esc = env.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const bRe = new RegExp(`\\\\begin\\{${esc}\\}`, 'g')
+    const eRe = new RegExp(`\\\\end\\{${esc}\\}`, 'g')
+    let depth = 0
+    for (let ln = startLine.number; ln <= doc.lines; ln++) {
+      const clean = stripCommentInLine(doc.line(ln).text)
+      depth += (clean.match(bRe) ?? []).length
+      depth -= (clean.match(eRe) ?? []).length
+      if (depth <= 0 && ln > startLine.number) {
+        return { from: startLine.to, to: doc.line(ln).to }
+      }
+    }
+    return null
+  }
+
+  const secMatch = /^\s*\\(part|chapter|section|subsection|subsubsection)\*?[\[{]/.exec(text)
+  if (secMatch) {
+    const rank = FOLD_HEADING_RANK[secMatch[1]] ?? 2
+    let lastLine = doc.lines
+    for (let ln = startLine.number + 1; ln <= doc.lines; ln++) {
+      const clean = stripCommentInLine(doc.line(ln).text)
+      if (/^\s*\\end\{document\}/.test(clean)) {
+        lastLine = ln - 1
+        break
+      }
+      const nextSec = /^\s*\\(part|chapter|section|subsection|subsubsection)\*?[\[{]/.exec(clean)
+      if (nextSec && (FOLD_HEADING_RANK[nextSec[1]] ?? 2) <= rank) {
+        lastLine = ln - 1
+        break
+      }
+    }
+    while (lastLine > startLine.number && !doc.line(lastLine).text.trim()) lastLine--
+    if (lastLine > startLine.number) {
+      return { from: startLine.to, to: doc.line(lastLine).to }
+    }
+  }
+  return null
+})
+
+interface TexCmdSpec {
+  label: string
+  detail: string
+  insert: string
+  cursorOffset: number
+}
+
+const TEX_COMMANDS: TexCmdSpec[] = [
+  { label: '\\section', detail: '一级节标题', insert: '\\section{}', cursorOffset: 9 },
+  { label: '\\subsection', detail: '二级小节', insert: '\\subsection{}', cursorOffset: 12 },
+  { label: '\\subsubsection', detail: '三级小节', insert: '\\subsubsection{}', cursorOffset: 15 },
+  { label: '\\textbf', detail: '粗体', insert: '\\textbf{}', cursorOffset: 8 },
+  { label: '\\textit', detail: '斜体', insert: '\\textit{}', cursorOffset: 8 },
+  { label: '\\emph', detail: '强调', insert: '\\emph{}', cursorOffset: 6 },
+  { label: '\\cite', detail: '文献引用', insert: '\\cite{}', cursorOffset: 6 },
+  { label: '\\citep', detail: '括号引用', insert: '\\citep{}', cursorOffset: 7 },
+  { label: '\\citet', detail: '作者主语引用', insert: '\\citet{}', cursorOffset: 7 },
+  { label: '\\ref', detail: '交叉引用', insert: '\\ref{}', cursorOffset: 5 },
+  { label: '\\eqref', detail: '公式编号引用', insert: '\\eqref{}', cursorOffset: 7 },
+  { label: '\\label', detail: '定义锚点标签', insert: '\\label{}', cursorOffset: 7 },
+  { label: '\\footnote', detail: '脚注', insert: '\\footnote{}', cursorOffset: 10 },
+  { label: '\\includegraphics', detail: '插入图片', insert: '\\includegraphics[width=0.8\\linewidth]{}', cursorOffset: 38 },
+  { label: '\\frac', detail: '分式', insert: '\\frac{}{}', cursorOffset: 6 },
+  { label: '\\sum', detail: '求和', insert: '\\sum_{i=1}^{n} ', cursorOffset: 15 },
+  { label: '\\begin{equation}', detail: '编号公式环境', insert: '\\begin{equation}\n  \n\\end{equation}', cursorOffset: 19 },
+  { label: '\\begin{align}', detail: '多行对齐公式', insert: '\\begin{align}\n  \n\\end{align}', cursorOffset: 16 },
+  { label: '\\begin{figure}', detail: '浮动图环境', insert: '\\begin{figure}[htbp]\n  \\centering\n  \n  \\caption{}\n  \\label{fig:}\n\\end{figure}', cursorOffset: 36 },
+  { label: '\\begin{table}', detail: '浮动表环境', insert: '\\begin{table}[htbp]\n  \\centering\n  \\caption{}\n  \\label{tab:}\n  \n\\end{table}', cursorOffset: 63 },
+  { label: '\\begin{itemize}', detail: '无序列表', insert: '\\begin{itemize}\n  \\item \n\\end{itemize}', cursorOffset: 24 },
+  { label: '\\begin{enumerate}', detail: '有序列表', insert: '\\begin{enumerate}\n  \\item \n\\end{enumerate}', cursorOffset: 26 },
+]
+
+/** 通用 LaTeX 命令与常用环境补全源（\begin{...} 自动闭合 \end{...}）。 */
+export function makeLatexCommandSource() {
+  return (ctx: CompletionContext): CompletionResult | null => {
+    const m = ctx.matchBefore(/\\[A-Za-z{}]*$/)
+    if (!m || m.text.startsWith('\\cite') && m.text.includes('{')) return null
+    if (m.text.includes('{') && !m.text.startsWith('\\begin{')) return null
+    const typed = m.text.toLowerCase()
+    if (typed.length < 2 && !ctx.explicit) return null
+    const opts = TEX_COMMANDS.filter((c) => c.label.toLowerCase().startsWith(typed)).map((c) => ({
+      label: c.label,
+      detail: c.detail,
+      type: 'keyword',
+      apply: (view: EditorView, _comp: unknown, from: number, to: number) => {
+        view.dispatch({
+          changes: { from, to, insert: c.insert },
+          selection: EditorSelection.cursor(from + c.cursorOffset),
+        })
+      },
+    }))
+    if (!opts.length) return null
+    return { from: m.from, options: opts, validFor: /^\\[A-Za-z{}]*$/ }
+  }
+}
+
+/** 项目术语表与自定义符号补全源（匹配 term / symbol / 别名提示规范写法）。 */
+export function makeGlossarySource(glossaryRef: MutableRefObject<GlossaryEntry[]>) {
+  return (ctx: CompletionContext): CompletionResult | null => {
+    const entries = glossaryRef.current
+    if (!entries.length) return null
+    const m = ctx.matchBefore(/(?:\\[A-Za-z@]+|[A-Za-z0-9_-]{2,})$/)
+    if (!m) return null
+    const typed = m.text.toLowerCase()
+    const opts = entries
+      .filter(
+        (e) =>
+          e.term.toLowerCase().includes(typed) ||
+          e.symbol.toLowerCase().includes(typed) ||
+          e.aliases.some((a) => a.toLowerCase().includes(typed)),
+      )
+      .slice(0, 20)
+      .map((e) => {
+        const insert = e.symbol || e.term
+        return {
+          label: insert,
+          detail: e.symbol && e.symbol !== e.term ? `${e.term}（术语表）` : '术语表规范',
+          info: e.definition || undefined,
+          type: 'variable',
+          apply: insert,
+        }
+      })
+    if (!opts.length) return null
+    return { from: m.from, options: opts }
+  }
+}
+
+const HL_CLASSES: Record<number, string> = {
+  0: 'cm-tok-meta',
+  6: 'cm-tok-keyword',
+  7: 'cm-tok-atom',
+  8: 'cm-tok-literal',
+  9: 'cm-tok-string',
+  10: 'cm-tok-escape',
+  11: 'cm-tok-var',
+  12: 'cm-tok-var',
+  13: 'cm-tok-type',
+  14: 'cm-tok-type',
+  15: 'cm-tok-macro',
+  16: 'cm-tok-var',
+  17: 'cm-tok-comment',
+  18: 'cm-tok-invalid',
+}
+
+/** 适配亮/暗源码主题的 CodeMirror 语法高亮（颜色由 CSS 变量控制）。 */
+export const latexHighlightStyle = HighlightStyle.define(
+  defaultHighlightStyle.specs.map((spec, idx) =>
+    HL_CLASSES[idx] ? { tag: spec.tag, class: HL_CLASSES[idx] } : spec,
+  ),
+)
+
+/** 沿主文件 \input / \include 递归统计整篇论文的字数与文件数（去重防环）。 */
+export function computeWholeDocStats(
+  mainPath: string,
+  contentIndex: ProjectContentIndex,
+  activePath: string | null,
+  activeContent: string,
+): { cjk: number; words: number; fileCount: number } | null {
+  if (!mainPath || !contentIndex.ready) return null
+  const getText = (p: string): string | undefined => {
+    if (activePath && p === activePath) return activeContent
+    return contentIndex.getFileContent(p)
+  }
+  const resolveInclude = (fromPath: string, rawTarget: string): string | null => {
+    const clean = rawTarget.trim().replace(/^\.\//, '')
+    if (!clean) return null
+    const dir = fromPath.includes('/') ? fromPath.slice(0, fromPath.lastIndexOf('/') + 1) : ''
+    for (const c of [clean, clean.endsWith('.tex') ? clean : `${clean}.tex`, `${dir}${clean}`, `${dir}${clean.endsWith('.tex') ? clean : `${clean}.tex`}`]) {
+      if (getText(c) !== undefined) return c
+    }
+    return null
+  }
+  const visited = new Set<string>()
+  const incRe = /\\(?:input|include)\{([^}]+)\}/g
+  let cjk = 0
+  let words = 0
+  const walk = (p: string) => {
+    if (visited.has(p)) return
+    const text = getText(p)
+    if (text === undefined) return
+    visited.add(p)
+    cjk += (text.match(/[\u4e00-\u9fff]/g) ?? []).length
+    words += (text.match(/[A-Za-z0-9]+/g) ?? []).length
+    for (const line of text.split('\n')) {
+      const noComment = stripCommentInLine(line)
+      incRe.lastIndex = 0
+      let im: RegExpExecArray | null
+      while ((im = incRe.exec(noComment)) !== null) {
+        const tgt = resolveInclude(p, im[1])
+        if (tgt) walk(tgt)
+      }
+    }
+  }
+  walk(mainPath)
+  if (visited.size === 0) return null
+  return { cjk, words, fileCount: visited.size }
 }
 
 export const setDiagnosticsEffect = StateEffect.define<LatexDiagnostic[]>()
@@ -381,12 +634,14 @@ export function latexHoverTooltipExtension({
   citeDataRef,
   contentIndex,
   filesRef,
+  glossaryRef,
 }: {
   pid: string
   activeRef: MutableRefObject<string | null>
   citeDataRef: MutableRefObject<{ cites: CiteCandidate[] }>
   contentIndex: ProjectContentIndex
   filesRef: MutableRefObject<LatexFileInfo[]>
+  glossaryRef?: MutableRefObject<GlossaryEntry[]>
 }) {
   return hoverTooltip((view, pos) => {
     const lineObj = view.state.doc.lineAt(pos)
@@ -502,6 +757,52 @@ export function latexHoverTooltipExtension({
             }
             return { dom }
           },
+        }
+      }
+    }
+
+    // 4) 项目术语表 / 符号 / 弃用别名悬停提示
+    const gEntries = glossaryRef?.current ?? []
+    if (gEntries.length > 0) {
+      const tokRe = /\\[A-Za-z@]+|\b[A-Za-z0-9_-]{2,}\b/g
+      let tm: RegExpExecArray | null
+      while ((tm = tokRe.exec(text)) !== null) {
+        if (col >= tm.index && col <= tm.index + tm[0].length) {
+          const tok = tm[0]
+          const low = tok.toLowerCase()
+          const hit = gEntries.find(
+            (e) =>
+              e.term.toLowerCase() === low ||
+              e.symbol.toLowerCase() === low ||
+              e.aliases.some((a) => a.toLowerCase() === low),
+          )
+          if (hit) {
+            const isDeprecated = hit.aliases.some((a) => a.toLowerCase() === low)
+            const spanStart = lineObj.from + tm.index
+            const spanEnd = spanStart + tok.length
+            return {
+              pos: spanStart,
+              end: spanEnd,
+              above: true,
+              create() {
+                const dom = document.createElement('div')
+                dom.className = 'cm-latex-tooltip'
+                const title = document.createElement('div')
+                title.className = 'cm-latex-tooltip-title'
+                title.textContent = isDeprecated
+                  ? `弃用别名「${tok}」→ 建议「${hit.term}」`
+                  : `${hit.term}${hit.symbol && hit.symbol !== hit.term ? ` (${hit.symbol})` : ''}`
+                dom.appendChild(title)
+                if (hit.definition) {
+                  const p = document.createElement('p')
+                  p.className = 'cm-latex-tooltip-meta'
+                  p.textContent = hit.definition
+                  dom.appendChild(p)
+                }
+                return { dom }
+              },
+            }
+          }
         }
       }
     }

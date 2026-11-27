@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
-import { Loader2, Plus, Trash2, Download, Copy, FileText, PencilLine, SendToBack } from 'lucide-react'
+import { Loader2, Plus, Trash2, Download, Copy, FileText, ImageUp, PencilLine, SendToBack } from 'lucide-react'
 import { figuresApi, type FigurePalette, type ProjectFigure } from '@/lib/api/projectFigures'
-import { req } from '@/lib/api/net'
+import { netFetch, req } from '@/lib/api/net'
 import { extractNumericValue, parseDelimitedTable } from '@/lib/latexTable'
 import type { ProjectSummary } from '@/lib/types'
 import { useStudio } from '@/store'
@@ -18,29 +18,58 @@ const SAMPLE_DATA_BY_TYPE: Record<string, string> = {
   pie: '{"categories":["计算耗时","通信开销","访存等待"],"series":[{"name":"耗时占比","values":[54,28,18]}]}',
   heatmap: '{"categories":["lr=1e-3","lr=1e-4","lr=1e-5"],"series":[{"name":"4层","values":[0.81,0.88,0.84]},{"name":"8层","values":[0.83,0.91,0.87]},{"name":"12层","values":[0.80,0.89,0.86]}]}',
   boxplot: '{"categories":["Seed1","Seed2","Seed3","Seed4","Seed5"],"series":[{"name":"Baseline","values":[81.0,82.5,80.2,83.1,81.9]},{"name":"Ablation","values":[83.4,84.1,82.9,84.8,83.7]},{"name":"Ours","values":[86.0,87.2,85.9,88.1,86.5]}]}',
+  radar: '{"categories":["准确率","召回率","延迟优度","显存效率","鲁棒性"],"series":[{"name":"Baseline","values":[78,74,69,72,70]},{"name":"Ours","values":[91,89,84,88,90]}]}',
+  violin: '{"categories":["Fold1","Fold2","Fold3","Fold4","Fold5"],"series":[{"name":"Baseline","values":[79.2,80.5,78.1,81.3,79.9]},{"name":"Ours","values":[86.8,88.1,85.9,87.4,89.0]}]}',
+  forest: '{"categories":["Subgroup A","Subgroup B","Subgroup C","Overall"],"series":[{"name":"Effect Size","values":[1.42,1.18,1.65,1.38],"errors":[0.21,0.18,0.29,0.12]}]}',
+  grouped_bar: '{"categories":["MMLU","GSM8K","HumanEval"],"series":[{"name":"Base-7B","values":[64.2,58.1,49.5],"errors":[0.8,1.1,1.3]},{"name":"Ours-7B","values":[72.8,74.6,68.2],"errors":[0.6,0.7,0.9]}]}',
 }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
 /** 项目图表库；项目切换时重建局部状态，权限跟随选定项目。 */
-export function ScientificFigures({ pid: initialPid }: { pid?: string }) {
+export function ScientificFigures({
+  pid: initialPid,
+  embedded = false,
+  onPublishedLatex,
+}: {
+  pid?: string
+  embedded?: boolean
+  onPublishedLatex?: (path: string, snippet?: string) => void
+}) {
   const allProjects = useStudio((s) => s.projects)
+  const activeProject = useStudio((s) => s.project)
   const authStatus = useStudio((s) => s.authStatus)
   const superuser = useStudio((s) => s.user?.is_superuser ?? false)
   const projects = allProjects.filter((p) => (p.list_state ?? 'active') === 'active')
   const [pid, setPid] = useState(initialPid ?? '')
   useEffect(() => setPid(initialPid ?? ''), [initialPid])
-  const project = projects.find((p) => p.id === pid)
+  const project =
+    projects.find((p) => p.id === pid) ??
+    (activeProject?.id === pid ? (activeProject as (typeof projects)[number]) : undefined)
+  const resolvedRole = project?.my_role ?? (project as { role?: string | null } | undefined)?.role ?? ''
   const canEdit = !!project && (authStatus === 'off' || (authStatus === 'authed'
-    && (superuser || ['owner', 'agent', 'editor'].includes(project.my_role ?? ''))))
+    && (superuser || ['owner', 'agent', 'editor'].includes(resolvedRole))))
 
-  return <ProjectFigures key={project?.id ?? ''} pid={pid} project={project} projects={projects} canEdit={canEdit} onSelect={setPid} />
+  return (
+    <ProjectFigures
+      key={project?.id ?? pid}
+      pid={pid}
+      project={project}
+      projects={projects}
+      canEdit={canEdit}
+      embedded={embedded}
+      onPublishedLatex={onPublishedLatex}
+      onSelect={setPid}
+    />
+  )
 }
 
-function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
+function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublishedLatex, onSelect }: {
   pid: string
   project?: ProjectSummary
   projects: ProjectSummary[]
   canEdit: boolean
+  embedded: boolean
+  onPublishedLatex?: (path: string, snippet?: string) => void
   onSelect: (pid: string) => void
 }) {
   const [figures, setFigures] = useState<ProjectFigure[]>([])
@@ -65,6 +94,8 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
   // 方法图编辑器：undefined=关闭，null=新建，ProjectFigure=编辑既有图。
   const [editorFig, setEditorFig] = useState<ProjectFigure | null | undefined>(undefined)
   const [publishFig, setPublishFig] = useState<ProjectFigure | null>(null)
+  const [visionBusy, setVisionBusy] = useState(false)
+  const visionInputRef = useRef<HTMLInputElement>(null)
   const alive = useRef(false)
   const formKey = JSON.stringify([name, type, palette, showValues, title, xLabel, yLabel, dataJson])
   const previewUrl = preview?.key === formKey ? preview.url : ''
@@ -123,6 +154,44 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
     setNotice('已将 CSV/TSV 转换为图表数据，点击「预览」查看效果')
   }
 
+  async function handleVisionUpload(file: File) {
+    if (!canEdit || visionBusy) return
+    setVisionBusy(true); setErr(''); setNotice(''); setPreview(null)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      const r = await netFetch('/api/charts/from-image', { method: 'POST', body: fd })
+      const payload = (await r.json()) as {
+        chart?: {
+          type?: string
+          title?: string
+          x_label?: string
+          y_label?: string
+          categories?: string[]
+          series?: { name: string; values: number[]; errors?: number[] }[]
+        }
+        detail?: { message?: string } | string
+      }
+      if (!r.ok || !payload.chart) {
+        const msg = typeof payload.detail === 'object' ? payload.detail?.message : payload.detail
+        throw new Error(msg || `图片识别失败 (${r.status})`)
+      }
+      const ch = payload.chart
+      if (alive.current) {
+        if (ch.type) setType(ch.type)
+        if (ch.title != null) setTitle(ch.title)
+        if (ch.x_label != null) setXLabel(ch.x_label)
+        if (ch.y_label != null) setYLabel(ch.y_label)
+        setDataJson(JSON.stringify({ categories: ch.categories ?? [], series: ch.series ?? [] }))
+        setNotice('已通过 Vision 模型从图片还原数据，请核对后点击「预览」')
+      }
+    } catch (error) {
+      if (alive.current) setErr(errorText(error))
+    } finally {
+      if (alive.current) setVisionBusy(false)
+    }
+  }
+
   async function renderPreview() {
     if (!canEdit || busy) return
     setBusy(true); setErr(''); setNotice(''); setPreview(null)
@@ -174,12 +243,16 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
   return (
     <div data-testid="scientific-figures">
       <div className="paper-figures-bar">
-        <label htmlFor="figures-project">论文项目</label>
-        <select id="figures-project" value={project ? pid : ''} onChange={(e) => onSelect(e.target.value)}
-          className="paper-figures-select" data-testid="figures-project-select">
-          <option value="">选择项目…</option>
-          {projects.map((p) => <option key={p.id} value={p.id}>{p.title || p.id}</option>)}
-        </select>
+        {!embedded && (
+          <>
+            <label htmlFor="figures-project">论文项目</label>
+            <select id="figures-project" value={project ? pid : ''} onChange={(e) => onSelect(e.target.value)}
+              className="paper-figures-select" data-testid="figures-project-select">
+              <option value="">选择项目…</option>
+              {projects.map((p) => <option key={p.id} value={p.id}>{p.title || p.id}</option>)}
+            </select>
+          </>
+        )}
         {canEdit && !loading && !loadError && (
           <>
             <button type="button" className="paper-primary" onClick={() => setShowForm((v) => !v)} disabled={busy} data-testid="figures-new">
@@ -220,6 +293,10 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
                     <option value="scatter">散点图</option><option value="pie">饼图</option>
                     <option value="heatmap">热力图 (Heatmap)</option>
                     <option value="boxplot">箱线图 (Boxplot)</option>
+                    <option value="radar">雷达图 (Radar)</option>
+                    <option value="violin">小提琴图 (Violin)</option>
+                    <option value="forest">森林图 (Forest)</option>
+                    <option value="grouped_bar">水平分组柱状图</option>
                   </select>
                 </div>
                 <div><label htmlFor="fig-palette">配色风格</label>
@@ -261,14 +338,38 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
               <div>
                 <div className="flex items-center justify-between gap-2">
                   <label htmlFor="fig-data">数据 JSON（categories 为横轴取值；series 每项支持可选 errors 误差棒）</label>
-                  <button
-                    type="button"
-                    className="text-xs text-link hover:underline"
-                    onClick={() => setCsvImportOpen((v) => !v)}
-                    data-testid="fig-csv-toggle"
-                  >
-                    {csvImportOpen ? '收起 CSV 导入' : '从 CSV/TSV 粘贴数据'}
-                  </button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={visionInputRef}
+                      type="file"
+                      accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
+                      className="hidden"
+                      data-testid="figure-vision-input"
+                      onChange={(e) => {
+                        const picked = e.target.files?.[0]
+                        e.target.value = ''
+                        if (picked) void handleVisionUpload(picked)
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1 text-xs text-link hover:underline"
+                      disabled={visionBusy}
+                      onClick={() => visionInputRef.current?.click()}
+                      data-testid="figure-vision-upload"
+                    >
+                      <ImageUp aria-hidden className="size-3.5" />
+                      {visionBusy ? '识图中…' : '从图片识别数据 (Vision)'}
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-link hover:underline"
+                      onClick={() => setCsvImportOpen((v) => !v)}
+                      data-testid="fig-csv-toggle"
+                    >
+                      {csvImportOpen ? '收起 CSV 导入' : '从 CSV/TSV 粘贴数据'}
+                    </button>
+                  </div>
                 </div>
                 {csvImportOpen && (
                   <div className="my-2 grid gap-1.5 rounded border border-border bg-app p-2">
@@ -355,7 +456,10 @@ function ProjectFigures({ pid, project, projects, canEdit, onSelect }: {
       )}
       {publishFig && (
         <PublishLatexDialog pid={pid} figure={publishFig} onClose={() => setPublishFig(null)}
-          onPublished={() => setNotice('已发布到 LaTeX 工程 figures/ 目录')} />
+          onPublished={(path, snippet) => {
+            setNotice('已发布到 LaTeX 工程 figures/ 目录')
+            onPublishedLatex?.(path, snippet)
+          }} />
       )}
     </div>
   )

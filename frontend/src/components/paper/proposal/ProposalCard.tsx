@@ -1,15 +1,18 @@
-import { useMemo } from 'react'
-import { CheckCircle2, ChevronDown, ChevronRight, FileWarning, Lock, X, XCircle } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { CheckCircle2, ChevronDown, ChevronRight, FileWarning, Lock, Sparkles, X, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { PROPOSAL_ACTION_LABELS, PROTECTION_LABELS, type PaperProposal } from '@/lib/api/paperProposals'
 import { computeDiff } from '../proposalDiff'
 import { truncate } from './anchorUtils'
+
+const REFINE_CHIPS = ['更简洁', '更学术', '保留原术语'] as const
 
 export function ProposalCard({
   p,
   expanded,
   onToggle,
   canEdit,
+  busy = false,
   acked,
   onAck,
   batchChecked,
@@ -18,6 +21,7 @@ export function ProposalCard({
   onLocate,
   onApply,
   onReject,
+  onRefine,
   editing,
   onStartEdit,
   editedText,
@@ -29,6 +33,7 @@ export function ProposalCard({
   expanded: boolean
   onToggle(): void
   canEdit: boolean
+  busy?: boolean
   acked: boolean
   onAck(): void
   batchChecked: boolean
@@ -37,6 +42,7 @@ export function ProposalCard({
   onLocate(): void
   onApply(): void
   onReject(): void
+  onRefine?(instruction: string): void
   editing: boolean
   onStartEdit(): void
   editedText: string
@@ -44,6 +50,8 @@ export function ProposalCard({
   onCancelEdit(): void
   onApplyEdited(): void
 }) {
+  const [refining, setRefining] = useState(false)
+  const [refineText, setRefineText] = useState('')
   const parts = useMemo(() => computeDiff(p.anchor.original_text, p.suggested_text), [p.anchor.original_text, p.suggested_text])
   const hasProtection = (p.protection_flags ?? []).length > 0
   return (
@@ -56,6 +64,9 @@ export function ProposalCard({
           </span>
           <span className="mt-0.5 flex flex-wrap items-center gap-1 text-2xs text-fg-muted">
             <span className="rounded bg-sunken px-1 font-medium text-fg">{PROPOSAL_ACTION_LABELS[p.action]}</span>
+            {p.parent_proposal_id && (
+              <span className="rounded bg-primary-soft px-1 text-primary">微调迭代</span>
+            )}
             <span>· {p.model || '—'}</span>
             <span>· {p.anchor.file}</span>
             {hasProtection && (
@@ -108,28 +119,83 @@ export function ProposalCard({
               </div>
             </div>
           ) : (
-            <div className="mt-2 flex flex-wrap items-center gap-1">
-              <Button variant="ghost" size="xs" onClick={onLocate} data-testid={`proposal-locate-${p.proposal_id}`}>
-                定位原文
-              </Button>
-              {canEdit && (
-                <>
-                  <Button size="xs" onClick={onApply} disabled={hasProtection && !acked} data-testid={`proposal-apply-${p.proposal_id}`}>
-                    <CheckCircle2 aria-hidden className="size-3" /> 采纳
-                  </Button>
-                  <Button variant="outline" size="xs" onClick={onStartEdit} data-testid={`proposal-edit-${p.proposal_id}`}>
-                    编辑建议后采纳
-                  </Button>
-                  <Button variant="ghost" size="xs" className="ml-auto" onClick={onReject} data-testid={`proposal-reject-${p.proposal_id}`}>
-                    <XCircle aria-hidden className="size-3" /> 拒绝
-                  </Button>
-                </>
-              )}
-              {!canEdit && (
-                <span className="ml-auto inline-flex items-center gap-0.5 text-2xs text-fg-muted">
-                  <X aria-hidden className="size-3" />
-                  只读：不能采纳
-                </span>
+            <div className="mt-2 space-y-1.5">
+              <div className="flex flex-wrap items-center gap-1">
+                <Button variant="ghost" size="xs" onClick={onLocate} data-testid={`proposal-locate-${p.proposal_id}`}>
+                  定位原文
+                </Button>
+                {canEdit && (
+                  <>
+                    <Button size="xs" onClick={onApply} disabled={hasProtection && !acked} data-testid={`proposal-apply-${p.proposal_id}`}>
+                      <CheckCircle2 aria-hidden className="size-3" /> 采纳
+                    </Button>
+                    <Button variant="outline" size="xs" onClick={onStartEdit} data-testid={`proposal-edit-${p.proposal_id}`}>
+                      编辑建议后采纳
+                    </Button>
+                    {onRefine && (
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={busy}
+                        onClick={() => setRefining((v) => !v)}
+                        data-testid={`proposal-refine-${p.proposal_id}`}
+                        title="基于当前建议继续微调，生成新版本供对比"
+                      >
+                        <Sparkles aria-hidden className="size-3" /> 微调
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="xs" className="ml-auto" onClick={onReject} data-testid={`proposal-reject-${p.proposal_id}`}>
+                      <XCircle aria-hidden className="size-3" /> 拒绝
+                    </Button>
+                  </>
+                )}
+                {!canEdit && (
+                  <span className="ml-auto inline-flex items-center gap-0.5 text-2xs text-fg-muted">
+                    <X aria-hidden className="size-3" />
+                    只读：不能采纳
+                  </span>
+                )}
+              </div>
+              {refining && canEdit && onRefine && (
+                <div className="space-y-1 rounded-md border border-line bg-sunken p-1.5" data-testid={`proposal-refine-box-${p.proposal_id}`}>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {REFINE_CHIPS.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        disabled={busy}
+                        className="rounded border border-line bg-panel px-1.5 py-0.5 text-2xs text-fg-muted hover:border-border-strong hover:text-fg"
+                        onClick={() => {
+                          onRefine(chip)
+                          setRefining(false)
+                        }}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <input
+                      className="h-6 min-w-0 flex-1 rounded border border-line bg-panel px-1.5 text-2xs outline-none"
+                      value={refineText}
+                      onChange={(e) => setRefineText(e.target.value)}
+                      placeholder="微调指令（如：再精简 20%）"
+                      data-testid={`proposal-refine-input-${p.proposal_id}`}
+                    />
+                    <Button
+                      size="xs"
+                      disabled={busy || !refineText.trim()}
+                      onClick={() => {
+                        onRefine(refineText)
+                        setRefineText('')
+                        setRefining(false)
+                      }}
+                      data-testid={`proposal-refine-go-${p.proposal_id}`}
+                    >
+                      生成新版
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
           )}

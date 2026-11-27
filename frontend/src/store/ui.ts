@@ -29,6 +29,7 @@ export interface UiSlice extends UiPersisted {
   wordEditorEnabled: boolean | null
   wordEditorReady: boolean | null
   demoMode: boolean
+  oidc: { enabled: boolean; label: string }
   registrationPolicy: {
     mode: RegistrationMode
     inviteCodeRequired: boolean
@@ -59,6 +60,7 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
   wordEditorEnabled: null,
   wordEditorReady: null,
   demoMode: false,
+  oidc: { enabled: false, label: '机构单点登录 (SSO)' },
   registrationPolicy: { mode: 'open', inviteCodeRequired: false, allowedDomains: [] },
   siteContact: { email: '', wechat: '', note: '' },
   theme: 'system',
@@ -78,6 +80,7 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
         word_editor?: boolean
         word_editor_ready?: boolean
         demo_mode?: boolean
+        oidc?: { enabled?: boolean; label?: string }
         registration?: {
           mode?: RegistrationMode
           invite_code_required?: boolean
@@ -93,6 +96,10 @@ export const uiSlice: Slice<UiSlice> = (set, get) => ({
         wordEditorEnabled: Boolean(m.word_editor),
         wordEditorReady: Boolean(m.word_editor_ready),
         demoMode: Boolean(m.demo_mode),
+        oidc: {
+          enabled: Boolean(m.oidc?.enabled),
+          label: (m.oidc?.label || '机构单点登录 (SSO)').trim(),
+        },
         registrationPolicy: {
           mode: regMode === 'invite_only' || regMode === 'closed' ? regMode : 'open',
           inviteCodeRequired: Boolean(m.registration?.invite_code_required),

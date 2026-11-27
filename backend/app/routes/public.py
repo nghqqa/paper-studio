@@ -24,8 +24,8 @@ from pydantic import BaseModel, Field
 from app import config
 from app.auth import CurrentUser
 from app.domain import comments as comments_mod
-from app.domain import events, org, public_share
-from app.errors import kind_error, not_implemented
+from app.domain import events, latex_diff, latex_history, org, public_share, word_documents
+from app.errors import ProjectError, kind_error, not_implemented
 from app.routes.comments import load_reanchored
 from app.schemas import PublicAnchor, PublicShareLink, PublicShareLinkIn, PublicShareMeta
 
@@ -201,3 +201,77 @@ async def public_confirm(token: str, body: PublicConfirmIn, request: Request):
     project = request.app.state.store.get(g.pid)
     rec = public_share.confirm(project, g, body.name.strip(), body.note, ip, ua)
     return public_share.confirmation_out(rec)
+
+
+@router.get("/api/public/{token}/revisions")
+async def public_revisions(token: str, request: Request):
+    """公开审阅链接的脱敏版本演进与修订差异摘要（绝不返回 .tex/.docx 原始源码下载）。"""
+    g = await _grant(token, request)
+    project = request.app.state.store.get(g.pid)
+    fmt = str(project.settings.get("source_format") or "markdown")
+    if fmt == "docx":
+        try:
+            st = await asyncio.to_thread(word_documents.state, project.dir)
+            raw_versions = list(st.get("versions") or [])
+        except ProjectError:
+            raw_versions = []
+        versions = [
+            {
+                "id": v.get("id"),
+                "created_at": v.get("created_at"),
+                "label": v.get("label"),
+                "source": v.get("source"),
+            }
+            for v in reversed(raw_versions[-10:])
+        ]
+        latest_diff = None
+        if len(raw_versions) >= 2:
+            try:
+                d = await asyncio.to_thread(
+                    word_documents.diff_versions,
+                    project.dir,
+                    raw_versions[-2]["id"],
+                    raw_versions[-1]["id"],
+                )
+                latest_diff = {
+                    "kind": "word",
+                    "base_vid": d["base_vid"],
+                    "target_vid": d["target_vid"],
+                    "added": d["added"],
+                    "removed": d["removed"],
+                    "unified_diff": d["unified_diff"][:12000],
+                    "truncated": d["truncated"] or len(d["unified_diff"]) > 12000,
+                }
+            except ProjectError:
+                latest_diff = None
+        return {"source_format": fmt, "versions": versions, "latest_diff": latest_diff}
+
+    if fmt == "latex":
+        commits = await asyncio.to_thread(latex_history.log, project.dir, 10)
+        versions = [
+            {
+                "id": c["sha"][:8],
+                "created_at": c["at"],
+                "message": c["message"],
+                "added": c["added"],
+                "deleted": c["deleted"],
+                "milestones": c.get("milestones", []),
+            }
+            for c in commits
+        ]
+        diffs = await asyncio.to_thread(latex_diff.list_diffs, project)
+        ok_diff = next((row for row in diffs if row.get("status") == "ok"), None)
+        latest_diff = (
+            {
+                "kind": "latexdiff",
+                "id": ok_diff.get("id"),
+                "base_ref": ok_diff.get("base_ref"),
+                "target_ref": ok_diff.get("target_ref"),
+                "created_at": ok_diff.get("created_at"),
+            }
+            if ok_diff
+            else None
+        )
+        return {"source_format": fmt, "versions": versions, "latest_diff": latest_diff}
+
+    return {"source_format": fmt, "versions": [], "latest_diff": None}

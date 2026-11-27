@@ -1,9 +1,18 @@
-import { req } from './net'
+import { postSse, req, type SseOptions } from './net'
 
 /** 论文 AI 修改提案 API（v0.4）。生成/列表/状态流转；落地在编辑器（前端事务 / Word 插件桥）。 */
 
 export type ProposalStatus = 'generating' | 'pending' | 'applied' | 'rejected' | 'stale' | 'failed' | 'undone'
-export type ProposalAction = 'polish' | 'academic' | 'condense' | 'expand' | 'custom' | 'deai' | 'writing'
+export type ProposalAction =
+  | 'polish'
+  | 'academic'
+  | 'condense'
+  | 'expand'
+  | 'custom'
+  | 'deai'
+  | 'writing'
+  | 'translate_en'
+  | 'translate_zh'
 
 export interface ProposalAnchor {
   file: string
@@ -53,6 +62,7 @@ export interface PaperProposal {
   error_context?: ProposalErrorContext | null
   linked_issue_id?: string | null
   verifications?: FixVerification[]
+  parent_proposal_id?: string | null
 }
 
 export const PROPOSAL_ACTION_LABELS: Record<ProposalAction, string> = {
@@ -62,6 +72,8 @@ export const PROPOSAL_ACTION_LABELS: Record<ProposalAction, string> = {
   academic: '学术化',
   condense: '凝练',
   expand: '扩写',
+  translate_en: '中译英',
+  translate_zh: '英译中',
   custom: '自定义',
 }
 
@@ -108,23 +120,35 @@ export interface AiDisclosureResponse {
   content: string
 }
 
+export interface GenerateProposalInput {
+  mode: 'latex' | 'word'
+  file: string
+  base_sha: string
+  original_text: string
+  context_before?: string
+  context_after?: string
+  action: ProposalAction
+  instruction?: string
+  error_context?: ProposalErrorContext
+  linked_issue_id?: string
+  parent_proposal_id?: string
+  previous_suggestion?: string
+  use_glossary?: boolean
+  cite_keys?: string[]
+}
+
 export const paperProposalApi = {
-  generate: (pid: string, body: {
-    mode: 'latex' | 'word'
-    file: string
-    base_sha: string
-    original_text: string
-    context_before?: string
-    context_after?: string
-    action: ProposalAction
-    instruction?: string
-    error_context?: ProposalErrorContext
-    linked_issue_id?: string
-  }) =>
+  generate: (pid: string, body: GenerateProposalInput) =>
     req<{ proposal: PaperProposal }>(`/api/projects/${encodeURIComponent(pid)}/paper-proposals/generate`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  generateStream: (pid: string, body: GenerateProposalInput, opts?: SseOptions) =>
+    postSse<{ proposal: PaperProposal }>(
+      `/api/projects/${encodeURIComponent(pid)}/paper-proposals/generate/stream`,
+      body,
+      opts,
+    ),
   list: (pid: string, params?: { status?: string; file?: string }) => {
     const q = new URLSearchParams()
     if (params?.status) q.set('status', params.status)
@@ -163,5 +187,15 @@ export const assistantApi = {
     req<{ answer: string; model: string; chars: number }>(
       `/api/projects/${encodeURIComponent(pid)}/paper-assistant/read`,
       { method: 'POST', body: JSON.stringify(body) },
+    ),
+  readStream: (
+    pid: string,
+    body: { mode: 'latex' | 'word'; file: string; text: string; question?: string },
+    opts?: SseOptions,
+  ) =>
+    postSse<{ answer: string; model: string; chars: number }>(
+      `/api/projects/${encodeURIComponent(pid)}/paper-assistant/read/stream`,
+      body,
+      opts,
     ),
 }

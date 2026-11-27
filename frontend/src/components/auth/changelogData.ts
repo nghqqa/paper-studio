@@ -23,19 +23,34 @@ export const CHANGE_CATEGORY_META: Record<ChangeCategory, { label: string; tone:
   fix: { label: '问题修复', tone: 'ok' },
 }
 
-export const LATEST_RELEASE_VERSION = 'v1.3.0'
+export const LATEST_RELEASE_VERSION = 'v1.4.0'
 
 /**
  * 面向科研用户的版本演进记录（按发布时间倒序）。
  */
 export const CHANGELOG_RELEASES: ReleaseEntry[] = [
   {
+    id: 'v1.4.0',
+    version: 'v1.4.0',
+    date: '2026-11-27',
+    title: '全链路 AI 流式协同、MCP 接入与科研生产力大版本',
+    summary: '围绕科研写作全生命周期上线流式 AI 助手与跨多轮微调、项目术语/符号一致性体系、文献 PDF 归档与分栏阅读器、PAT + 原生 MCP Server、跨项目资产库、截稿月历与 .ics 订阅、10 类科研图表及 Vision 识图还原、OIDC 单点登录、便携整档迁移与中英双语界面。',
+    badge: '最新',
+    changes: [
+      { category: 'feature', text: 'AI 助手支持 SSE 实时流式生成、中英学术互译（translate_en/zh）、基于上轮建议的多轮微调（refine）、文献精读问答流与审稿回复信流式起草，并新增 Citation-Aware 真实文献卡片引用注入。' },
+      { category: 'feature', text: '新增项目术语表与符号规范（Glossary & Notation）：支持从 .tex 自动扫描缩略语与自定义宏、投稿体检一致性拦截及编辑器自动补全/悬停定义；文献库新增 PDF 原文归档与对照分栏阅读器。' },
+      { category: 'feature', text: '开放个人访问令牌（PAT）与原生 MCP Server（POST /api/mcp JSON-RPC 2.0），严格遵循 Proposal-Only 安全契约（外部智能体改写提案仅进人工 Diff 队列）；新增跨项目共享文献库与 LaTeX 常用片段库。' },
+      { category: 'feature', text: '外部审阅批注支持一键转为待办 Issue 或纳入审稿回复信，公开审阅链接支持查看脱敏版本差异摘要；投稿计划上线截稿月历、RFC 5545 .ics 导出及站内截稿提醒，编辑器顶栏展示轻量协同在线头像。' },
+      { category: 'feature', text: '科研图表扩展雷达图、小提琴图、森林图与水平分组柱状图（共 10 类），新增多模态 Vision 图片识别数据一键还原；支持企业 OIDC / OAuth 2.0 单点登录、便携项目整档 .zip 导出导入、管理员数据健康体检/SQLite 热备及轻量中英双语界面切换。' },
+      { category: 'improvement', text: 'LaTeX 工作台新增 Ctrl+/ 注释切换、环境折叠、全工程字数统计、已打开 Tab 栏、Ctrl+P 快速切文件、可拖拽侧栏及 409 冲突对比合并弹窗；Word 工作台新增里程碑标签、段落级 Diff、非破坏式版本恢复与返修包 ZIP，看板支持跨阶段拖拽调整。' },
+    ],
+  },
+  {
     id: 'v1.3.0',
     version: 'v1.3.0',
     date: '2026-11-26',
     title: 'LaTeX 沉浸式编辑增强、投稿与返修闭环及科研图表升级',
     summary: '全面升级 LaTeX 实时公式/悬停/行内诊断与插图流，补齐干净投稿源码打包、投稿就绪度体检与返修三件套一键打包，并支持 PDF 文献拖拽自动抽取与科研热力图/箱线图矢量发布。',
-    badge: '最新',
     changes: [
       { category: 'feature', text: 'LaTeX 编辑器支持剪贴板粘贴/拖放/工具栏上传插图，光标进入数学环境即触发 KaTeX 实时预览，新增 Ctrl/Cmd+B/I 快捷键、\\cite/\\ref/\\includegraphics 悬停预览及行内编译诊断波浪线与 AI 修复提案入口。' },
       { category: 'feature', text: '新增「投稿打包」干净源码 ZIP 导出（安全移除 % 注释且保留 \\% 与代码环境、自动附带 .bbl、裁剪未引用图片与 50 MB 体积预警）及历史面板「返修包」三件套打包（终稿 PDF + 高亮 Diff PDF + 多格式回复信）。' },
