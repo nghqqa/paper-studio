@@ -273,6 +273,13 @@ def _check_acronyms_and_consistency(lines: dict[str, list[tuple[int, str]]], rul
     return item
 
 
+def _compile_alias_re(alias: str) -> re.Pattern:
+    esc = re.escape(alias)
+    left = r"(?<![A-Za-z0-9_\\])" if re.match(r"^[A-Za-z0-9_]", alias) else ""
+    right = r"(?![A-Za-z0-9_])" if re.search(r"[A-Za-z0-9_]$", alias) else ""
+    return re.compile(f"{left}{esc}{right}")
+
+
 def _check_glossary_consistency(project, lines: dict[str, list[tuple[int, str]]], rule_id: str) -> dict:
     from app.domain import glossary
 
@@ -284,20 +291,35 @@ def _check_glossary_consistency(project, lines: dict[str, list[tuple[int, str]]]
             "evidence": "未配置需强制核对别名的术语条目",
             "source": _SRC_GLOSSARY,
         }
+    body_start_by_file: dict[str, int] = {}
+    for rel, rows in lines.items():
+        if not rel.lower().endswith(".tex"):
+            continue
+        for lineno, code in rows:
+            if "\\begin{document}" in code:
+                body_start_by_file[rel] = lineno
+                break
+
     hits: list[str] = []
     locs: list[dict] = []
     for entry in entries:
         term = str(entry.get("term") or "")
+        cat = str(entry.get("category") or "term")
         for alias in entry.get("aliases") or []:
             alias = str(alias).strip()
             if not alias:
                 continue
-            pat = re.compile(rf"\b{re.escape(alias)}\b") if alias.isascii() else re.compile(re.escape(alias))
+            pat = _compile_alias_re(alias)
+            is_symbol_like = cat == "notation" or "\\" in alias or "$" in alias
             for rel, rows in lines.items():
                 if not rel.lower().endswith(".tex"):
                     continue
+                body_start = body_start_by_file.get(rel, 0)
                 for lineno, code in rows:
-                    if pat.search(code):
+                    if not is_symbol_like and body_start and lineno <= body_start:
+                        continue
+                    target_text = code if is_symbol_like else _STRIP_CMD_ARG_RE.sub(" ", code)
+                    if pat.search(target_text):
                         hits.append(f"{rel}:{lineno}「{alias}」建议统一为「{term}」")
                         locs.append({"file": rel, "line": lineno, "label": f"{alias} → {term}"})
                         break

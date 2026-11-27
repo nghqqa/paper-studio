@@ -20,7 +20,7 @@ export const patApi = {
   create: (name: string, expiresDays?: number | null) =>
     req<{ token: CreatedPatToken }>('/api/tokens', {
       method: 'POST',
-      body: JSON.stringify({ name, ...(expiresDays ? { expires_days: expiresDays } : {}) }),
+      body: JSON.stringify({ name, ...(expiresDays != null ? { expires_days: expiresDays } : {}) }),
     }),
   revoke: (id: string) => req<{ ok: boolean }>(`/api/tokens/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }

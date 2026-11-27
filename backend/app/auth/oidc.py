@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import secrets
 import threading
 import time
 from datetime import UTC, datetime
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -22,17 +23,17 @@ from app.errors import error_detail
 router = APIRouter(prefix="/api/auth/oidc", tags=["oidc"])
 
 _STATE_TTL = 600.0
+_DISCOVER_TTL = 300.0
+_STATE_COOKIE = "ps_oidc_state"
 _lock = threading.Lock()
 _states: dict[str, dict] = {}
+_discover_cache: dict[tuple[str, int], tuple[float, dict]] = {}
 
 
 def _prune_states(now: float) -> None:
     stale = [k for k, v in _states.items() if now - float(v.get("at", 0.0)) > _STATE_TTL]
     for k in stale:
         _states.pop(k, None)
-    if len(_states) > 2000:
-        for k in list(_states)[: len(_states) - 1500]:
-            _states.pop(k, None)
 
 
 def _pkce_challenge(verifier: str) -> str:
@@ -40,14 +41,42 @@ def _pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
+def _valid_oidc_url(raw: str) -> bool:
+    try:
+        p = urlsplit(raw)
+    except ValueError:
+        return False
+    if p.scheme == "https" and p.hostname:
+        return True
+    if p.scheme == "http" and p.hostname in ("localhost", "127.0.0.1", "::1"):
+        return True
+    return False
+
+
 async def _discover(issuer: str) -> dict:
-    url = issuer.rstrip("/") + "/.well-known/openid-configuration"
+    clean_issuer = issuer.rstrip("/")
+    cache_key = (clean_issuer, id(httpx.AsyncClient))
+    now = time.time()
+    with _lock:
+        hit = _discover_cache.get(cache_key)
+        if hit is not None and now - hit[0] < _DISCOVER_TTL:
+            return hit[1]
+
+    url = clean_issuer + "/.well-known/openid-configuration"
     async with httpx.AsyncClient(timeout=10.0) as client:
         r = await client.get(url)
         r.raise_for_status()
         data = r.json()
     if not isinstance(data, dict) or not data.get("authorization_endpoint") or not data.get("token_endpoint"):
         raise ValueError("OIDC discovery 缺少 authorization_endpoint 或 token_endpoint")
+    if "issuer" in data and str(data["issuer"]).rstrip("/") != clean_issuer:
+        raise ValueError("OIDC discovery issuer 与配置不一致")
+    for k in ("authorization_endpoint", "token_endpoint", "userinfo_endpoint"):
+        if data.get(k) and not _valid_oidc_url(str(data[k])):
+            raise ValueError(f"OIDC discovery {k} URL 不合法")
+
+    with _lock:
+        _discover_cache[cache_key] = (now, data)
     return data
 
 
@@ -78,6 +107,8 @@ async def oidc_login(request: Request):
     now = time.time()
     with _lock:
         _prune_states(now)
+        if len(_states) >= 2000:
+            raise HTTPException(429, error_detail("rate_limit", "当前单点登录请求过多，请稍后重试"))
         _states[state] = {"verifier": verifier, "redirect_uri": redir, "at": now}
 
     params = urlencode({
@@ -90,7 +121,17 @@ async def oidc_login(request: Request):
         "code_challenge_method": "S256",
     })
     sep = "&" if "?" in meta["authorization_endpoint"] else "?"
-    return RedirectResponse(url=f"{meta['authorization_endpoint']}{sep}{params}", status_code=302)
+    resp = RedirectResponse(url=f"{meta['authorization_endpoint']}{sep}{params}", status_code=302)
+    resp.set_cookie(
+        _STATE_COOKIE,
+        state,
+        max_age=int(_STATE_TTL),
+        httponly=True,
+        samesite="lax",
+        secure=config.COOKIE_SECURE,
+        path="/api/auth/oidc/callback",
+    )
+    return resp
 
 
 @router.get("/callback")
@@ -100,7 +141,6 @@ async def oidc_callback(
     state: str = Query(default=""),
     error: str = Query(default=""),
 ):
-    del request
     if not config.OIDC_ENABLED:
         raise HTTPException(404, error_detail("not_found", "尚未启用 OIDC 单点登录"))
     if error:
@@ -108,6 +148,9 @@ async def oidc_callback(
     if not code or not state:
         raise HTTPException(400, error_detail("auth", "缺少授权码或 state 参数"))
 
+    cookie_state = request.cookies.get(_STATE_COOKIE) or ""
+    if not cookie_state or not hmac.compare_digest(cookie_state, state):
+        raise HTTPException(400, error_detail("auth", "登录 state 已过期或无效，请重新发起单点登录"))
     now = time.time()
     with _lock:
         _prune_states(now)
@@ -117,18 +160,17 @@ async def oidc_callback(
 
     try:
         meta = await _discover(config.OIDC_ISSUER)
+        token_form = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": rec["redirect_uri"],
+            "client_id": config.OIDC_CLIENT_ID,
+            "code_verifier": rec["verifier"],
+        }
+        if config.OIDC_CLIENT_SECRET:
+            token_form["client_secret"] = config.OIDC_CLIENT_SECRET
         async with httpx.AsyncClient(timeout=15.0) as client:
-            tok_resp = await client.post(
-                meta["token_endpoint"],
-                data={
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": rec["redirect_uri"],
-                    "client_id": config.OIDC_CLIENT_ID,
-                    "client_secret": config.OIDC_CLIENT_SECRET,
-                    "code_verifier": rec["verifier"],
-                },
-            )
+            tok_resp = await client.post(meta["token_endpoint"], data=token_form)
             tok_resp.raise_for_status()
             tok_json = tok_resp.json()
             access_token = str(tok_json.get("access_token") or "")
@@ -143,9 +185,11 @@ async def oidc_callback(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(502, error_detail("upstream", f"OIDC 令牌换取失败：{exc}")) from exc
 
-    email = str(uinfo.get("email") or uinfo.get("preferred_username") or "").strip().lower()
+    email = str(uinfo.get("email") or "").strip().lower()
     if "@" not in email:
         raise HTTPException(422, error_detail("auth", "身份提供商未返回有效邮箱字段 (email)"))
+    if uinfo.get("email_verified") is not True:
+        raise HTTPException(403, error_detail("forbidden", "身份提供商未验证该邮箱（需要 email_verified=true）"))
     display_name = str(uinfo.get("name") or uinfo.get("preferred_username") or email.split("@", 1)[0]).strip()[:64]
 
     from fastapi_users.db import SQLAlchemyUserDatabase
@@ -194,4 +238,14 @@ async def oidc_callback(
     out = RedirectResponse(url="/#/", status_code=302)
     for cookie_hdr in login_resp.headers.getlist("set-cookie"):
         out.headers.append("set-cookie", cookie_hdr)
+    out.delete_cookie(_STATE_COOKIE, path="/api/auth/oidc/callback")
+    out.set_cookie(
+        "ps_oidc_ok",
+        "1",
+        max_age=60,
+        httponly=False,
+        samesite="lax",
+        secure=config.COOKIE_SECURE,
+        path="/",
+    )
     return out

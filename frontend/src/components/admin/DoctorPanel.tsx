@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, CheckCircle2, CircleMinus, Database, Download, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { accountApi, type DataHealthReport, type DoctorCheck, type DoctorReport } from '@/lib/api/account'
+import { downloadFile } from '@/lib/download'
 import { cn } from '@/lib/utils'
 
 function fmtMb(bytes: number): string {
@@ -21,6 +22,7 @@ export function DoctorPanel() {
   const [report, setReport] = useState<DoctorReport | null>(null)
   const [dataHealth, setDataHealth] = useState<DataHealthReport | null>(null)
   const [loading, setLoading] = useState(false)
+  const [backupBusy, setBackupBusy] = useState(false)
   const [error, setError] = useState('')
 
   const run = useCallback(async () => {
@@ -43,6 +45,22 @@ export function DoctorPanel() {
   useEffect(() => {
     void run()
   }, [run])
+
+  const downloadBackup = async (includeProjects: boolean) => {
+    if (backupBusy) return
+    setBackupBusy(true)
+    setError('')
+    try {
+      await downloadFile(
+        accountApi.dataBackupUrl(includeProjects),
+        includeProjects ? 'paper-studio-full-backup.zip' : 'paper-studio-backup.zip',
+      )
+    } catch (e) {
+      setError((e as Error).message || '导出备份失败')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
 
   return (
     <div className="grid gap-4" data-testid="admin-doctor-panel">
@@ -111,22 +129,24 @@ export function DoctorPanel() {
               </span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <a
-                href={accountApi.dataBackupUrl(false)}
-                download="paper-studio-backup.zip"
-                className="inline-flex h-7 items-center gap-1 rounded border border-border bg-app px-2.5 text-xs text-fg hover:bg-hover"
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={backupBusy}
+                onClick={() => void downloadBackup(false)}
                 data-testid="admin-data-backup-btn"
               >
                 <Download aria-hidden className="size-3.5" /> 下载核心备份 (.zip)
-              </a>
-              <a
-                href={accountApi.dataBackupUrl(true)}
-                download="paper-studio-full-backup.zip"
-                className="inline-flex h-7 items-center gap-1 rounded border border-border bg-app px-2.5 text-xs text-fg hover:bg-hover"
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={backupBusy}
+                onClick={() => void downloadBackup(true)}
                 data-testid="admin-data-full-backup-btn"
               >
                 <Download aria-hidden className="size-3.5" /> 全量备份（含项目）
-              </a>
+              </Button>
             </div>
           </div>
           <div className="grid gap-2 text-xs text-fg sm:grid-cols-4">

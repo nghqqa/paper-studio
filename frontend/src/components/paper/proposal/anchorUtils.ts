@@ -25,39 +25,41 @@ export function truncate(s: string, n = 40): string {
 export function payloadFor(
   doc: string,
   text: string,
+  from?: number,
+  to?: number,
 ): { original_text: string; context_before: string; context_after: string } {
-  const from = doc.indexOf(text)
-  if (from === -1) return { original_text: text, context_before: '', context_after: '' }
+  const start = typeof from === 'number' && from >= 0 ? from : doc.indexOf(text)
+  if (start === -1) return { original_text: text, context_before: '', context_after: '' }
+  const end = typeof to === 'number' && to >= start ? to : start + text.length
   return {
     original_text: text,
-    context_before: doc.slice(Math.max(0, from - 400), from),
-    context_after: doc.slice(from + text.length, from + text.length + 400),
+    context_before: doc.slice(Math.max(0, start - 400), start),
+    context_after: doc.slice(end, end + 400),
   }
 }
 
 export function sectionRangeOf(doc: string, pos: number): { from: number; to: number } | null {
   const lines = doc.split('\n')
   let offset = 0
-  let start = -1
-  let startOffset = 0
+  let startOffset = -1
   let endOffset = doc.length
   let level = -1
+  const levels: Record<string, number> = { chapter: 0, section: 1, subsection: 2 }
   for (const line of lines) {
-    const m = /^\\(section|subsection)\*?\{/.exec(line)
+    const m = /^\s*\\(chapter|section|subsection)\*?(?:\[[^\]]*\])?\{/.exec(line)
     if (m) {
-      const lvl = m[1] === 'subsection' ? 2 : 1
-      if (start === -1 && offset <= pos) {
-        start = offset
+      const lvl = levels[m[1]] ?? 1
+      if (offset <= pos) {
         startOffset = offset
         level = lvl
-      } else if (start !== -1 && lvl <= level) {
+      } else if (startOffset !== -1 && lvl <= level) {
         endOffset = offset
         break
       }
     }
     offset += line.length + 1
   }
-  if (start === -1) return null
+  if (startOffset === -1) return null
   return { from: startOffset, to: endOffset }
 }
 

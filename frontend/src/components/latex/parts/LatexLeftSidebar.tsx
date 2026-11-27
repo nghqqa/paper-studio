@@ -253,21 +253,37 @@ export function LatexLeftSidebar({
           pid={pid}
           canEdit={canEdit}
           onJumpLocation={(loc) => {
-            if (loc.line != null && loc.file === active) {
-              onJump(loc.file, loc.line)
-            } else if (loc.line != null) {
-              void onOpenFile(loc.file).then(() => onJump(loc.file, loc.line!))
-            } else {
-              void onOpenFile(loc.file)
+            const info = files.find((f) => f.path === loc.file)
+            if (info && !info.editable) {
+              const kind = /\.pdf$/i.test(loc.file) ? 'pdf' : 'image'
+              onPreviewFile({ path: loc.file, kind })
+              return
             }
+            if (loc.file === active) {
+              if (loc.line != null) onJump(loc.file, loc.line)
+              return
+            }
+            if (dirty && !window.confirm('当前文件有未保存修改，放弃并切换？')) return
+            void onOpenFile(loc.file).then(() => {
+              if (loc.line != null) window.setTimeout(() => onJump(loc.file, loc.line!), 200)
+            })
           }}
           onAskAiFix={
             onProposeFixFromDiag
               ? (item) => {
-                  const first = item.locations?.[0]
+                  const first =
+                    item.locations?.find((loc) => {
+                      const info = files.find((f) => f.path === loc.file)
+                      return info ? info.editable : /\.(tex|ltx|bib|cls|sty|md|txt)$/i.test(loc.file)
+                    }) ?? item.locations?.[0]
+                  const firstInfo = first ? files.find((f) => f.path === first.file) : undefined
+                  const targetFile =
+                    first && (firstInfo ? firstInfo.editable : /\.(tex|ltx|bib|cls|sty|md|txt)$/i.test(first.file))
+                      ? first.file
+                      : (active || '')
                   onProposeFixFromDiag({
-                    file: first?.file || active || '',
-                    line: first?.line ?? null,
+                    file: targetFile,
+                    line: targetFile === first?.file ? (first?.line ?? null) : null,
                     message: `[${item.rule_id}] ${item.evidence}`,
                   })
                 }

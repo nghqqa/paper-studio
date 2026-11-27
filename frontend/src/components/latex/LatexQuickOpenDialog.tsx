@@ -39,6 +39,10 @@ export function LatexQuickOpenDialog({
     setCursor(0)
   }, [query])
 
+  useEffect(() => {
+    setCursor((c) => Math.min(c, Math.max(0, candidates.length - 1)))
+  }, [candidates.length])
+
   const pick = (path: string) => {
     onOpenChange(false)
     onPick(path)
@@ -65,7 +69,7 @@ export function LatexQuickOpenDialog({
               } else if (e.key === 'ArrowUp') {
                 e.preventDefault()
                 setCursor((c) => Math.max(0, c - 1))
-              } else if (e.key === 'Enter' && candidates[cursor]) {
+              } else if (e.key === 'Enter' && !e.nativeEvent.isComposing && candidates[cursor]) {
                 e.preventDefault()
                 pick(candidates[cursor].path)
               }

@@ -23,19 +23,32 @@ export const CHANGE_CATEGORY_META: Record<ChangeCategory, { label: string; tone:
   fix: { label: '问题修复', tone: 'ok' },
 }
 
-export const LATEST_RELEASE_VERSION = 'v1.4.0'
+export const LATEST_RELEASE_VERSION = 'v1.4.1'
 
 /**
  * 面向科研用户的版本演进记录（按发布时间倒序）。
  */
 export const CHANGELOG_RELEASES: ReleaseEntry[] = [
   {
+    id: 'v1.4.1',
+    version: 'v1.4.1',
+    date: '2026-11-27',
+    title: '全链路安全加固、流式配额结算与工作台稳定性修复',
+    summary: '针对 v1.4.0 开展全面代码复审，修复认证与归档边界、AI 流式配额与并发竞争、LaTeX/Word 工作台交互及跨模块数据一致性等系列问题。',
+    badge: '最新',
+    changes: [
+      { category: 'fix', text: '修复 AI SSE 流式请求的组织配额延迟结算、流连接关闭与异常处理，隔离章节改写与 Rebuttal 草稿多路并发流状态。' },
+      { category: 'fix', text: '加固 OIDC 邮箱验证与 state Cookie 绑定、PAT 路由与作用域边界、MCP Server 请求校验及便携归档 .zip/管理端 SQLite 热备安全检查。' },
+      { category: 'fix', text: '修复投稿日历与在线协同头像请求路径、SSE 中断清理、鉴权保护下的文件下载及 OIDC 登录后前端引导状态同步。' },
+      { category: 'fix', text: '修复 Word 版本恢复重载与 Diff 竞态，以及 LaTeX 冲突对比、标签页状态、术语悬停与跨文件体检跳转、共享资产、PDF 阅读器及科研图表等边界问题。' },
+    ],
+  },
+  {
     id: 'v1.4.0',
     version: 'v1.4.0',
     date: '2026-11-27',
     title: '全链路 AI 流式协同、MCP 接入与科研生产力大版本',
     summary: '围绕科研写作全生命周期上线流式 AI 助手与跨多轮微调、项目术语/符号一致性体系、文献 PDF 归档与分栏阅读器、PAT + 原生 MCP Server、跨项目资产库、截稿月历与 .ics 订阅、10 类科研图表及 Vision 识图还原、OIDC 单点登录、便携整档迁移与中英双语界面。',
-    badge: '最新',
     changes: [
       { category: 'feature', text: 'AI 助手支持 SSE 实时流式生成、中英学术互译（translate_en/zh）、基于上轮建议的多轮微调（refine）、文献精读问答流与审稿回复信流式起草，并新增 Citation-Aware 真实文献卡片引用注入。' },
       { category: 'feature', text: '新增项目术语表与符号规范（Glossary & Notation）：支持从 .tex 自动扫描缩略语与自定义宏、投稿体检一致性拦截及编辑器自动补全/悬停定义；文献库新增 PDF 原文归档与对照分栏阅读器。' },

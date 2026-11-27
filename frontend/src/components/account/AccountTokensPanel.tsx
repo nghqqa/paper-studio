@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Check, Copy, KeyRound, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { patApi, type PatTokenInfo } from '@/lib/api/pat'
+import { copyText as copyToClipboard } from '@/lib/download'
 
 function fmtTs(ts: number | null | undefined): string {
   if (!ts) return '—'
@@ -15,7 +16,7 @@ export function AccountTokensPanel() {
   const [name, setName] = useState('')
   const [expiresDays, setExpiresDays] = useState('')
   const [busy, setBusy] = useState(false)
-  const [revealed, setRevealed] = useState<string | null>(null)
+  const [revealed, setRevealed] = useState<{ id: string; token: string } | null>(null)
   const [copiedKey, setCopiedKey] = useState<'token' | 'mcp' | null>(null)
 
   const refresh = useCallback(async () => {
@@ -37,12 +38,25 @@ export function AccountTokensPanel() {
 
   const handleCreate = async () => {
     if (!name.trim() || busy) return
+    const trimmedDays = expiresDays.trim()
+    let validDays: number | null = null
+    if (trimmedDays) {
+      if (!/^\d+$/.test(trimmedDays)) {
+        setErr('有效天数须为 1 至 3650 之间的整数')
+        return
+      }
+      const n = Number(trimmedDays)
+      if (!Number.isInteger(n) || n < 1 || n > 3650) {
+        setErr('有效天数须为 1 至 3650 之间的整数')
+        return
+      }
+      validDays = n
+    }
     setBusy(true)
     setErr('')
     try {
-      const days = expiresDays.trim() ? Number(expiresDays.trim()) : null
-      const r = await patApi.create(name.trim(), days && Number.isFinite(days) ? days : null)
-      setRevealed(r.token.token)
+      const r = await patApi.create(name.trim(), validDays)
+      setRevealed({ id: r.token.id, token: r.token.token })
       setName('')
       setExpiresDays('')
       await refresh()
@@ -59,6 +73,7 @@ export function AccountTokensPanel() {
     setErr('')
     try {
       await patApi.revoke(id)
+      setRevealed((cur) => (cur?.id === id ? null : cur))
       await refresh()
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e))
@@ -74,7 +89,7 @@ export function AccountTokensPanel() {
         'paper-studio': {
           url: `${origin}/api/mcp`,
           headers: {
-            Authorization: `Bearer ${revealed || '<YOUR_PAT_TOKEN>'}`,
+            Authorization: `Bearer ${revealed?.token || '<YOUR_PAT_TOKEN>'}`,
           },
         },
       },
@@ -84,12 +99,12 @@ export function AccountTokensPanel() {
   )
 
   const copyText = async (txt: string, kind: 'token' | 'mcp') => {
-    try {
-      await navigator.clipboard.writeText(txt)
+    const ok = await copyToClipboard(txt)
+    if (ok) {
       setCopiedKey(kind)
       window.setTimeout(() => setCopiedKey(null), 1500)
-    } catch {
-      /* ignore */
+    } else {
+      setErr('无法复制，请允许浏览器访问剪贴板后重试')
     }
   }
 
@@ -131,9 +146,9 @@ export function AccountTokensPanel() {
             <div className="font-medium text-warning">请立即保存该明文令牌（页面关闭或刷新后将不再完整显示）：</div>
             <div className="flex items-center gap-2">
               <code className="min-w-0 flex-1 overflow-auto rounded bg-app px-2 py-1 font-mono text-fg-strong" data-testid="pat-revealed-value">
-                {revealed}
+                {revealed.token}
               </code>
-              <Button size="xs" variant="outline" onClick={() => void copyText(revealed, 'token')}>
+              <Button size="xs" variant="outline" onClick={() => void copyText(revealed.token, 'token')}>
                 {copiedKey === 'token' ? <Check aria-hidden className="size-3" /> : <Copy aria-hidden className="size-3" />}
                 {copiedKey === 'token' ? '已复制' : '复制'}
               </Button>

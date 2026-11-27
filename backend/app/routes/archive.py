@@ -55,6 +55,8 @@ async def import_archive(
     )
     await auth.grant_owner(proj.id, user)
     cases.ensure_case(proj.dir)
+    if user is not None:
+        cases.claim_owner(proj.dir, str(user.id))
     events.emit("case.created", pid=proj.id, actor=events.actor_of(user), data={"title": proj.title, "via": "archive_import"})
     return {
         "project": {

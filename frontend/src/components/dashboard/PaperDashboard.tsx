@@ -266,12 +266,36 @@ export function PaperDashboard() {
     }
   }
 
+  async function exportArchiveRow(row: ProjectSummary) {
+    if (busy) return
+    setBusy(true)
+    try {
+      await archiveApi.downloadArchive(row.id, row.title)
+    } catch (e) {
+      useStudio.getState().toast(e instanceof Error ? e.message : String(e), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function exportDeadlinesIcs() {
+    if (busy) return
+    setBusy(true)
+    try {
+      await downloadFile(deadlinesApi.icsUrl(), 'paper-deadlines.ics')
+    } catch (e) {
+      useStudio.getState().toast(e instanceof Error ? e.message : String(e), 'error')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function rowActions(row: ProjectSummary) {
     const state = row.list_state ?? 'active'
     return <div className="paper-row-actions">
       <button disabled={!writable(row)} onClick={() => setEditing(row)} aria-label={`编辑 ${row.title} 的项目信息`} title="项目信息"><Pencil aria-hidden /></button>
       <button disabled={busy} onClick={() => void downloadRow(row)} aria-label={row.source_format === 'docx' ? `下载 ${row.title} 的已保存 Word 版本` : `下载 ${row.title}`} title={row.source_format === 'docx' ? '下载服务器已保存的 Word 版本；不含其他窗口尚未保存的修改' : '下载最近编译的 PDF'}><Download aria-hidden /></button>
-      <button disabled={busy} onClick={() => void archiveApi.downloadArchive(row.id, row.title)} aria-label={`导出 ${row.title} 整档`} title="导出便携整档 (.zip)" data-testid={`row-export-archive-${row.id}`}><Package aria-hidden /></button>
+      <button disabled={busy} onClick={() => void exportArchiveRow(row)} aria-label={`导出 ${row.title} 整档`} title="导出便携整档 (.zip)" data-testid={`row-export-archive-${row.id}`}><Package aria-hidden /></button>
       {scope !== 'archived' && scope !== 'trash' && state === 'active' && <button disabled={!writable(row)} onClick={() => void setListState(row.id, 'archived')} aria-label={`归档 ${row.title}`} title="归档"><Archive aria-hidden /></button>}
       {(scope === 'archived' || scope === 'trash') && <button disabled={!writable(row)} onClick={() => void setListState(row.id, scope === 'trash' ? 'active' : 'active')} aria-label={`恢复 ${row.title}`} title={scope === 'trash' ? '恢复到项目列表' : '取消归档'}><FolderOpen aria-hidden /></button>}
       {scope !== 'trash' && state === 'active' && <button disabled={!writable(row)} onClick={() => void setListState(row.id, 'trashed')} aria-label={`移到回收站 ${row.title}`} title="移到回收站"><Trash2 aria-hidden /></button>}
@@ -337,20 +361,21 @@ export function PaperDashboard() {
                   <CalendarDays aria-hidden className="size-3.5" />
                   截稿月历
                 </Button>
-                <a
-                  href={deadlinesApi.icsUrl()}
-                  className="inline-flex h-6 items-center gap-1 rounded border border-border bg-panel px-2 text-2xs text-fg hover:bg-hover"
-                  download="paper-deadlines.ics"
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={busy}
+                  onClick={() => void exportDeadlinesIcs()}
                   data-testid="venues-export-ics"
                 >
                   <Download aria-hidden className="size-3" />
                   导出 .ics
-                </a>
+                </Button>
               </div>
             </div>
           )}
           {area === 'venues' && venueMode === 'calendar' ? (
-            <DeadlineCalendar projects={base} />
+            <DeadlineCalendar projects={rows} />
           ) : (
             <>
           <div className="paper-toolbar" role="toolbar" aria-label="项目列表工具">

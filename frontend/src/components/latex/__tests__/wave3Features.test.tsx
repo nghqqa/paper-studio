@@ -8,6 +8,7 @@ import { ScientificFigures } from '@/components/figures/ScientificFigures'
 import { LanguageToggle } from '@/components/shell/LanguageToggle'
 import { accountApi } from '@/lib/api/account'
 import { figuresApi } from '@/lib/api/projectFigures'
+import * as downloadMod from '@/lib/download'
 import { setLocale } from '@/lib/i18n'
 import { useStudio } from '@/store'
 
@@ -146,6 +147,8 @@ describe('Wave 3 平台化与国际化前端回归', () => {
       top_projects: [{ pid: 'p1', title: '测试论文', total_bytes: 1024000, cache_bytes: 128000 }],
     })
 
+    const dlSpy = vi.spyOn(downloadMod, 'downloadFile').mockResolvedValue('paper-studio-backup.zip')
+
     await act(async () => {
       root!.render(<DoctorPanel />)
     })
@@ -155,8 +158,7 @@ describe('Wave 3 平台化与国际化前端回归', () => {
     expect(box.textContent).toContain('SQLite: 完整正常')
     expect(box.textContent).toContain('5 篇')
     expect(box.textContent).toContain('LaTeX 3 / Word 2')
-    expect(host!.querySelector('[data-testid="admin-data-backup-btn"]')?.getAttribute('href')).toBe(
-      '/api/admin/data/backup?include_projects=false',
-    )
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-testid="admin-data-backup-btn"]')!.click())
+    expect(dlSpy).toHaveBeenCalledWith('/api/admin/data/backup?include_projects=false', 'paper-studio-backup.zip')
   })
 })

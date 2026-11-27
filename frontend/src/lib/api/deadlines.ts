@@ -14,7 +14,7 @@ export interface DeadlineItem {
 }
 
 export const deadlinesApi = {
-  list: () => req<{ items: DeadlineItem[]; today: string }>('/deadlines'),
+  list: () => req<{ items: DeadlineItem[]; today: string }>('/api/deadlines'),
   icsUrl: () => '/api/deadlines/calendar.ics',
-  remindCheck: () => req<{ checked: number; due_soon: DeadlineItem[]; notified: number }>('/deadlines/remind-check', { method: 'POST' }),
+  remindCheck: () => req<{ checked: number; due_soon: DeadlineItem[]; notified: number }>('/api/deadlines/remind-check', { method: 'POST' }),
 }

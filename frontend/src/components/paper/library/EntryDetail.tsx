@@ -394,13 +394,18 @@ export function EntryDetail({
                 className="text-danger"
                 disabled={busy || pdfBusy}
                 onClick={() =>
-                  void libraryApi
-                    .deleteEntryPdf(pid, entry.reference_id)
-                    .then(() => {
+                  void (async () => {
+                    setPdfBusy(true)
+                    try {
+                      await libraryApi.deleteEntryPdf(pid, entry.reference_id)
                       onNotice('已移除归档 PDF')
-                      return onChanged()
-                    })
-                    .catch((err) => onError(errText(err)))
+                      await onChanged()
+                    } catch (err) {
+                      onError(errText(err))
+                    } finally {
+                      setPdfBusy(false)
+                    }
+                  })()
                 }
               >
                 移除 PDF

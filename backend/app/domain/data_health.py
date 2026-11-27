@@ -10,8 +10,10 @@ import sqlite3
 import tempfile
 import time
 import zipfile
+from pathlib import Path
 
 from app import config
+from app.domain import shared_assets
 
 _CACHE_SUBDIRS = (
     os.path.join(".studio", "latex-builds"),
@@ -22,12 +24,16 @@ _CACHE_SUBDIRS = (
 
 def _dir_size(path: str) -> int:
     total = 0
-    if not os.path.isdir(path):
+    if not os.path.isdir(path) or os.path.islink(path):
         return 0
-    for base, _dirs, files in os.walk(path):
+    for base, dirs, files in os.walk(path, followlinks=False):
+        dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(base, d))]
         for fn in files:
+            full = os.path.join(base, fn)
+            if os.path.islink(full):
+                continue
             try:
-                total += os.path.getsize(os.path.join(base, fn))
+                total += os.path.getsize(full)
             except OSError:
                 pass
     return total
@@ -45,7 +51,8 @@ def _sqlite_integrity(db_path: str) -> tuple[bool, str, int]:
             except OSError:
                 pass
     try:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=5.0)
+        uri = Path(db_path).resolve().as_uri() + "?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, timeout=5.0)
         try:
             row = conn.execute("PRAGMA integrity_check").fetchone()
             msg = str(row[0] if row else "unknown")
@@ -87,7 +94,7 @@ def collect_data_health(store) -> dict:
         })
 
     project_sizes.sort(key=lambda r: r["total_bytes"], reverse=True)
-    shared_bytes = _dir_size(os.path.join(store.root, ".studio", "shared-assets"))
+    shared_bytes = _dir_size(os.path.join(store.root, shared_assets._DIR))
     db_ok, db_msg, db_bytes = _sqlite_integrity(config.DB_PATH)
     disk_root = store.root if os.path.isdir(store.root) else os.path.dirname(store.root)
     try:
@@ -119,17 +126,23 @@ def _hot_backup_sqlite(db_path: str) -> bytes | None:
         return None
     fd, tmp_path = tempfile.mkstemp(prefix="ps_backup_", suffix=".db")
     os.close(fd)
+    src = None
+    dst = None
     try:
         src = sqlite3.connect(db_path, timeout=10.0)
         dst = sqlite3.connect(tmp_path)
-        try:
-            src.backup(dst)
-        finally:
-            dst.close()
-            src.close()
+        src.backup(dst, pages=256, sleep=0.05)
+        dst.close()
+        dst = None
+        src.close()
+        src = None
         with open(tmp_path, "rb") as f:
             return f.read()
     finally:
+        if dst is not None:
+            dst.close()
+        if src is not None:
+            src.close()
         try:
             os.remove(tmp_path)
         except OSError:
@@ -152,8 +165,11 @@ def build_platform_backup_zip(store, *, include_projects: bool = False) -> bytes
             try:
                 with open(org_path, encoding="utf-8") as f:
                     org_data = json.load(f)
-                if isinstance(org_data, dict) and isinstance(org_data.get("ai_provider"), dict):
-                    org_data["ai_provider"] = {**org_data["ai_provider"], "api_key": ""}
+                if isinstance(org_data, dict):
+                    if isinstance(org_data.get("ai_provider"), dict):
+                        org_data["ai_provider"] = {**org_data["ai_provider"], "api_key": ""}
+                    if isinstance(org_data.get("registration"), dict):
+                        org_data["registration"] = {**org_data["registration"], "invite_code": ""}
                 zf.writestr(".studio/org.json", json.dumps(org_data, ensure_ascii=False, indent=2) + "\n")
                 included.append(".studio/org.json")
             except (OSError, ValueError):
@@ -161,19 +177,25 @@ def build_platform_backup_zip(store, *, include_projects: bool = False) -> bytes
 
         for rel_file in ("tags.json",):
             p = os.path.join(studio_global, rel_file)
-            if os.path.isfile(p):
+            if os.path.isfile(p) and not os.path.islink(p):
                 zf.write(p, f".studio/{rel_file}")
                 included.append(f".studio/{rel_file}")
 
-        shared_dir = os.path.join(studio_global, "shared-assets")
-        if os.path.isdir(shared_dir):
-            for base, _dirs, files in os.walk(shared_dir):
+        shared_dir = os.path.join(store.root, shared_assets._DIR)
+        if os.path.isdir(shared_dir) and not os.path.islink(shared_dir):
+            for base, dirs, files in os.walk(shared_dir, followlinks=False):
+                dirs[:] = [d for d in dirs if not os.path.islink(os.path.join(base, d))]
                 for fn in sorted(files):
+                    if fn.endswith(".lock"):
+                        continue
                     full = os.path.join(base, fn)
+                    if os.path.islink(full) or not os.path.isfile(full):
+                        continue
                     rel = os.path.relpath(full, store.root).replace(os.sep, "/")
                     zf.write(full, rel)
                     included.append(rel)
 
+        skipped: list[dict] = []
         if include_projects:
             from app.domain import project_archive
 
@@ -184,12 +206,14 @@ def build_platform_backup_zip(store, *, include_projects: bool = False) -> bytes
                     proj = store.get(pid)
                     arch_bytes, _name = project_archive.export_project_archive(proj)
                     if used + len(arch_bytes) > budget:
+                        skipped.append({"pid": pid, "reason": "budget_exceeded"})
                         continue
                     arc_name = f"projects/{pid}.zip"
                     zf.writestr(arc_name, arch_bytes)
                     included.append(arc_name)
                     used += len(arch_bytes)
-                except Exception:  # noqa: BLE001
+                except Exception as exc:  # noqa: BLE001
+                    skipped.append({"pid": pid, "reason": str(exc)[:120]})
                     continue
 
         manifest = {
@@ -197,6 +221,8 @@ def build_platform_backup_zip(store, *, include_projects: bool = False) -> bytes
             "created_at": int(time.time()),
             "product": config.PRODUCT,
             "include_projects": include_projects,
+            "truncated": bool(skipped),
+            "skipped": skipped,
             "items": included,
         }
         zf.writestr("backup-manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")

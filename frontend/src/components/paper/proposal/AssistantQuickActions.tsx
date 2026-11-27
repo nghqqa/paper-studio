@@ -138,7 +138,7 @@ export function AssistantQuickActions({
           title="论文写作"
           desc="起草段落或规划论证结构"
           loading={false}
-          disabled={busy || !canEdit}
+          disabled={busy || readingBusy || !canEdit}
           onClick={onStartWriting}
         />
         <QuickTaskCard

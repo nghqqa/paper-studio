@@ -55,8 +55,18 @@ def _sanitize_terms(raw) -> list[str]:
 def _current_fingerprint(project, ruleset_id: str) -> str:
     """当前源码指纹——必须与报告绑定同一范围口径（规则集 scope），
     否则 double-blind（只扫 .tex）的报告会被 .bib 变化误判为恒过期。"""
+    import hashlib
+
     scope = latex_preflight.RULESETS[ruleset_id]["scope"]
     digest, _lines, _error = latex_preflight._scan_files(project, scope)
+    if ruleset_id in ("latex-general", "submission-readiness"):
+        gl_path = os.path.join(project.dir, ".studio", "glossary.json")
+        if os.path.isfile(gl_path):
+            try:
+                with open(gl_path, "rb") as f:
+                    digest[".studio/glossary.json"] = hashlib.sha256(f.read()).hexdigest()
+            except OSError:
+                pass
     return latex_preflight.digest_fingerprint(digest)
 
 

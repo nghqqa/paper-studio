@@ -68,53 +68,60 @@ def _first_surname(authors: list[str]) -> str:
 
 
 def _extract_arxiv_id(entry: LibraryEntry) -> str:
-    direct = (getattr(entry, "arxiv", None) or "").strip()
+    direct = (getattr(entry, "arxiv_id", None) or getattr(entry, "arxiv", None) or "").strip()
     if direct:
         return direct
-    extra = getattr(entry, "extra_fields", None) or {}
+    extra = getattr(entry, "fields", None) or getattr(entry, "extra_fields", None) or {}
     if isinstance(extra, dict):
         eprint = str(extra.get("eprint") or "").strip()
-        if eprint and re.match(r"^\d{4}\.\d{4,5}(?:v\d+)?$", eprint):
+        if eprint and re.match(r"^(?:[a-z\-]+(?:\.[A-Z]{2})?/\d{7}|\d{4}\.\d{4,5})(?:v\d+)?$", eprint, re.IGNORECASE):
             return eprint
     doi = (entry.doi or "").strip()
-    m = re.search(r"10\.48550/arxiv\.(\d{4}\.\d{4,5}(?:v\d+)?)", doi, re.IGNORECASE)
+    m = re.search(
+        r"10\.48550/arxiv\.([a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?|\d{4}\.\d{4,5}(?:v\d+)?)",
+        doi,
+        re.IGNORECASE,
+    )
     if m:
         return m.group(1)
     url = (getattr(entry, "url", None) or "").strip()
-    m2 = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5}(?:v\d+)?)", url, re.IGNORECASE)
+    m2 = re.search(
+        r"arxiv\.org/(?:abs|pdf)/([a-z\-]+(?:\.[A-Z]{2})?/\d{7}(?:v\d+)?|\d{4}\.\d{4,5}(?:v\d+)?)",
+        url,
+        re.IGNORECASE,
+    )
     if m2:
         return m2.group(1)
     return ""
 
 
 async def _find_authoritative(entry: LibraryEntry) -> tuple[dict[str, Any] | None, str | None]:
-    """按优先级（DOI → arXiv → 标题检索）查询权威源。返回 (candidate, error_message)。"""
+    """按优先级查询权威源（正式 DOI → arXiv → 标题检索）。返回 (candidate, error_message)。"""
     doi = (entry.doi or "").strip()
     arxiv_id = _extract_arxiv_id(entry)
     title = (entry.title or "").strip()
+    is_arxiv_doi = bool(doi and re.match(r"^10\.48550/arxiv\.", doi, re.IGNORECASE))
+    last_err: str | None = None
 
-    # 1. arXiv DOI（10.48550/arXiv.*）或显式 arXiv ID 优先查 arXiv，失败再退 Crossref/OpenAlex
-    if arxiv_id:
+    async def _try_arxiv() -> tuple[dict[str, Any] | None, str | None]:
+        if not arxiv_id:
+            return None, None
         try:
             cand = await library_sources.lookup_arxiv(arxiv_id)
             if cand and (cand.get("fields") or {}).get("title"):
                 return cand, None
+            return None, None
         except library_sources.SourceError as exc:
-            if exc.status not in (404, 422):
-                last_err = exc.message
-            else:
-                last_err = None
-        else:
-            last_err = None
-    else:
-        last_err = None
+            return None, (exc.message if exc.status not in (404, 422) else None)
 
-    # 2. DOI 精确查询（Crossref 优先，404 时 OpenAlex 兜底）
-    if doi:
+    async def _try_doi() -> tuple[dict[str, Any] | None, str | None]:
+        if not doi:
+            return None, None
         try:
             cand = await library_sources.lookup_doi(doi)
             if cand and (cand.get("fields") or {}).get("title"):
                 return cand, None
+            return None, None
         except library_sources.SourceError as exc:
             if exc.status == 404:
                 try:
@@ -123,9 +130,33 @@ async def _find_authoritative(entry: LibraryEntry) -> tuple[dict[str, Any] | Non
                         return cand, None
                 except library_sources.SourceError as exc2:
                     if exc2.status not in (404, 422):
-                        last_err = exc2.message
+                        return None, exc2.message
             elif exc.status != 422:
-                last_err = exc.message
+                return None, exc.message
+            return None, None
+
+    if doi and not is_arxiv_doi:
+        cand, err = await _try_doi()
+        if cand is not None:
+            return cand, None
+        if err:
+            last_err = err
+        cand, err = await _try_arxiv()
+        if cand is not None:
+            return cand, None
+        if err:
+            last_err = err
+    else:
+        cand, err = await _try_arxiv()
+        if cand is not None:
+            return cand, None
+        if err:
+            last_err = err
+        cand, err = await _try_doi()
+        if cand is not None:
+            return cand, None
+        if err:
+            last_err = err
 
     # 3. 标题关键词检索（OpenAlex，按最高标题相似度挑候选；中文标题允许 ≥4 字）
     min_title_len = 4 if _CJK_RUN_RE.search(title) else 6
@@ -290,33 +321,33 @@ async def verify_entries(
                 "checked_at": time.time(),
             })
 
-    # 与已有缓存按 reference_id 合并，保留局部抽检历史
-    prev = load_cached(project_dir)
-    merged_map = {it["reference_id"]: it for it in prev.get("items", []) if it.get("reference_id")}
-    for it in results:
-        merged_map[it["reference_id"]] = it
-    # 仅保留当前文献库仍存在的条目
-    valid_rids = {e.reference_id for e in entries}
-    all_items = [it for rid, it in merged_map.items() if rid in valid_rids]
-
-    counts = {"verified": 0, "mismatch": 0, "retracted": 0, "unverified": 0, "error": 0}
-    for it in all_items:
-        st = it.get("status", "error")
-        if st in counts:
-            counts[st] += 1
-
-    report = {
-        "checked_at": time.time(),
-        "total": len(all_items),
-        "batch_size": len(batch),
-        "truncated": truncated,
-        "max_batch": MAX_BATCH,
-        "counts": counts,
-        "items": all_items,
-    }
     cache_path = os.path.join(project_dir, CACHE_FILE)
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    valid_rids = {e.reference_id for e in entries}
     with atomic.studio_lock(project_dir, "citation-verify"):
+        # 与已有缓存按 reference_id 合并，保留局部抽检历史
+        prev = load_cached(project_dir)
+        merged_map = {it["reference_id"]: it for it in prev.get("items", []) if it.get("reference_id")}
+        for it in results:
+            merged_map[it["reference_id"]] = it
+        # 仅保留当前文献库仍存在的条目
+        all_items = [it for rid, it in merged_map.items() if rid in valid_rids]
+
+        counts = {"verified": 0, "mismatch": 0, "retracted": 0, "unverified": 0, "error": 0}
+        for it in all_items:
+            st = it.get("status", "error")
+            if st in counts:
+                counts[st] += 1
+
+        report = {
+            "checked_at": time.time(),
+            "total": len(all_items),
+            "batch_size": len(batch),
+            "truncated": truncated,
+            "max_batch": MAX_BATCH,
+            "counts": counts,
+            "items": all_items,
+        }
         atomic.write_json(cache_path, report)
     return report
 

@@ -216,30 +216,45 @@ export async function postSse<T>(url: string, body: unknown, opts: SseOptions = 
       const chunk = typeof parsed?.text === 'string' ? parsed.text : raw
       if (chunk) onDelta?.(chunk)
     } else if (evName === 'done') {
-      donePayload = (parsed ?? raw) as T
+      if (parsed === null) {
+        errMsg = '流式响应结果解析失败'
+      } else {
+        donePayload = parsed as T
+      }
     } else if (evName === 'error') {
       errMsg = typeof parsed?.message === 'string' ? parsed.message : raw || '生成失败'
     }
   }
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += decoder.decode(value, { stream: true })
-    const frames = buf.split(/\r?\n\r?\n/)
-    buf = frames.pop() ?? ''
-    for (const f of frames) {
-      if (f.trim()) processFrame(f)
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const frames = buf.split(/\r?\n\r?\n/)
+      buf = frames.pop() ?? ''
+      for (const f of frames) {
+        if (f.trim()) processFrame(f)
+        if (errMsg) throw new ApiError(502, errMsg)
+      }
+    }
+    buf += decoder.decode()
+    if (buf.trim()) {
+      processFrame(buf)
       if (errMsg) throw new ApiError(502, errMsg)
     }
+    if (donePayload === undefined) {
+      throw new ApiError(502, '流式响应未完整结束')
+    }
+    return donePayload
+  } catch (e) {
+    if (e instanceof DOMException && e.name === 'TimeoutError') {
+      throw new ApiError(0, '请求超时，请检查网络后重试')
+    }
+    throw e
+  } finally {
+    await reader.cancel().catch(() => {})
+    reader.releaseLock()
   }
-  if (buf.trim()) {
-    processFrame(buf)
-    if (errMsg) throw new ApiError(502, errMsg)
-  }
-  if (donePayload === undefined) {
-    throw new ApiError(502, '流式响应未完整结束')
-  }
-  return donePayload
 }
 
 export function triggerBlobDownload(blob: Blob, filename: string): void {

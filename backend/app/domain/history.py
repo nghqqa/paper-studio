@@ -122,7 +122,18 @@ def _run(
     if index is not None:
         env["GIT_INDEX_FILE"] = index
     return subprocess.run(
-        [g, "-c", "commit.gpgsign=false", "-c", "core.autocrlf=input", *args],
+        [
+            g,
+            "-c",
+            "commit.gpgsign=false",
+            "-c",
+            "core.autocrlf=input",
+            "-c",
+            "core.fsmonitor=false",
+            "-c",
+            f"core.hooksPath={os.devnull}",
+            *args,
+        ],
         cwd=project_dir,
         env=env,
         input=stdin,

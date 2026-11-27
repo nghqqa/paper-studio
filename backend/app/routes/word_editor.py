@@ -388,6 +388,7 @@ async def diff_word_versions(pid: str, request: Request,
                              base_vid: str = Query(..., min_length=1, max_length=64),
                              target_vid: str = Query(..., min_length=1, max_length=64)):
     p = _project(request, pid)
+    await _download_allowed(pid)
     return await asyncio.to_thread(word.diff_versions, p.dir, base_vid, target_vid)
 
 

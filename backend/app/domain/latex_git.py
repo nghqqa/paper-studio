@@ -165,6 +165,8 @@ def push(project, force: bool = False) -> dict:
     row = load_remote(project)
     if row is None:
         raise ProjectError("尚未配置远端仓库", 400)
+    if not re_branch_ok(row["branch"]):
+        raise ProjectError("远端分支名非法", 422)
     sha = latex_history.commit(project.dir, "sync", force=True)
     head = latex_history.head(project.dir)
     if head is None:
@@ -238,10 +240,12 @@ def pull(project, force: bool = False) -> dict:
     row = load_remote(project)
     if row is None:
         raise ProjectError("尚未配置远端仓库", 400)
+    if not re_branch_ok(row["branch"]):
+        raise ProjectError("远端分支名非法", 422)
     if not force:
         latex_history.commit(project.dir, "sync", force=True)
     before = latex_history.head(project.dir)
-    r = _run_git(project.dir, "fetch", _authed_url(row), row["branch"])
+    r = _run_git(project.dir, "fetch", "--", _authed_url(row), row["branch"])
     if r.returncode != 0:
         raise ProjectError(f"拉取失败：{_clean(r.stderr, row)}", 502)
     _ensure_remote_ref(project.dir, row)

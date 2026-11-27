@@ -126,11 +126,12 @@ def verify_token(raw: str) -> dict | None:
             return None
         if matched.get("revoked_at") is not None:
             return None
-        exp = matched.get("expires_at")
-        if exp is not None and float(exp) <= now:
+        if matched.get("expires_at") is not None and float(matched["expires_at"]) <= now:
             return None
-        matched["last_used_at"] = now
-        _save_records(recs)
+        last_used = matched.get("last_used_at")
+        if last_used is None or now - float(last_used) >= 60.0:
+            matched["last_used_at"] = now
+            _save_records(recs)
         return {
             "id": matched["id"],
             "user_id": matched["user_id"],

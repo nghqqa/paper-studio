@@ -285,7 +285,10 @@ export function LoginPage() {
                 variant="outline"
                 size="lg"
                 className="w-full"
-                onClick={() => window.location.assign('/api/auth/oidc/login')}
+                onClick={() => {
+                  useStudio.getState().clearAnonHint()
+                  window.location.assign('/api/auth/oidc/login')
+                }}
                 data-testid="login-oidc-btn"
               >
                 {oidc.label || '机构单点登录 (SSO)'}

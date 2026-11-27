@@ -139,8 +139,47 @@ export function GlossaryPanel({
     try {
       const r = await glossaryApi.remove(pid, e.id)
       setEntries(r.entries)
+      if (editingId === e.id) resetForm()
+      setCandidates((prev) =>
+        prev
+          ? prev.map((it) =>
+              it.category === e.category && it.term === e.term ? { ...it, exists: false } : it,
+            )
+          : null,
+      )
       onChanged?.()
       setNotice(`已移除「${e.term}」`)
+    } catch (ex) {
+      setErr(errMsg(ex))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleAddCandidate = async (c: NonNullable<typeof candidates>[number]) => {
+    if (!canEdit || busy) return
+    setBusy(true)
+    setErr('')
+    setNotice('')
+    try {
+      const r = await glossaryApi.upsert(pid, {
+        term: c.term,
+        category: c.category,
+        symbol: c.symbol,
+        definition: c.definition,
+        aliases: c.aliases,
+        enforce: true,
+      })
+      setEntries(r.entries)
+      onChanged?.()
+      setCandidates((prev) =>
+        prev
+          ? prev.map((it) =>
+              it.category === c.category && it.term === c.term ? { ...it, exists: true } : it,
+            )
+          : null,
+      )
+      setNotice(`已收入「${c.term}」`)
     } catch (ex) {
       setErr(errMsg(ex))
     } finally {
@@ -285,22 +324,7 @@ export function GlossaryPanel({
                       size="xs"
                       variant="outline"
                       disabled={busy}
-                      onClick={() =>
-                        void glossaryApi.upsert(pid, {
-                          term: c.term,
-                          category: c.category,
-                          symbol: c.symbol,
-                          definition: c.definition,
-                          aliases: c.aliases,
-                          enforce: true,
-                        }).then((r) => {
-                          setEntries(r.entries)
-                          onChanged?.()
-                          setCandidates((prev) =>
-                            prev ? prev.map((it) => (it.term === c.term ? { ...it, exists: true } : it)) : null,
-                          )
-                        })
-                      }
+                      onClick={() => void handleAddCandidate(c)}
                     >
                       收入
                     </Button>

@@ -474,5 +474,142 @@ def test_word_milestones_diff_restore_and_revision_kit(env):
     owner.put(f"/api/projects/{pid}/collab-settings", json={"allow_download": False})
     try:
         assert owner.post(f"/api/projects/{pid}/word/export-revision-kit", json={}).status_code == 403
+        assert owner.get(f"/api/projects/{pid}/word/diff?base_vid={v1_id}&target_vid={v2_id}").status_code == 403
     finally:
         owner.put(f"/api/projects/{pid}/collab-settings", json={"allow_download": True})
+
+    # 5) 恢复同 SHA 版本保持幂等（不追加版本、不改写已有标签），实际恢复清除保存 nonce/时间戳
+    st_file = env["projects"] / pid / ".studio" / "word" / "state.json"
+    st_raw = json.loads(st_file.read_text(encoding="utf-8"))
+    st_raw["save_nonce"] = "nonce-123"
+    st_raw["ds_lastsave"] = "2026-11-27T00:00:00Z"
+    st_file.write_text(json.dumps(st_raw), encoding="utf-8")
+    same_rest = owner.post(f"/api/projects/{pid}/word/versions/{v1_id}/restore", json={})
+    assert same_rest.status_code == 200
+    assert same_rest.json()["version"] == 3 and len(same_rest.json()["versions"]) == 3
+    assert "恢复自 初稿送审" in (same_rest.json()["versions"][-1].get("label") or "")
+
+    diff_rest = owner.post(f"/api/projects/{pid}/word/versions/{v2_id}/restore", json={})
+    assert diff_rest.status_code == 200 and diff_rest.json()["version"] == 4
+    st_after = json.loads(st_file.read_text(encoding="utf-8"))
+    assert "save_nonce" not in st_after and "ds_lastsave" not in st_after
+
+
+def test_sse_abort_releases_sem_and_quota_and_citation_verify_doi_priority(env, monkeypatch):
+    import asyncio
+
+    from app.ai import client as ai_client_mod
+    from app.domain import ai_quota
+    from app.domain import citation_verify as cv
+    from app.domain import library_sources as ls
+    from app.domain.library import LibraryEntry
+
+    pid = _create_latex_project(env)
+    owner = env["users"]["owner"]
+    main_sha = owner.get(f"/api/projects/{pid}/latex/files/main.tex").json()["sha"]
+
+    # 1) 真实 AiClient.chat(stream=True) 连续 4 次中途退出，_SEM 不泄漏死锁
+    class _StubProv:
+        name = "stub"
+        key = "sk-stub"
+
+        async def stream(self, model, messages, *, timeout, max_tokens=None, temperature=None):
+            yield '{"text": "chunk1'
+            yield ' chunk2"}'
+
+    async def _run_aborts():
+        cli = ai_client_mod.AiClient(_StubProv())
+        before_val = ai_client_mod._SEM._value
+        for _ in range(4):
+            cs = await cli.chat([{"role": "user", "content": "hi"}], "interactive", stream=True, project_dir=str(env["projects"] / pid))
+            assert await cs.__anext__() == '{"text": "chunk1'
+            await cs.aclose()
+        assert ai_client_mod._SEM._value == before_val
+        # 归还后第 5 次仍可完整消费并释放
+        cs2 = await cli.chat([{"role": "user", "content": "ok"}], "interactive", stream=True, project_dir=str(env["projects"] / pid))
+        parts = [c async for c in cs2]
+        assert "".join(parts) == '{"text": "chunk1 chunk2"}'
+        assert ai_client_mod._SEM._value == before_val
+
+    asyncio.run(asyncio.wait_for(_run_aborts(), timeout=5.0))
+
+    # SSE 路由在流断连或抛错时必须执行 res.aclose() 并释放流句柄
+    close_calls = [0]
+
+    class _AbortingStream:
+        def __init__(self, *, fail: bool = False):
+            self._n = 0
+            self._fail = fail
+
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if self._n == 0:
+                self._n += 1
+                return '{"text": "partial'
+            if self._fail:
+                raise RuntimeError("upstream stream broken")
+            raise StopAsyncIteration
+
+        async def aclose(self):
+            close_calls[0] += 1
+
+    import app.domain.user_ai as ua
+
+    fail_flag = [False]
+
+    class _AbortClient:
+        async def chat(self, *a, **kw):
+            return _AbortingStream(fail=fail_flag[0])
+
+    monkeypatch.setattr(ua, "resolve_ai_client", lambda *a, **kw: (_AbortClient(), None))
+    for _ in range(3):
+        with owner.stream(
+            "POST",
+            f"/api/projects/{pid}/paper-proposals/generate/stream",
+            json={"file": "main.tex", "action": "polish", "original_text": "hello", "base_sha": main_sha},
+        ) as resp:
+            assert resp.status_code == 200
+            for _line in resp.iter_lines():
+                break
+    fail_flag[0] = True
+    r_err = owner.post(
+        f"/api/projects/{pid}/paper-proposals/generate/stream",
+        json={"file": "main.tex", "action": "polish", "original_text": "hello", "base_sha": main_sha},
+    )
+    assert r_err.status_code == 200
+    evs_err = _parse_sse(r_err.text)
+    assert evs_err[-1][0] == "error" and "upstream stream broken" in evs_err[-1][1]["message"]
+    assert close_calls[0] == 4
+    _ = ai_quota.used_today("nonexistent")
+
+    # 2) citation_verify._extract_arxiv_id 识别 arxiv_id 与 fields['eprint']，且正式 DOI 优先于 arXiv
+    e1 = LibraryEntry(reference_id="r_a", citation_key="a2023", title="Paper A", authors=["A"], arxiv_id="2301.00001")
+    e2 = LibraryEntry(reference_id="r_b", citation_key="b1999", title="Paper B", authors=["B"], fields={"eprint": "hep-th/9901001"})
+    assert cv._extract_arxiv_id(e1) == "2301.00001"
+    assert cv._extract_arxiv_id(e2) == "hep-th/9901001"
+
+    order: list[str] = []
+
+    async def _fake_doi(doi: str):
+        order.append("doi:" + doi)
+        return {"source": "crossref", "fields": {"title": "Published Title", "doi": doi}}
+
+    async def _fake_arxiv(aid: str):
+        order.append("arxiv:" + aid)
+        return {"source": "arxiv", "fields": {"title": "Preprint Title"}}
+
+    monkeypatch.setattr(ls, "lookup_doi", _fake_doi)
+    monkeypatch.setattr(ls, "lookup_arxiv", _fake_arxiv)
+    e_both = LibraryEntry(
+        reference_id="r_both",
+        citation_key="both2024",
+        title="Some Published Paper Title",
+        authors=["Smith, Alice"],
+        doi="10.1145/1234567",
+        arxiv_id="2401.00001",
+    )
+    cand, err = asyncio.run(cv._find_authoritative(e_both))
+    assert err is None and cand is not None and cand["source"] == "crossref"
+    assert order == ["doi:10.1145/1234567"]

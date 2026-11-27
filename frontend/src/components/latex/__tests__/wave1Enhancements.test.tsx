@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { EditorState } from '@codemirror/state'
 import { EditorView } from '@codemirror/view'
@@ -9,11 +9,14 @@ import { computeWholeDocStats, latexFoldService, toggleLatexComment } from '@/co
 import { ProjectContentIndex } from '@/components/latex/editorSearch'
 import { PreflightPanel, type PreflightItemBase, type PreflightReportBase } from '@/components/paper/PreflightPanel'
 import { EntryDetail } from '@/components/paper/library/EntryDetail'
-import { extractJsonStreamField } from '@/components/paper/proposal/anchorUtils'
+import { extractJsonStreamField, payloadFor, sectionRangeOf } from '@/components/paper/proposal/anchorUtils'
+import { useProposalActions } from '@/components/paper/proposal/useProposalActions'
 import { WordWorkbench } from '@/components/word/WordWorkbench'
 import { api } from '@/lib/api'
 import { coreApi } from '@/lib/api/core'
 import { libraryApi, type CitationVerifyItem, type LibraryEntry } from '@/lib/api/library'
+import { ApiError, postSse } from '@/lib/api/net'
+import { paperProposalApi } from '@/lib/api/paperProposals'
 import { wordApi, type WordState } from '@/lib/api/word'
 import { useStudio } from '@/store'
 
@@ -346,14 +349,136 @@ describe('Wave 1: Word version milestones, diff, restore & revision kit + Kanban
       document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     })
 
-    // 两步恢复（携带 expected_sha）
+    // 两步恢复（携带 expected_sha）并触发编辑器重载
     await act(async () => box.querySelector<HTMLButtonElement>('[data-testid="word-version-restore-v1"]')!.click())
-    await act(async () => box.querySelector<HTMLButtonElement>('[data-testid="word-version-restore-confirm-v1"]')!.click())
+    await act(async () => {
+      box.querySelector<HTMLButtonElement>('[data-testid="word-version-restore-confirm-v1"]')!.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
     expect(restoreSpy).toHaveBeenCalledWith('pw1', 'v1', 'sha-v2')
+    expect(mockLoadOnlyOffice).toHaveBeenCalledTimes(2)
 
-    // 导出返修包
+    // 导出返修包（关闭 Diff 与恢复版本后清空过期 diffPair）
     await act(async () => box.querySelector<HTMLButtonElement>('[data-testid="word-export-revision-kit"]')!.click())
-    expect(kitSpy).toHaveBeenCalledWith('pw1', { base_vid: 'v1', target_vid: 'v2' })
+    expect(kitSpy).toHaveBeenCalledWith('pw1', undefined)
+  })
+
+  it('sectionRangeOf, payloadFor, refine(writing), and postSse handle edge cases accurately', async () => {
+    const doc = [
+      '\\section{Intro}',
+      'dup text here.',
+      '\\section{Methods}',
+      'We propose Foo.',
+      'dup text here.',
+      '\\section{Results}',
+      'Done.',
+    ].join('\n')
+    const sec2Start = doc.indexOf('\\section{Methods}')
+    const sec3Start = doc.indexOf('\\section{Results}')
+    const r = sectionRangeOf(doc, doc.indexOf('We propose Foo.'))
+    expect(r).toEqual({ from: sec2Start, to: sec3Start })
+
+    const secondDup = doc.lastIndexOf('dup text here.')
+    const pay = payloadFor(doc, 'dup text here.', secondDup, secondDup + 'dup text here.'.length)
+    expect(pay.context_before).toContain('We propose Foo.')
+    expect(pay.context_after).toContain('\\section{Results}')
+
+    // writing 提案 refine 保留 action: 'writing'
+    vi.spyOn(paperProposalApi, 'list').mockResolvedValue({ proposals: [] })
+    const genSpy = vi.spyOn(paperProposalApi, 'generateStream').mockResolvedValue({
+      proposal: {
+        proposal_id: 'p2',
+        mode: 'latex',
+        action: 'writing',
+        instruction: null,
+        anchor: { file: 'main.tex', base_sha: 's1', offset: 0, original_text: '', context_before: '', context_after: '' },
+        suggested_text: 'Refined draft.',
+        rationale: '',
+        model: 'm1',
+        created_by: null,
+        created_at: 1,
+        updated_at: 1,
+        status: 'pending',
+        protection_flags: [],
+        error: null,
+        applied_at: null,
+        applied_text: null,
+        applied_by: null,
+      },
+    })
+    const actRef: { current: ReturnType<typeof useProposalActions> | null } = { current: null }
+    function Harness() {
+      const value = useProposalActions({
+        pid: 'p1',
+        activePath: 'main.tex',
+        reloadSignal: 0,
+        mode: 'latex',
+        getSelection: () => null,
+        applyProposal: () => ({ ok: true, reason: 'unique' }),
+        revertProposal: () => ({ ok: true, reason: 'unique' }),
+      })
+      useEffect(() => {
+        actRef.current = value
+      }, [value])
+      return null
+    }
+    host = document.body.appendChild(document.createElement('div'))
+    root = createRoot(host)
+    await act(async () => { root!.render(<Harness />) })
+    await act(async () => {
+      await actRef.current!.refine(
+        {
+          proposal_id: 'p1',
+          mode: 'latex',
+          action: 'writing',
+          instruction: null,
+          anchor: { file: 'main.tex', base_sha: 's1', offset: 0, original_text: '', context_before: '', context_after: '' },
+          suggested_text: 'Draft v1.',
+          rationale: '',
+          model: 'm1',
+          created_by: null,
+          created_at: 1,
+          updated_at: 1,
+          status: 'pending',
+          protection_flags: [],
+          error: null,
+          applied_at: null,
+          applied_text: null,
+          applied_by: null,
+        },
+        '扩展第二段',
+      )
+    })
+    expect(genSpy).toHaveBeenCalledWith(
+      'p1',
+      expect.objectContaining({ action: 'writing', parent_proposal_id: 'p1' }),
+      expect.anything(),
+    )
+
+    // postSse 在损坏 done JSON 时抛 ApiError 并取消释放 reader
+    const enc = new TextEncoder()
+    const cancelSpy = vi.fn().mockResolvedValue(undefined)
+    const releaseSpy = vi.fn()
+    let readIdx = 0
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+      body: {
+        getReader: () => ({
+          read: async () => {
+            if (readIdx++ === 0) return { done: false, value: enc.encode('event: done\ndata: {bad json\n\n') }
+            return { done: true, value: undefined }
+          },
+          cancel: cancelSpy,
+          releaseLock: releaseSpy,
+        }),
+      },
+    } as unknown as Response)
+    await expect(postSse('/api/test-sse', {})).rejects.toBeInstanceOf(ApiError)
+    expect(cancelSpy).toHaveBeenCalled()
+    expect(releaseSpy).toHaveBeenCalled()
   })
 
   it('PaperDashboard Kanban supports drag-and-drop stage update via coreApi.saveSettings', async () => {

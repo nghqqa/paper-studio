@@ -10,6 +10,7 @@ import hashlib
 import io
 import math
 import os
+import threading
 from pathlib import Path
 from typing import Annotated, Literal
 
@@ -43,6 +44,36 @@ PALETTES: dict[str, tuple[str, ...]] = {
 PaletteName = Literal["default", "academic", "colorblind", "grayscale"]
 _GRAY_LINESTYLES = ("-", "--", "-.", ":")
 _GRAY_MARKERS = ("o", "s", "^", "D", "v", "P")
+
+_FONT_LOCK = threading.Lock()
+_FONT_CHECKED = False
+_FONT_FAMILY: str | None = None
+_RENDER_LOCK = threading.Lock()
+
+
+def _detect_image_mime(raw: bytes) -> str | None:
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if len(raw) >= 12 and raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _ensure_cjk_font_family() -> str | None:
+    global _FONT_CHECKED, _FONT_FAMILY
+    with _FONT_LOCK:
+        if _FONT_CHECKED:
+            return _FONT_FAMILY
+        _FONT_CHECKED = True
+        font_path = _cjk_font()
+        if font_path:
+            from matplotlib import font_manager
+
+            font_manager.fontManager.addfont(font_path)
+            _FONT_FAMILY = font_manager.FontProperties(fname=font_path).get_name()
+        return _FONT_FAMILY
 
 
 def _cjk_font():
@@ -128,25 +159,30 @@ class ChartIn(BaseModel):
 
 def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dpi: int | None = None) -> bytes:
     """渲染科研数据图为 PNG（含高 DPI）或 TrueType 嵌入矢量 PDF / SVG。"""
-    from matplotlib import font_manager
-
-    font_path = _cjk_font()
-    if font_path:
-        font_manager.fontManager.addfont(font_path)
-        family = font_manager.FontProperties(fname=font_path).get_name()
-        plt.rcParams["font.sans-serif"] = [family, "DejaVu Sans"]
-    plt.rcParams["axes.unicode_minus"] = False
-    plt.rcParams["pdf.fonttype"] = 42
-    plt.rcParams["ps.fonttype"] = 42
-
+    family = _ensure_cjk_font_family()
     effective_dpi = dpi if dpi is not None else body.dpi
     colors = PALETTES.get(body.palette)
-    if body.type == "radar":
-        fig, ax = plt.subplots(figsize=(7, 5), dpi=effective_dpi, subplot_kw={"polar": True})
-    else:
-        fig, ax = plt.subplots(figsize=(8, 4.5), dpi=effective_dpi)
     cats = body.categories
     xs = list(range(len(cats)))
+
+    with _RENDER_LOCK:
+        if family:
+            plt.rcParams["font.sans-serif"] = [family, "DejaVu Sans"]
+        plt.rcParams["axes.unicode_minus"] = False
+        plt.rcParams["pdf.fonttype"] = 42
+        plt.rcParams["ps.fonttype"] = 42
+
+        if body.type == "radar":
+            fig, ax = plt.subplots(figsize=(7, 5), dpi=effective_dpi, subplot_kw={"polar": True})
+        else:
+            fig, ax = plt.subplots(figsize=(8, 4.5), dpi=effective_dpi)
+        try:
+            return _draw_and_export(fig, ax, body, cats, xs, colors, fmt, effective_dpi)
+        finally:
+            plt.close(fig)
+
+
+def _draw_and_export(fig, ax, body: ChartIn, cats, xs, colors, fmt, effective_dpi) -> bytes:
     if body.type == "pie":
         pie_colors = list(colors[: len(cats)]) if colors else None
         ax.pie(body.series[0].values, labels=cats, autopct="%1.1f%%", startangle=90, colors=pie_colors)
@@ -326,7 +362,6 @@ def render_chart(body: ChartIn, *, fmt: Literal["png", "pdf", "svg"] = "png", dp
     buf = io.BytesIO()
     fig.tight_layout()
     fig.savefig(buf, format=fmt, dpi=effective_dpi)
-    plt.close(fig)
     return buf.getvalue()
 
 
@@ -371,14 +406,24 @@ async def chart_from_image(
     """借助多模态 Vision 模型从科研图表/实验表格截图中还原结构化 ChartIn 数据。"""
     fname = (file.filename or "").lower()
     ext = os.path.splitext(fname)[1]
-    mime = _VISION_MIMES.get(ext) or (file.content_type if (file.content_type or "").startswith("image/") else None)
-    if not mime or mime == "image/svg+xml":
+    base_ct = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if base_ct and base_ct not in ("application/octet-stream", "image/png", "image/jpeg", "image/jpg", "image/webp"):
+        await file.close()
         raise HTTPException(422, error_detail("validation", "仅支持 PNG / JPG / WebP 图表或表格截图"))
-    raw = await file.read(_VISION_MAX_BYTES + 1)
+    if ext and ext not in _VISION_MIMES:
+        await file.close()
+        raise HTTPException(422, error_detail("validation", "仅支持 PNG / JPG / WebP 图表或表格截图"))
+    try:
+        raw = await file.read(_VISION_MAX_BYTES + 1)
+    finally:
+        await file.close()
     if len(raw) > _VISION_MAX_BYTES:
         raise HTTPException(413, error_detail("file", "图片过大（上限 8 MB）"))
     if not raw:
         raise HTTPException(422, error_detail("validation", "上传的图片为空"))
+    mime = _detect_image_mime(raw)
+    if not mime:
+        raise HTTPException(422, error_detail("validation", "图片文件内容无效，仅支持合法 PNG / JPG / WebP"))
 
     client, _provider = user_ai.resolve_ai_client(user)
     b64 = base64.b64encode(raw).decode("ascii")
@@ -404,12 +449,30 @@ async def chart_from_image(
     try:
         res = await client.chat(messages, "interactive", max_tokens=2048, temperature=0.1)
     except ai_client.AiError as exc:
-        raise HTTPException(exc.status, error_detail(exc.kind, str(exc))) from exc
+        raise HTTPException(exc.status or 502, error_detail(exc.kind, str(exc))) from exc
 
     try:
         parsed = ai_client.parse_json(res.text, {"required": ["categories", "series"]})
         if parsed.get("type") not in CHART_TYPES:
             parsed["type"] = "bar"
+        for txt_k in ("title", "x_label", "y_label"):
+            if parsed.get(txt_k) is None:
+                parsed[txt_k] = ""
+            elif not isinstance(parsed.get(txt_k), str):
+                parsed[txt_k] = str(parsed[txt_k])
+        if isinstance(parsed.get("categories"), list):
+            parsed["categories"] = ["" if c is None else str(c) for c in parsed["categories"]]
+        if isinstance(parsed.get("series"), list):
+            norm_series = []
+            for s in parsed["series"]:
+                if isinstance(s, dict):
+                    s_copy = dict(s)
+                    if s_copy.get("name") is not None and not isinstance(s_copy.get("name"), str):
+                        s_copy["name"] = str(s_copy["name"])
+                    norm_series.append(s_copy)
+                else:
+                    norm_series.append(s)
+            parsed["series"] = norm_series
         validated = ChartIn.model_validate(parsed)
     except (ValueError, ValidationError) as exc:
         raise HTTPException(502, error_detail("format", f"图片识别结果未能通过数据结构校验：{exc}")) from exc

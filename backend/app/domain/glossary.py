@@ -22,9 +22,48 @@ FILE = os.path.join(".studio", "glossary.json")
 Category = Literal["term", "notation", "acronym"]
 _CATEGORIES = ("term", "notation", "acronym")
 
-_NEWACRONYM_RE = re.compile(r"\\(?:newacronym|acro)\s*\{[^}]*\}\s*\{([A-Za-z0-9_-]{2,20})\}\s*\{([^}]{2,160})\}")
+_NEWACRONYM_RE = re.compile(r"\\newacronym\s*\{[^}]*\}\s*\{([A-Za-z0-9_-]{2,20})\}\s*\{([^}]{2,160})\}")
+_ACRO_RE = re.compile(r"\\acro\s*\{([A-Za-z0-9_-]{2,20})\}\s*(?:\[[^\]]*\]\s*)?\{([^}]{2,160})\}")
 _PAREN_ACRO_RE = re.compile(r"([A-Za-z][A-Za-z0-9 \-]{3,80}|[\u4e00-\u9fff]{2,24})\s*\(([A-Z]{2,8})\)")
-_NEWCMD_RE = re.compile(r"\\(?:newcommand|renewcommand)\s*\*?\s*\{\s*(\\[A-Za-z@]+)\s*\}(?:\[\d+\])*\s*\{([^}]{1,160})\}")
+_CMD_HEAD_RE = re.compile(r"\\(?:newcommand|renewcommand)\s*\*?\s*\{\s*(\\[A-Za-z@]+)\s*\}(?:\[\d+\])*\s*")
+
+
+def _term_key(term: str, cat: str) -> str:
+    return term if (cat == "notation" or term.startswith("\\")) else term.lower()
+
+
+def _extract_braced(text: str, start: int, max_len: int = 160) -> str | None:
+    n = len(text)
+    i = start
+    while i < n and text[i].isspace():
+        i += 1
+    if i >= n or text[i] != "{":
+        return None
+    depth = 0
+    buf: list[str] = []
+    while i < n:
+        ch = text[i]
+        if ch == "\\" and i + 1 < n:
+            if depth >= 1:
+                buf.append(text[i : i + 2])
+            i += 2
+            continue
+        if ch == "{":
+            depth += 1
+            if depth > 1:
+                buf.append(ch)
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                val = "".join(buf).strip()
+                return val[:max_len] if val else None
+            buf.append(ch)
+        elif depth >= 1:
+            buf.append(ch)
+        if len(buf) > max_len * 2:
+            break
+        i += 1
+    return None
 
 
 def _path(project_dir: str) -> str:
@@ -89,21 +128,23 @@ def upsert_entry(project_dir: str, payload: dict) -> tuple[dict, list[dict]]:
         hit = None
         if gid:
             hit = next((e for e in entries if e.get("id") == gid), None)
+        t_key = _term_key(term, cat)
         if hit is None:
             hit = next(
                 (
                     e
                     for e in entries
-                    if str(e.get("term") or "").lower() == term.lower() and e.get("category") == cat
+                    if e.get("category") == cat and _term_key(str(e.get("term") or ""), cat) == t_key
                 ),
                 None,
             )
         now = time.time()
+        filtered_aliases = [a for a in aliases if _term_key(a, cat) != t_key]
         if hit is not None:
             hit.update(
                 term=term,
                 category=cat,
-                aliases=[a for a in aliases if a.lower() != term.lower()],
+                aliases=filtered_aliases,
                 symbol=symbol,
                 definition=definition,
                 enforce=enforce,
@@ -115,7 +156,7 @@ def upsert_entry(project_dir: str, payload: dict) -> tuple[dict, list[dict]]:
                 "id": gid or f"gl_{uuid.uuid4().hex[:10]}",
                 "term": term,
                 "category": cat,
-                "aliases": [a for a in aliases if a.lower() != term.lower()],
+                "aliases": filtered_aliases,
                 "symbol": symbol,
                 "definition": definition,
                 "enforce": enforce,
@@ -142,9 +183,11 @@ def update_entry(project_dir: str, gid: str, patch: dict) -> tuple[dict, list[di
             if c not in _CATEGORIES:
                 raise kind_error("validation", f"类别必须是 {'/'.join(_CATEGORIES)} 之一", detail=c)
             hit["category"] = c
-        if "aliases" in patch and patch["aliases"] is not None:
-            t_cur = str(hit.get("term") or "").lower()
-            hit["aliases"] = [a for a in _norm_aliases(patch["aliases"]) if a.lower() != t_cur]
+        t_cur = str(hit.get("term") or "")
+        cat_cur = str(hit.get("category") or "term")
+        t_cur_key = _term_key(t_cur, cat_cur)
+        src_aliases = _norm_aliases(patch["aliases"]) if ("aliases" in patch and patch["aliases"] is not None) else list(hit.get("aliases") or [])
+        hit["aliases"] = [a for a in src_aliases if _term_key(a, cat_cur) != t_cur_key]
         if "symbol" in patch and patch["symbol"] is not None:
             hit["symbol"] = str(patch["symbol"]).strip()[:120]
         if "definition" in patch and patch["definition"] is not None:
@@ -171,7 +214,7 @@ def extract_from_project(project, *, commit: bool = False) -> dict:
     from app.domain import latex_build, latex_submission
 
     existing = list_entries(project.dir)
-    existing_keys = {str(e.get("term") or "").lower() for e in existing}
+    existing_keys = {_term_key(str(e.get("term") or ""), str(e.get("category") or "term")) for e in existing}
 
     candidates: list[dict] = []
     seen: set[tuple[str, str]] = set()
@@ -185,23 +228,24 @@ def extract_from_project(project, *, commit: bool = False) -> dict:
             except Exception:  # noqa: BLE001
                 continue
             clean = latex_submission.strip_tex_comments(raw)
-            for m in _NEWACRONYM_RE.finditer(clean):
-                term, defn = m.group(1).strip(), m.group(2).strip()
-                k = ("acronym", term.lower())
-                if k not in seen:
-                    seen.add(k)
-                    candidates.append({
-                        "term": term,
-                        "category": "acronym",
-                        "symbol": term,
-                        "definition": defn,
-                        "aliases": [],
-                        "source_file": rel,
-                        "exists": term.lower() in existing_keys,
-                    })
+            for pat in (_NEWACRONYM_RE, _ACRO_RE):
+                for m in pat.finditer(clean):
+                    term, defn = m.group(1).strip(), m.group(2).strip()
+                    k = ("acronym", _term_key(term, "acronym"))
+                    if k not in seen:
+                        seen.add(k)
+                        candidates.append({
+                            "term": term,
+                            "category": "acronym",
+                            "symbol": term,
+                            "definition": defn,
+                            "aliases": [],
+                            "source_file": rel,
+                            "exists": _term_key(term, "acronym") in existing_keys,
+                        })
             for m in _PAREN_ACRO_RE.finditer(clean):
                 defn, term = m.group(1).strip(), m.group(2).strip()
-                k = ("acronym", term.lower())
+                k = ("acronym", _term_key(term, "acronym"))
                 if k not in seen and len(defn) >= 3:
                     seen.add(k)
                     candidates.append({
@@ -211,11 +255,14 @@ def extract_from_project(project, *, commit: bool = False) -> dict:
                         "definition": defn,
                         "aliases": [],
                         "source_file": rel,
-                        "exists": term.lower() in existing_keys,
+                        "exists": _term_key(term, "acronym") in existing_keys,
                     })
-            for m in _NEWCMD_RE.finditer(clean):
-                cmd, body = m.group(1).strip(), m.group(2).strip()
-                k = ("notation", cmd.lower())
+            for m in _CMD_HEAD_RE.finditer(clean):
+                cmd = m.group(1).strip()
+                body = _extract_braced(clean, m.end())
+                if not body:
+                    continue
+                k = ("notation", _term_key(cmd, "notation"))
                 if k not in seen:
                     seen.add(k)
                     candidates.append({
@@ -225,18 +272,40 @@ def extract_from_project(project, *, commit: bool = False) -> dict:
                         "definition": body,
                         "aliases": [],
                         "source_file": rel,
-                        "exists": cmd.lower() in existing_keys,
+                        "exists": _term_key(cmd, "notation") in existing_keys,
                     })
 
     added = 0
     if commit:
-        for cand in candidates:
-            if not cand["exists"]:
-                upsert_entry(project.dir, cand)
+        with atomic.studio_lock(project.dir, "glossary"):
+            cur = _read_raw(project.dir)
+            cur_keys = {_term_key(str(e.get("term") or ""), str(e.get("category") or "term")) for e in cur}
+            now = time.time()
+            for cand in candidates:
+                ck = _term_key(cand["term"], cand["category"])
+                if ck in cur_keys:
+                    cand["exists"] = True
+                    continue
+                cur.append({
+                    "id": f"gl_{uuid.uuid4().hex[:10]}",
+                    "term": cand["term"][:120],
+                    "category": cand["category"],
+                    "aliases": [],
+                    "symbol": str(cand.get("symbol") or "")[:120],
+                    "definition": str(cand.get("definition") or "")[:1000],
+                    "enforce": True,
+                    "updated_at": now,
+                })
+                cur_keys.add(ck)
                 cand["exists"] = True
                 added += 1
+            if added:
+                _write_raw(project.dir, cur)
+            entries_out = cur
+    else:
+        entries_out = list_entries(project.dir)
 
-    return {"candidates": candidates, "added": added, "entries": list_entries(project.dir)}
+    return {"candidates": candidates, "added": added, "entries": entries_out}
 
 
 def format_prompt_block(project_dir: str, max_chars: int = 2400) -> str:

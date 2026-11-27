@@ -164,12 +164,16 @@ def _prepare_generate(pid: str, body: GenerateIn, request: Request, user) -> tup
         from app.domain import library as library_mod
         from app.domain import library_pdf as library_pdf_mod
 
-        idx = library_mod.load_index(project.dir)
+        if project.settings.get("source_format") == "latex":
+            idx, _bib_errs = library_mod.rebuild_from_bib(project)
+        else:
+            idx = library_mod.load_index(project.dir)
         by_key = {e.citation_key: e for e in idx.entries}
+        dedup_keys = list(dict.fromkeys(str(ck).strip() for ck in body.cite_keys if str(ck).strip()))[:12]
         cards: list[str] = []
         used_chars = 0
-        for ck in body.cite_keys[:12]:
-            ent = by_key.get(str(ck).strip())
+        for ck in dedup_keys:
+            ent = by_key.get(ck)
             if ent is None:
                 continue
             auth_txt = ", ".join((ent.authors or [])[:3]) or "Unknown"
@@ -246,14 +250,25 @@ async def generate(pid: str, body: GenerateIn, request: Request, user: auth.Curr
 @router.post("/paper-proposals/generate/stream", dependencies=[Depends(require_org_ai)])
 async def generate_stream(pid: str, body: GenerateIn, request: Request, user: auth.CurrentUser = None):
     project, client, who, placeholder, messages = _prepare_generate(pid, body, request, user)
+    try:
+        try:
+            res = await client.chat(messages, "interactive", stream=True, max_tokens=4096, temperature=0.4)
+        except TypeError:
+            res = await client.chat(messages, "interactive", max_tokens=4096, temperature=0.4)
+    except AiError as e:
+        failed = placeholder.model_copy(update={"status": "failed", "error": str(e), "updated_at": time.time()})
+        pp.append(project.dir, pid, failed, by=who)
+        raise HTTPException(e.status or 502, error_detail("ai", str(e)))
+    except HTTPException as e:
+        detail = e.detail if isinstance(e.detail, dict) else {}
+        err_msg = str(detail.get("message") or e.detail or "生成失败")
+        failed = placeholder.model_copy(update={"status": "failed", "error": err_msg, "updated_at": time.time()})
+        pp.append(project.dir, pid, failed, by=who)
+        raise
 
     async def event_iter():
         finalized = False
         try:
-            try:
-                res = await client.chat(messages, "interactive", stream=True, max_tokens=4096, temperature=0.4)
-            except TypeError:
-                res = await client.chat(messages, "interactive", max_tokens=4096, temperature=0.4)
             parts: list[str] = []
             model_name = ""
             if hasattr(res, "__aiter__"):
@@ -294,13 +309,31 @@ async def generate_stream(pid: str, body: GenerateIn, request: Request, user: au
             pp.append(project.dir, pid, failed, by=who)
             finalized = True
             yield _sse_event("error", {"message": str(e)})
+        except HTTPException as e:
+            detail = e.detail if isinstance(e.detail, dict) else {}
+            err_msg = str(detail.get("message") or e.detail or "生成失败")
+            failed = placeholder.model_copy(update={"status": "failed", "error": err_msg, "updated_at": time.time()})
+            pp.append(project.dir, pid, failed, by=who)
+            finalized = True
+            yield _sse_event("error", {"message": err_msg})
         except asyncio.CancelledError:
             if not finalized:
                 failed = placeholder.model_copy(update={"status": "failed", "error": "已取消生成", "updated_at": time.time()})
                 pp.append(project.dir, pid, failed, by=who)
                 finalized = True
             raise
+        except Exception as e:  # noqa: BLE001
+            failed = placeholder.model_copy(update={"status": "failed", "error": str(e), "updated_at": time.time()})
+            pp.append(project.dir, pid, failed, by=who)
+            finalized = True
+            yield _sse_event("error", {"message": str(e)})
         finally:
+            aclose = getattr(res, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001
+                    pass
             if not finalized:
                 failed = placeholder.model_copy(update={"status": "failed", "error": "生成中断", "updated_at": time.time()})
                 pp.append(project.dir, pid, failed, by=who)
@@ -490,13 +523,16 @@ async def assistant_read_stream(pid: str, body: ReadIn, request: Request, user: 
         {"role": "system", "content": READ_SYSTEM},
         {"role": "user", "content": user_content},
     ]
+    try:
+        try:
+            res = await client.chat(messages, "interactive", stream=True, max_tokens=4096, temperature=0.3)
+        except TypeError:
+            res = await client.chat(messages, "interactive", max_tokens=4096, temperature=0.3)
+    except AiError as e:
+        raise HTTPException(e.status or 502, error_detail("ai", str(e)))
 
     async def event_iter():
         try:
-            try:
-                res = await client.chat(messages, "interactive", stream=True, max_tokens=4096, temperature=0.3)
-            except TypeError:
-                res = await client.chat(messages, "interactive", max_tokens=4096, temperature=0.3)
             parts: list[str] = []
             model_name = ""
             if hasattr(res, "__aiter__"):
@@ -519,6 +555,18 @@ async def assistant_read_stream(pid: str, body: ReadIn, request: Request, user: 
             yield _sse_event("done", {"answer": answer, "model": model_name, "chars": len(body.text)})
         except AiError as e:
             yield _sse_event("error", {"message": str(e)})
+        except HTTPException as e:
+            detail = e.detail if isinstance(e.detail, dict) else {}
+            yield _sse_event("error", {"message": str(detail.get("message") or e.detail or "精读失败")})
+        except Exception as e:  # noqa: BLE001
+            yield _sse_event("error", {"message": str(e)})
+        finally:
+            aclose = getattr(res, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001
+                    pass
 
     return StreamingResponse(
         event_iter(),

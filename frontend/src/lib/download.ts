@@ -65,7 +65,12 @@ export function saveBlob(blob: Blob, filename: string) {
 export async function downloadFile(url: string, fallbackName?: string): Promise<string> {
   // 走 netFetch：断网 / DNS 失败与 API 调用同口径 toast（导出正是用户最在意反馈的动作）
   const r = await netFetch(url, { credentials: 'same-origin' })
-  if (!r.ok) throw await toApiError(r)
+  if (!r.ok) {
+    if (r.status === 401) {
+      void import('@/store').then((m) => m.useStudio.getState().expireSession())
+    }
+    throw await toApiError(r)
+  }
   const blob = await r.blob()
   const name = filenameFromDisposition(r.headers.get('Content-Disposition')) ?? fallbackName ?? filenameFromUrl(url)
   saveBlob(blob, name)

@@ -12,6 +12,7 @@ import hmac
 import io
 import json
 import os
+import re
 import secrets
 import time
 import zipfile
@@ -328,11 +329,24 @@ def session_file(d: str, key: str) -> str:
         return document_path(d)
 
 
+_VID_RE = re.compile(r"^[A-Za-z0-9._-]{1,80}$")
+
+
+def _safe_vid_path(d: str, vid: str) -> str:
+    if not vid or ".." in vid or "/" in vid or "\\" in vid or not _VID_RE.match(vid):
+        raise ProjectError("Word 版本不存在", 404)
+    versions_dir = os.path.realpath(os.path.join(_base(d), "versions"))
+    vpath = os.path.realpath(os.path.join(versions_dir, vid + ".docx"))
+    if not vpath.startswith(versions_dir + os.sep):
+        raise ProjectError("Word 版本不存在", 404)
+    return vpath
+
+
 def version_path(d: str, vid: str) -> str:
     s = _load(d)
     if not any(v["id"] == vid for v in s["versions"]):
         raise ProjectError("Word 版本不存在", 404)
-    return os.path.join(_base(d), "versions", vid + ".docx")
+    return _safe_vid_path(d, vid)
 
 
 def _origin(p):
@@ -580,6 +594,8 @@ def export_pdf(project) -> dict:
 
 def label_version(d: str, vid: str, label: str) -> dict:
     """为指定已保存 Word 版本设置或清空里程碑标签（<=80 字符）。"""
+    if not vid or ".." in vid or not _VID_RE.match(vid):
+        raise ProjectError("Word 版本不存在", 404)
     clean = str(label or "").strip()[:80]
     with atomic.studio_lock(d, "word"):
         s = _load(d)
@@ -605,13 +621,17 @@ def restore_version(d: str, vid: str, *, expected_sha: str | None = None) -> dic
         target = next((v for v in s["versions"] if v["id"] == vid), None)
         if target is None:
             raise ProjectError("Word 版本不存在", 404)
-        vpath = os.path.join(_base(d), "versions", vid + ".docx")
+        vpath = _safe_vid_path(d, vid)
         if not os.path.isfile(vpath):
             raise ProjectError("Word 版本文件缺失", 404)
         with open(vpath, "rb") as f:
             data = f.read()
         validate_docx(data)
+        if hashlib.sha256(data).hexdigest() == s.get("sha"):
+            return _public_state(s)
         s.update(key=secrets.token_hex(20), closed=False)
+        for field in ("save_nonce", "last_saved_request_id", "ds_lastsave", "ds_last_save_was_manual"):
+            s.pop(field, None)
         s = _persist(d, s, data, f"restore:{vid}")
         src_label = target.get("label") or vid[:12]
         s["versions"][-1]["label"] = f"恢复自 {src_label}"[:80]
@@ -621,7 +641,10 @@ def restore_version(d: str, vid: str, *, expected_sha: str | None = None) -> dic
 
 def _extract_docx_lines(path: str) -> list[str]:
     doc = Document(path)
-    out = [p.text for p in doc.paragraphs]
+    out: list[str] = []
+    for p in doc.paragraphs:
+        parts = p.text.splitlines()
+        out.extend(parts if parts else [""])
     for table in doc.tables:
         for row in table.rows:
             cells = [c.text.replace("\n", " ").strip() for c in row.cells]
@@ -637,8 +660,8 @@ def diff_versions(d: str, base_vid: str, target_vid: str) -> dict:
         target_v = next((v for v in s["versions"] if v["id"] == target_vid), None)
         if base_v is None or target_v is None:
             raise ProjectError("指定的对比 Word 版本不存在", 404)
-    base_path = os.path.join(_base(d), "versions", base_vid + ".docx")
-    target_path = os.path.join(_base(d), "versions", target_vid + ".docx")
+    base_path = _safe_vid_path(d, base_vid)
+    target_path = _safe_vid_path(d, target_vid)
     if not os.path.isfile(base_path) or not os.path.isfile(target_path):
         raise ProjectError("Word 版本文件缺失", 404)
 
@@ -684,13 +707,20 @@ def build_word_revision_kit_zip(project, *, base_vid: str | None = None, target_
 
     latest = versions[-1]
     latest_path = version_path(project.dir, latest["id"])
+    if not os.path.isfile(latest_path):
+        raise ProjectError("Word 版本文件缺失", 404)
     with open(latest_path, "rb") as f:
         entries.append(("01-manuscript-current.docx", f.read()))
     included.append(f"01-manuscript-current.docx (version {len(versions)}, id {latest['id']})")
 
     b_vid, t_vid = base_vid, target_vid
-    if (not b_vid or not t_vid) and len(versions) >= 2:
-        b_vid, t_vid = versions[-2]["id"], versions[-1]["id"]
+    if len(versions) >= 2:
+        if b_vid and not t_vid:
+            t_vid = versions[-1]["id"]
+        elif t_vid and not b_vid:
+            b_vid = versions[-2]["id"]
+        elif not b_vid and not t_vid:
+            b_vid, t_vid = versions[-2]["id"], versions[-1]["id"]
     if b_vid and t_vid:
         dres = diff_versions(project.dir, b_vid, t_vid)
         diff_body = dres["unified_diff"] or "两个版本段落与表格文本完全一致，无差异。"

@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Copy } from 'lucide-react'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { figuresApi, type ProjectFigure } from '@/lib/api/projectFigures'
+import { copyText } from '@/lib/download'
 
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 
@@ -48,10 +49,9 @@ export function PublishLatexDialog({ pid, figure, onClose, onPublished }: {
   }
 
   async function copySnippet() {
-    try {
-      await navigator.clipboard.writeText(snippet)
-      setErr('')
-    } catch { setErr('无法复制，请允许浏览器访问剪贴板后重试') }
+    const ok = await copyText(snippet)
+    if (ok) setErr('')
+    else setErr('无法复制，请允许浏览器访问剪贴板后重试')
   }
 
   return (

@@ -1,4 +1,4 @@
-import { req } from './net'
+import { P, req } from './net'
 
 export interface PresencePeer {
   client_id: string
@@ -9,8 +9,6 @@ export interface PresencePeer {
   mode?: string
   updated_at: number
 }
-
-const P = (pid: string) => `/projects/${encodeURIComponent(pid)}`
 
 export const presenceApi = {
   heartbeat: (

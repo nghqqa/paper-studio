@@ -20,6 +20,7 @@ from app.domain import comments as store_mod
 from app.domain import events, latex_build, latex_issues
 from app.domain import rebuttal as rebuttal_mod
 from app.domain.comments import Anchor, Author, Comment
+from app.errors import error_detail
 
 router = APIRouter(prefix="/api/projects/{pid}", tags=["review"])
 log = logging.getLogger("paper_studio.review")
@@ -299,6 +300,8 @@ async def reopen_comment(pid: str, cid: str, request: Request, user: CurrentUser
 async def promote_comment_to_issue(pid: str, cid: str, request: Request, user: CurrentUser):
     await auth.check_access(request, user, pid, "editor")
     project = request.app.state.store.get(pid)
+    if project.settings.get("source_format") != "latex":
+        raise HTTPException(400, error_detail("project", "仅 LaTeX 工程支持将批注转为编译 Issue"))
     d = project.dir
     async with store_mod.ledger_lock(d):
         comments = store_mod.load(d)
@@ -316,13 +319,15 @@ async def promote_comment_to_issue(pid: str, cid: str, request: Request, user: C
             c.linked_issue_id = issue["id"]
             c.updated_at = time.time()
             store_mod.save(d, comments)
-    return {"comment": c.to_dict(), "issue": issue, "already_linked": False}
+    return {"comment": c.to_dict(), "issue": issue, "issue_id": issue["id"], "already_linked": False}
 
 
 @router.post("/comments/{cid}/promote-to-rebuttal")
 async def promote_comment_to_rebuttal(pid: str, cid: str, request: Request, user: CurrentUser):
     await auth.check_access(request, user, pid, "editor")
     project = request.app.state.store.get(pid)
+    if project.settings.get("document_type") != "paper":
+        raise HTTPException(400, error_detail("project", "审稿回复信仅支持论文（paper）项目"))
     d = project.dir
     async with store_mod.ledger_lock(d):
         comments = store_mod.load(d)
@@ -332,8 +337,10 @@ async def promote_comment_to_rebuttal(pid: str, cid: str, request: Request, user
         line = c.anchor.line_start or c.anchor.line
         loc = None
         if c.anchor.file:
-            loc = {"file": c.anchor.file, "line": line}
-        elif c.anchor.block_id.startswith("pdf:page-") and c.anchor.line:
+            loc = {"file": c.anchor.file}
+            if isinstance(line, int) and 0 < line <= 10**6:
+                loc["line"] = line
+        elif c.anchor.block_id.startswith("pdf:page-") and isinstance(c.anchor.line, int) and c.anchor.line > 0:
             loc = {"label": f"PDF 第 {c.anchor.line} 页"}
         reviewer = f"外部导师·{c.author.name}" if c.source == "client" else (c.author.name or "审阅批注")
         with store_mod.file_lock(d):
@@ -341,15 +348,18 @@ async def promote_comment_to_rebuttal(pid: str, cid: str, request: Request, user
             c = _get(comments, cid)
             if c.linked_rebuttal_id:
                 return {"comment": c.to_dict(), "item_id": c.linked_rebuttal_id, "already_linked": True}
-            item = rebuttal_mod.append_single_item(
-                d,
-                reviewer=reviewer,
-                category="major",
-                text=c.body,
-                location=loc,
-                comment_ids=[c.id],
-            )
+            try:
+                item = rebuttal_mod.append_single_item(
+                    d,
+                    reviewer=reviewer,
+                    category="major",
+                    text=c.body,
+                    location=loc,
+                    comment_ids=[c.id],
+                )
+            except rebuttal_mod.RebuttalError as e:
+                raise HTTPException(e.status, error_detail(e.kind, str(e))) from e
             c.linked_rebuttal_id = item["id"]
             c.updated_at = time.time()
             store_mod.save(d, comments)
-    return {"comment": c.to_dict(), "item": item, "already_linked": False}
+    return {"comment": c.to_dict(), "item": item, "item_id": item["id"], "already_linked": False}

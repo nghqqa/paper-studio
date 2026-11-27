@@ -342,6 +342,7 @@ async def admin_data_backup(request: Request, user: CurrentUser, include_project
         request.app.state.store,
         include_projects=include_projects,
     )
+    events.emit("admin.backup_exported", actor=events.actor_of(user), data={"include_projects": include_projects})
     stamp = time.strftime("%Y%m%d-%H%M%S", time.gmtime())
     return Response(
         payload,

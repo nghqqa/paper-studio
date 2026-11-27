@@ -26,6 +26,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EXCLUDE_DIRS: tuple[str, ...] = (
     ".git",
     ".oss-release",
+    "deliverables",
     ".agents",
     ".impeccable",
     ".import-staging",
@@ -215,6 +216,8 @@ def _is_excluded(rel: str, is_dir: bool) -> bool:
         else:
             if ex in parts:
                 return True
+    if rel == "examples/latex-blank" or rel.startswith("examples/latex-blank-") or rel.startswith("examples/latex-blank/"):
+        return True
     if not is_dir:
         if rel in EXCLUDE_FILES:
             return True

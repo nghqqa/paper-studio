@@ -79,6 +79,42 @@ def resolve_provider(uid: str | None) -> tuple[AiProvider | None, str]:
     return None, "none"
 
 
+class _QuotaStreamProxy:
+    """将流式 AI 配额预留的结算延后至流结束、异常或主动关闭（aclose）。"""
+
+    def __init__(self, inner, release_fn):
+        self._inner = inner
+        self._release = release_fn
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        try:
+            return await self._inner.__anext__()
+        except StopAsyncIteration:
+            self._release()
+            raise
+        except BaseException:
+            self._release()
+            raise
+
+    async def aclose(self):
+        try:
+            aclose = getattr(self._inner, "aclose", None)
+            if aclose is not None:
+                await aclose()
+        finally:
+            self._release()
+
+    @property
+    def result(self):
+        return getattr(self._inner, "result", None)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
 def resolve_ai_client(user):
     """三个论文线 AI 消费点共用的解析入口：用户自建 > 机构接入；都没有 ⇒ 400 ai_not_configured（文案含自助路径）。
 
@@ -106,37 +142,49 @@ def resolve_ai_client(user):
                 "fallback": provider.model_fallback},
     )
     if source == "org":
-        est_box = [0]
-        est_day_box = [None]
-        got_success = [False]
+        active_releases: list = []
 
         def _count(kw: dict) -> None:
             usage = kw.get("usage")
             tokens = int(getattr(usage, "total_tokens", 0) or 0) if usage is not None else 0
             if kw.get("ok") and tokens > 0:
-                got_success[0] = True
                 try:
                     ai_quota.add(uid, tokens)
                 except OSError:
                     pass  # 计数盘不可写不阻断调用（额度闸下次仍会尝试读）
 
         def _release() -> None:
-            try:
-                ai_quota.settle(uid, 0, est_box[0], day=est_day_box[0])
-            except OSError:
-                pass
-            est_box[0] = 0
+            for fn in list(active_releases):
+                fn()
 
         chat_orig = getattr(client, "chat", None)
 
         if chat_orig is not None:
             async def chat_guard(*args, **kwargs):
-                est_box[0] = ai_quota.reserve(uid)
-                est_day_box[0] = ai_quota.today()
+                est = ai_quota.reserve(uid)
+                est_day = ai_quota.today()
+                box = [est]
+
+                def _rel() -> None:
+                    if not box[0]:
+                        return
+                    val = box[0]
+                    box[0] = 0
+                    try:
+                        ai_quota.settle(uid, 0, val, day=est_day)
+                    except OSError:
+                        pass
+
+                active_releases.append(_rel)
                 try:
-                    return await chat_orig(*args, **kwargs)
-                finally:
-                    _release()
+                    res = await chat_orig(*args, **kwargs)
+                except BaseException:
+                    _rel()
+                    raise
+                if hasattr(res, "__aiter__"):
+                    return _QuotaStreamProxy(res, _rel)
+                _rel()
+                return res
 
             client.chat = chat_guard
         client.on_record = _count

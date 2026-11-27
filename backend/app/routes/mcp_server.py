@@ -11,19 +11,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
 
 from app import auth, config
 from app.domain import comments as comments_mod
+from app.domain import events, latex_build, latex_preflight
 from app.domain import glossary as glossary_mod
-from app.domain import latex_build, latex_preflight
 from app.domain import library as library_mod
 from app.domain import paper_proposals as pp
 from app.domain import rebuttal as rebuttal_mod
+from app.domain.projects import ProjectError
 
 router = APIRouter(tags=["mcp"])
 
@@ -203,10 +205,17 @@ def _list_projects(store) -> list[dict]:
     return out
 
 
+def _check_pat_scope(request: Request, need_scope: str) -> None:
+    scopes = getattr(request.state, "pat_scopes", None)
+    if scopes is not None and need_scope not in scopes:
+        raise auth.forbidden(need_scope)
+
+
 async def _call_tool(request: Request, user, name: str, args: dict[str, Any]) -> dict:
     store = request.app.state.store
 
     if name == "paper_list_projects":
+        _check_pat_scope(request, "read")
         all_projects = await asyncio.to_thread(_list_projects, store)
         allowed = set(await auth.visible_pids(user, [p["id"] for p in all_projects]))
         items = [p for p in all_projects if p["id"] in allowed]
@@ -217,12 +226,14 @@ async def _call_tool(request: Request, user, name: str, args: dict[str, Any]) ->
         return _tool_result({"error": "缺少必填参数 pid"}, is_error=True)
 
     if name == "paper_list_files":
+        _check_pat_scope(request, "read")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         files = await asyncio.to_thread(latex_build.list_source_files, proj)
         return _tool_result({"files": files})
 
     if name == "paper_read_file":
+        _check_pat_scope(request, "read")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         rel = str(args.get("path") or "").strip()
@@ -231,33 +242,39 @@ async def _call_tool(request: Request, user, name: str, args: dict[str, Any]) ->
         return _tool_result({"path": rel, "sha": sha, "content": content})
 
     if name == "paper_get_library":
+        _check_pat_scope(request, "read")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         idx = await asyncio.to_thread(library_mod.load_index, proj.dir)
         return _tool_result({"entries": [e.model_dump(mode="json") for e in idx.entries]})
 
     if name == "paper_get_glossary":
+        _check_pat_scope(request, "read")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         entries = await asyncio.to_thread(glossary_mod.list_entries, proj.dir)
         return _tool_result({"entries": entries})
 
     if name == "paper_get_rebuttal":
+        _check_pat_scope(request, "read")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         state = await asyncio.to_thread(rebuttal_mod.load_state, proj.dir)
         return _tool_result(state)
 
     if name == "paper_run_preflight":
+        _check_pat_scope(request, "read")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         ruleset = str(args.get("ruleset") or "latex-general")
         rid, entry = latex_preflight.resolve_ruleset(ruleset)
         fn = getattr(latex_preflight, entry["run"])
-        res = await asyncio.to_thread(fn, proj, ())
+        terms = tuple(proj.settings.get("blind_terms") or ()) if rid == "double-blind" else ()
+        res = await asyncio.to_thread(fn, proj, terms)
         return _tool_result({"ruleset_id": rid, "report": res})
 
     if name == "paper_list_proposals":
+        _check_pat_scope(request, "read")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         status = args.get("status")
@@ -265,20 +282,28 @@ async def _call_tool(request: Request, user, name: str, args: dict[str, Any]) ->
         return _tool_result({"proposals": [p.model_dump(mode="json") for p in props]})
 
     if name == "paper_create_proposal":
+        _check_pat_scope(request, "propose")
         await auth.check_access(request, user, pid, "editor")
         proj = store.get(pid)
         file_path = str(args.get("file") or "").strip()
         mode = str(args.get("mode") or ("word" if proj.settings.get("source_format") == "docx" else "latex"))
+        if mode not in ("latex", "word"):
+            return _tool_result({"error": f"不支持的 mode：{mode}（仅支持 latex / word）"}, is_error=True)
         action = str(args.get("action") or "custom")
         if action not in pp.ACTION_LABELS:
             action = "custom"
         orig = str(args.get("original_text") or "")
         sug = str(args.get("suggested_text") or "").strip()
+        instr = str(args.get("instruction") or "")
         if not file_path or not sug:
             return _tool_result({"error": "file 与 suggested_text 不能为空"}, is_error=True)
+        if len(file_path) > 400 or len(orig) > 8000 or len(sug) > 10000 or len(instr) > 500:
+            return _tool_result({"error": "file / original_text / suggested_text / instruction 长度超限"}, is_error=True)
         insert_mode = bool(args.get("insert", False)) or (action == "writing")
         if mode == "latex":
             base_sha = await asyncio.to_thread(latex_build.source_file_sha, proj, file_path)
+            if base_sha is None:
+                return _tool_result({"error": f"文件不存在或路径非法：{file_path}"}, is_error=True)
         else:
             base_sha = ""
         who = getattr(user, "email", None) or (str(getattr(user, "id", "")) if user else "mcp-agent")
@@ -287,7 +312,7 @@ async def _call_tool(request: Request, user, name: str, args: dict[str, Any]) ->
             proposal_id=pp.new_id(),
             mode=mode,  # type: ignore[arg-type]
             action=action,  # type: ignore[arg-type]
-            instruction=str(args.get("instruction") or "") or None,
+            instruction=instr or None,
             anchor=pp.Anchor(
                 file=file_path,
                 base_sha=base_sha,
@@ -309,28 +334,54 @@ async def _call_tool(request: Request, user, name: str, args: dict[str, Any]) ->
         })
 
     if name == "paper_add_comment":
+        _check_pat_scope(request, "propose")
         await auth.check_access(request, user, pid, "viewer")
         proj = store.get(pid)
         file_path = str(args.get("file") or "").strip()
         body_text = str(args.get("body") or "").strip()
         if not file_path or not body_text:
             return _tool_result({"error": "file 与 body 不能为空"}, is_error=True)
-        line_val = int(args["line"]) if args.get("line") is not None else 0
-        quote_val = str(args.get("quote") or "")
+        if len(file_path) > 400 or len(body_text) > 4000:
+            return _tool_result({"error": "file 或 body 长度超限（body 上限 4000 字）"}, is_error=True)
+        try:
+            line_val = int(args["line"]) if args.get("line") is not None else 0
+        except (TypeError, ValueError):
+            return _tool_result({"error": "line 必须是整数"}, is_error=True)
+        if line_val < 0:
+            return _tool_result({"error": "line 不能为负数"}, is_error=True)
+        quote_val = str(args.get("quote") or "")[:400]
+        anchor_sha: str | None = None
+        if proj.settings.get("source_format") == "latex":
+            resolved = latex_build.resolve_source_path(proj, file_path)
+            if not os.path.isfile(resolved):
+                return _tool_result({"error": f"文件不存在：{file_path}"}, is_error=True)
+            anchor_sha = await asyncio.to_thread(latex_build.source_file_sha, proj, file_path)
         author = (
             comments_mod.LOCAL_AUTHOR
             if user is None
             else comments_mod.Author(id=str(user.id), name=user.display_name or user.email)
         )
-        anchor = comments_mod.Anchor(file=file_path, line=line_val, quote=quote_val)
+        anchor = comments_mod.Anchor(file=file_path, line=line_val, quote=quote_val, sha=anchor_sha)
         comment = comments_mod.create(anchor, body_text, author, source="ai")
-        with comments_mod.file_lock(proj.dir):
-            lst = comments_mod.load(proj.dir)
-            lst.append(comment)
-            comments_mod.save(proj.dir, lst)
+
+        def _append_comment() -> None:
+            with comments_mod.file_lock(proj.dir):
+                lst = comments_mod.load(proj.dir)
+                lst.append(comment)
+                comments_mod.save(proj.dir, lst)
+
+        async with comments_mod.ledger_lock(proj.dir):
+            await asyncio.to_thread(_append_comment)
+        events.emit(
+            "comment.created",
+            pid=pid,
+            actor=events.actor_of(user),
+            data={"cid": comment.id, "reply_id": None, "is_reply": False, "snippet": body_text[:120], "mentioned_ids": []},
+        )
         return _tool_result({"comment": comment.to_dict()})
 
     if name == "paper_upsert_glossary":
+        _check_pat_scope(request, "propose")
         await auth.check_access(request, user, pid, "editor")
         proj = store.get(pid)
         saved, _all = await asyncio.to_thread(glossary_mod.upsert_entry, proj.dir, args)
@@ -350,6 +401,8 @@ async def mcp_endpoint(request: Request, user: auth.CurrentUser = None):
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0" or "method" not in msg:
         return _err(msg.get("id") if isinstance(msg, dict) else None, -32600, "Invalid JSON-RPC 2.0 request")
 
+    if "id" not in msg:
+        return Response(status_code=202)
     req_id = msg.get("id")
     method = str(msg["method"])
     params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
@@ -366,6 +419,7 @@ async def mcp_endpoint(request: Request, user: auth.CurrentUser = None):
     if method in ("notifications/initialized", "ping"):
         return _ok(req_id, {})
     if method == "tools/list":
+        _check_pat_scope(request, "read")
         return _ok(req_id, {"tools": _TOOLS})
     if method == "tools/call":
         t_name = str(params.get("name") or "")
@@ -380,6 +434,7 @@ async def mcp_endpoint(request: Request, user: auth.CurrentUser = None):
                 raise
             return _ok(req_id, _tool_result({"error": err_msg}, is_error=True))
     if method == "resources/list":
+        _check_pat_scope(request, "read")
         return _ok(
             req_id,
             {
@@ -394,6 +449,7 @@ async def mcp_endpoint(request: Request, user: auth.CurrentUser = None):
             },
         )
     if method == "resources/read":
+        _check_pat_scope(request, "read")
         uri = str(params.get("uri") or "")
         if uri == "paper://projects":
             store = request.app.state.store
@@ -409,8 +465,11 @@ async def mcp_endpoint(request: Request, user: auth.CurrentUser = None):
             if "/files/" in rest:
                 pid, rel = rest.split("/files/", 1)
                 await auth.check_access(request, user, pid, "viewer")
-                proj = request.app.state.store.get(pid)
-                content = await asyncio.to_thread(latex_build.read_source_file, proj, rel)
+                try:
+                    proj = request.app.state.store.get(pid)
+                    content = await asyncio.to_thread(latex_build.read_source_file, proj, rel)
+                except ProjectError as exc:
+                    return _err(req_id, -32002, str(exc))
                 return _ok(
                     req_id,
                     {"contents": [{"uri": uri, "mimeType": "text/plain; charset=utf-8", "text": content}]},

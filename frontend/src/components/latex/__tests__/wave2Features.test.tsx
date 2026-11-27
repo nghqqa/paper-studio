@@ -14,7 +14,9 @@ import { deadlinesApi } from '@/lib/api/deadlines'
 import { glossaryApi } from '@/lib/api/glossary'
 import { libraryApi, type LibraryEntry } from '@/lib/api/library'
 import { patApi } from '@/lib/api/pat'
+import { presenceApi } from '@/lib/api/presence'
 import { sharedAssetsApi } from '@/lib/api/sharedAssets'
+import * as downloadMod from '@/lib/download'
 import type { ProjectSummary } from '@/lib/types'
 import { useStudio } from '@/store'
 
@@ -189,6 +191,18 @@ describe('Wave 2 前端差异化新功能回归', () => {
     })
     await act(async () => { await Promise.resolve() })
 
+    // 输入 0 天阻止提交并提示错误
+    await act(async () => {
+      setInput(host!.querySelector('[data-testid="pat-name-input"]')!, 'BadDays')
+      setInput(host!.querySelector('[data-testid="pat-days-input"]')!, '0')
+    })
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-testid="pat-create-btn"]')!.click())
+    expect(createSpy).not.toHaveBeenCalled()
+    expect(host!.querySelector('[role="alert"]')?.textContent).toContain('1 至 3650')
+    await act(async () => {
+      setInput(host!.querySelector('[data-testid="pat-days-input"]')!, '')
+    })
+
     await act(async () => {
       setInput(host!.querySelector('[data-testid="pat-name-input"]')!, 'Cursor')
     })
@@ -199,6 +213,7 @@ describe('Wave 2 前端差异化新功能回归', () => {
 
     await act(async () => host!.querySelector<HTMLButtonElement>('[data-testid="pat-revoke-tok1"]')!.click())
     expect(revokeSpy).toHaveBeenCalledWith('tok1')
+    expect(host!.querySelector('[data-testid="pat-revealed-box"]')).toBeNull()
   })
 
   it('SharedAssetsView：导入共享文献、跨项目推送与新建 LaTeX 片段', async () => {
@@ -319,6 +334,8 @@ describe('Wave 2 前端差异化新功能回归', () => {
     ]
     const remindSpy = vi.spyOn(deadlinesApi, 'remindCheck').mockResolvedValue({ checked: 2, due_soon: [], notified: 0 })
 
+    const dlSpy = vi.spyOn(downloadMod, 'downloadFile').mockResolvedValue('paper-deadlines.ics')
+
     await act(async () => {
       root!.render(
         <div>
@@ -339,7 +356,9 @@ describe('Wave 2 前端差异化新功能回归', () => {
 
     expect(host!.querySelector('[data-testid="deadline-pill-p-due"]')?.textContent).toContain('[ICML] 多智能体论文')
     expect(host!.querySelector('[data-testid="deadline-unscheduled"]')?.textContent).toContain('综述草稿')
-    expect(host!.querySelector('[data-testid="deadline-calendar-ics"]')?.getAttribute('href')).toBe('/api/deadlines/calendar.ics')
+    const icsBtn = host!.querySelector<HTMLButtonElement>('[data-testid="deadline-calendar-ics"]')!
+    await act(async () => icsBtn.click())
+    expect(dlSpy).toHaveBeenCalledWith('/api/deadlines/calendar.ics', 'paper-deadlines.ics')
 
     await act(async () => host!.querySelector<HTMLButtonElement>('[data-testid="deadline-remind-btn"]')!.click())
     expect(remindSpy).toHaveBeenCalled()
@@ -347,5 +366,35 @@ describe('Wave 2 前端差异化新功能回归', () => {
     const avatars = host!.querySelector('[data-testid="presence-avatars"]')!
     expect(avatars.querySelector('[data-testid="presence-peer-c1"]')?.getAttribute('title')).toContain('张三（我） · main.tex:10')
     expect(avatars.textContent).toContain('+1')
+  })
+
+  it('deadlinesApi 与 presenceApi 实际请求路径带 /api 前缀', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof Request ? input.url : input.toString()
+      if (url.endsWith('/presence') || url.includes('/presence?')) {
+        return new Response(JSON.stringify({ peers: [], ttl_sec: 35 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ items: [], today: '2026-11-27', checked: 0, due_soon: [], notified: 0 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    })
+
+    await deadlinesApi.list()
+    await deadlinesApi.remindCheck()
+    await presenceApi.heartbeat('p1', { client_id: 'c1', mode: 'latex' })
+    await presenceApi.list('p1')
+    await presenceApi.leave('p1', 'c1')
+
+    const urls = fetchSpy.mock.calls.map(([input]) =>
+      typeof input === 'string' ? input : input instanceof Request ? input.url : input.toString(),
+    )
+    expect(urls).toEqual([
+      '/api/deadlines',
+      '/api/deadlines/remind-check',
+      '/api/projects/p1/presence',
+      '/api/projects/p1/presence',
+      '/api/projects/p1/presence?client_id=c1',
+    ])
   })
 })

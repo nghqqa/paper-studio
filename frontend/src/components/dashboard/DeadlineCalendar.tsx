@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { BellRing, CalendarDays, ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { deadlinesApi } from '@/lib/api/deadlines'
+import { downloadFile } from '@/lib/download'
 import { projectHash } from '@/lib/hash'
 import type { ProjectSummary } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -18,6 +19,7 @@ export function DeadlineCalendar({ projects }: { projects: ProjectSummary[] }) {
   const now = useMemo(() => new Date(), [])
   const [cursor, setCursor] = useState(() => ({ year: now.getFullYear(), month: now.getMonth() }))
   const [reminding, setReminding] = useState(false)
+  const [exporting, setExporting] = useState(false)
 
   const scheduled = useMemo(() => {
     const byDay = new Map<string, ProjectSummary[]>()
@@ -74,6 +76,18 @@ export function DeadlineCalendar({ projects }: { projects: ProjectSummary[] }) {
     }
   }
 
+  const handleExportIcs = async () => {
+    if (exporting) return
+    setExporting(true)
+    try {
+      await downloadFile(deadlinesApi.icsUrl(), 'paper-deadlines.ics')
+    } catch (e) {
+      useStudio.getState().toast(e instanceof Error ? e.message : String(e), 'error')
+    } finally {
+      setExporting(false)
+    }
+  }
+
   return (
     <div className="space-y-4 px-6 py-4" data-testid="deadline-calendar">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -110,15 +124,16 @@ export function DeadlineCalendar({ projects }: { projects: ProjectSummary[] }) {
             <BellRing aria-hidden className="size-3.5" />
             {reminding ? '检查中…' : '检查截稿提醒'}
           </Button>
-          <a
-            href={deadlinesApi.icsUrl()}
-            className="inline-flex h-7 items-center gap-1.5 rounded border border-border bg-panel px-2.5 text-xs text-fg hover:bg-hover"
-            download="paper-deadlines.ics"
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={exporting}
+            onClick={() => void handleExportIcs()}
             data-testid="deadline-calendar-ics"
           >
             <Download aria-hidden className="size-3.5" />
-            导出 .ics 订阅日历
-          </a>
+            {exporting ? '导出中…' : '导出 .ics 订阅日历'}
+          </Button>
         </div>
       </div>
 

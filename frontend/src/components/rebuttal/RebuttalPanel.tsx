@@ -107,8 +107,8 @@ export function RebuttalPanel({
             activeFile={activeFile}
             cursorLine={cursorLine}
             aiEnabled={rb.aiEnabled}
-            aiBusy={rb.aiBusy}
-            streamingDraft={rb.streamingDraft}
+            aiBusy={rb.aiBusy && rb.draftItemId === rb.selected.id}
+            streamingDraft={rb.draftItemId === rb.selected.id ? rb.streamingDraft : null}
             dirty={rb.dirty}
             saving={rb.saving}
             onBack={() => rb.setActiveId(null)}

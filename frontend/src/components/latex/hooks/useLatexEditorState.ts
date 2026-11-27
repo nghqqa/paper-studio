@@ -41,6 +41,7 @@ export function useLatexEditorState({
   citeDataRef,
   glossaryRef,
   contentIndex,
+  indexStamp = 0,
   onSearchOpen,
   onLocateFlash,
   onProposeFixFromDiag,
@@ -57,6 +58,7 @@ export function useLatexEditorState({
   citeDataRef: MutableRefObject<{ cites: CiteCandidate[] }>
   glossaryRef?: MutableRefObject<GlossaryEntry[]>
   contentIndex: ProjectContentIndex
+  indexStamp?: number
   onSearchOpen: () => void
   onLocateFlash: (msg: string) => void
   onProposeFixFromDiag?: (diag: LatexDiagnostic) => void
@@ -286,7 +288,7 @@ export function useLatexEditorState({
     if (!doc || !main) return null
     return computeWholeDocStats(main, contentIndex, active, doc.toString())
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [st, active, main, activeRev, files])
+  }, [st, active, main, activeRev, files, indexStamp])
 
   const outlineItems = useMemo(() => {
     const doc = activeRev > 0 ? (viewRef.current?.state.doc ?? st?.doc) : st?.doc
@@ -314,7 +316,7 @@ export function useLatexEditorState({
     }
     return out
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [st, active, main, activeRev, files])
+  }, [st, active, main, activeRev, files, indexStamp])
 
   return {
     viewRef,

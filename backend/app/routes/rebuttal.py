@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ValidationError
 
 from app import auth, config
+from app.ai import client as ai_client
 from app.domain import rebuttal as rb
 from app.domain import user_ai
 from app.domain.org import require_org_ai
@@ -193,21 +194,23 @@ async def rebuttal_draft_stream(
     else:
         ai_cli, _ = user_ai.resolve_ai_client(user)
     try:
-        project_dir, messages = rb.prepare_draft_context(store, pid, item_id, body.context)
+        project_dir, messages, expected_round = rb.prepare_draft_context_with_round(store, pid, item_id, body.context)
     except rb.RebuttalError as e:
         raise HTTPException(e.status, error_detail(e.kind, str(e), detail=UNIT))
+
+    try:
+        try:
+            res = await ai_cli.chat(messages, "interactive", stream=True, project_dir=project_dir)
+        except TypeError:
+            res = await ai_cli.chat(messages, "interactive", project_dir=project_dir)
+    except ai_client.AiError as e:
+        raise HTTPException(e.status or 502, error_detail(f"ai_{e.kind}", str(e), detail=UNIT))
 
     def _ev(name: str, data: dict) -> str:
         return f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
     async def event_iter():
-        from app.ai import client as ai_client
-
         try:
-            try:
-                res = await ai_cli.chat(messages, "interactive", stream=True, project_dir=project_dir)
-            except TypeError:
-                res = await ai_cli.chat(messages, "interactive", project_dir=project_dir)
             parts: list[str] = []
             if hasattr(res, "__aiter__"):
                 async for chunk in res:
@@ -221,10 +224,22 @@ async def rebuttal_draft_stream(
                 if full_text:
                     yield _ev("delta", {"text": full_text})
             resp, summ, warnings = rb._parse_draft_response(full_text)
-            item = rb.save_draft_result(project_dir, item_id, resp, summ)
+            item = rb.save_draft_result(project_dir, item_id, resp, summ, expected_round=expected_round)
             yield _ev("done", {"item": item, "warnings": warnings})
         except (ai_client.AiError, rb.RebuttalError) as e:
             yield _ev("error", {"message": str(e)})
+        except HTTPException as e:
+            detail = e.detail if isinstance(e.detail, dict) else {}
+            yield _ev("error", {"message": str(detail.get("message") or e.detail or "生成失败")})
+        except Exception as e:  # noqa: BLE001
+            yield _ev("error", {"message": str(e)})
+        finally:
+            aclose = getattr(res, "aclose", None)
+            if aclose is not None:
+                try:
+                    await aclose()
+                except Exception:  # noqa: BLE001
+                    pass
 
     return StreamingResponse(
         event_iter(),

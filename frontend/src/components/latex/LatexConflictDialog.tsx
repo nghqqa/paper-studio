@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -19,7 +19,7 @@ export function LatexConflictDialog({
   localContent: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onMerged: (mergedContent: string, newSha: string) => void
+  onMerged: (file: string, mergedContent: string, newSha: string) => void
 }) {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -27,31 +27,44 @@ export function LatexConflictDialog({
   const [serverContent, setServerContent] = useState('')
   const [serverSha, setServerSha] = useState('')
   const [merged, setMerged] = useState('')
+  const reqSeqRef = useRef(0)
+  const initKeyRef = useRef<string | null>(null)
+  const localRef = useRef(localContent)
+  localRef.current = localContent
 
-  useEffect(() => {
-    if (!open || !file) return
-    let alive = true
+  const loadServer = useCallback(async () => {
+    if (!file) return
+    const seq = ++reqSeqRef.current
     setLoading(true)
     setError('')
-    void latexApi
-      .read(pid, file)
-      .then((res) => {
-        if (!alive) return
-        setServerContent(res.content)
-        setServerSha(res.sha)
-        setMerged(localContent)
-      })
-      .catch((e: unknown) => {
-        if (!alive) return
-        setError(e instanceof Error ? e.message : String(e))
-      })
-      .finally(() => {
-        if (alive) setLoading(false)
-      })
-    return () => {
-      alive = false
+    setServerContent('')
+    setServerSha('')
+    try {
+      const res = await latexApi.read(pid, file)
+      if (reqSeqRef.current !== seq) return
+      setServerContent(res.content)
+      setServerSha(res.sha)
+    } catch (e: unknown) {
+      if (reqSeqRef.current !== seq) return
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (reqSeqRef.current === seq) setLoading(false)
     }
-  }, [open, pid, file, localContent])
+  }, [pid, file])
+
+  useEffect(() => {
+    if (!open || !file) {
+      initKeyRef.current = null
+      reqSeqRef.current += 1
+      return
+    }
+    const key = `${pid}:${file}`
+    if (initKeyRef.current !== key) {
+      initKeyRef.current = key
+      setMerged(localRef.current)
+    }
+    void loadServer()
+  }, [open, pid, file, loadServer])
 
   const diffParts = useMemo(
     () => (loading ? [] : computeDiff(serverContent, localContent)),
@@ -64,7 +77,7 @@ export function LatexConflictDialog({
     setError('')
     try {
       const reply = await latexApi.save(pid, file, merged, serverSha)
-      onMerged(merged, reply.sha)
+      onMerged(file, merged, reply.sha)
       onOpenChange(false)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e))
@@ -102,6 +115,9 @@ export function LatexConflictDialog({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="font-medium text-fg-strong">合并结果（可直接编辑）：</span>
+              <Button type="button" size="xs" variant="outline" disabled={loading || saving} onClick={() => void loadServer()}>
+                重新读取服务器版本
+              </Button>
               <Button type="button" size="xs" variant="outline" onClick={() => setMerged(serverContent)}>
                 填入服务器版本
               </Button>

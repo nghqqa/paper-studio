@@ -61,8 +61,11 @@ export function useLatexSession({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsBusy, setSettingsBusy] = useState(false)
   const [configStamp, setConfigStamp] = useState(0)
+  const [indexStamp, setIndexStamp] = useState(0)
   const [libraryStamp, setLibraryStamp] = useState(0)
   const [glossaryStamp, setGlossaryStamp] = useState(0)
+  const openTabsRef = useRef(openTabs)
+  openTabsRef.current = openTabs
   const draftWriteTimer = useRef<number | undefined>(undefined)
 
   const draftStore = useMemo((): DraftStore => {
@@ -90,9 +93,12 @@ export function useLatexSession({
 
   const refreshIndex = useCallback(() => {
     contentIndex.invalidate()
-    void contentIndex.ensure().catch(() => {
-      /* 索引失败静默：搜索/补全降级为空，不影响编辑 */
-    })
+    void contentIndex
+      .ensure()
+      .then(() => setIndexStamp((n) => n + 1))
+      .catch(() => {
+        /* 索引失败静默：搜索/补全降级为空，不影响编辑 */
+      })
   }, [contentIndex])
 
   const citeDataRef = useRef<{ cites: CiteCandidate[] }>({ cites: [] })
@@ -299,23 +305,37 @@ export function useLatexSession({
     [active, ctrl, openFile],
   )
 
+  useEffect(() => {
+    if (!files.length) return
+    const valid = new Set(files.filter((f) => f.editable).map((f) => f.path))
+    setOpenTabs((prev) => {
+      const next = prev.filter((p) => valid.has(p))
+      if (next.length === prev.length) return prev
+      try {
+        window.sessionStorage.setItem(`paper-latex-tabs:${pid}`, JSON.stringify(next))
+      } catch {
+        /* ignore */
+      }
+      return next
+    })
+  }, [files, pid])
+
   const closeTab = useCallback(
     (rel: string) => {
       if (rel === active && ctrl.isDirty() && !window.confirm('当前文件有未保存修改，放弃并关闭？')) return
-      setOpenTabs((prev) => {
-        const idx = prev.indexOf(rel)
-        const next = prev.filter((x) => x !== rel)
-        try {
-          window.sessionStorage.setItem(`paper-latex-tabs:${pid}`, JSON.stringify(next))
-        } catch {
-          /* ignore */
-        }
-        if (rel === active && next.length > 0) {
-          const fallback = next[Math.min(idx, next.length - 1)]
-          void openFile(fallback)
-        }
-        return next
-      })
+      const prev = openTabsRef.current
+      const idx = prev.indexOf(rel)
+      const next = prev.filter((x) => x !== rel)
+      setOpenTabs(next)
+      try {
+        window.sessionStorage.setItem(`paper-latex-tabs:${pid}`, JSON.stringify(next))
+      } catch {
+        /* ignore */
+      }
+      if (rel === active && next.length > 0) {
+        const fallback = next[Math.min(Math.max(0, idx), next.length - 1)]
+        void openFile(fallback)
+      }
     },
     [active, ctrl, openFile, pid],
   )
@@ -476,15 +496,15 @@ export function useLatexSession({
   }, [active, ctrl, draftStore, openFile, pid, userScope])
 
   const applyMergedConflict = useCallback(
-    (mergedContent: string, newSha: string) => {
-      if (!active) return
-      ctrl.open(active, mergedContent, newSha)
-      draftStore.removeDraft(userScope, pid, active)
+    (targetFile: string, mergedContent: string, newSha: string) => {
+      if (!targetFile || ctrl.getPath() !== targetFile) return
+      ctrl.open(targetFile, mergedContent, newSha)
+      draftStore.removeDraft(userScope, pid, targetFile)
       setDraftRestored(false)
       setReloadTick((t) => t + 1)
       refreshIndex()
     },
-    [active, ctrl, draftStore, pid, refreshIndex, userScope],
+    [ctrl, draftStore, pid, refreshIndex, userScope],
   )
 
   // 当显式保存成功（draftPaused 解除），草稿恢复状态自然失效
@@ -514,6 +534,7 @@ export function useLatexSession({
     settingsOpen,
     setSettingsOpen,
     configStamp,
+    indexStamp,
     contentIndex,
     citeDataRef,
     glossaryRef,

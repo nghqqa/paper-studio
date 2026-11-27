@@ -347,7 +347,7 @@ export function makeGlossarySource(glossaryRef: MutableRefObject<GlossaryEntry[]
   return (ctx: CompletionContext): CompletionResult | null => {
     const entries = glossaryRef.current
     if (!entries.length) return null
-    const m = ctx.matchBefore(/(?:\\[A-Za-z@]+|[A-Za-z0-9_-]{2,})$/)
+    const m = ctx.matchBefore(/(?:\\[A-Za-z@]+(?:\{[A-Za-z0-9_]*\}?)?|[\u4e00-\u9fff]{1,}|[A-Za-z0-9_-]{2,})$/)
     if (!m) return null
     const typed = m.text.toLowerCase()
     const opts = entries
@@ -761,48 +761,78 @@ export function latexHoverTooltipExtension({
       }
     }
 
-    // 4) 项目术语表 / 符号 / 弃用别名悬停提示
+    // 4) 项目术语表 / 符号 / 弃用别名悬停提示（支持中文、多词短语与带花括号 LaTeX 命令）
     const gEntries = glossaryRef?.current ?? []
     if (gEntries.length > 0) {
-      const tokRe = /\\[A-Za-z@]+|\b[A-Za-z0-9_-]{2,}\b/g
-      let tm: RegExpExecArray | null
-      while ((tm = tokRe.exec(text)) !== null) {
-        if (col >= tm.index && col <= tm.index + tm[0].length) {
-          const tok = tm[0]
-          const low = tok.toLowerCase()
-          const hit = gEntries.find(
-            (e) =>
-              e.term.toLowerCase() === low ||
-              e.symbol.toLowerCase() === low ||
-              e.aliases.some((a) => a.toLowerCase() === low),
-          )
-          if (hit) {
-            const isDeprecated = hit.aliases.some((a) => a.toLowerCase() === low)
-            const spanStart = lineObj.from + tm.index
-            const spanEnd = spanStart + tok.length
-            return {
-              pos: spanStart,
-              end: spanEnd,
-              above: true,
-              create() {
-                const dom = document.createElement('div')
-                dom.className = 'cm-latex-tooltip'
-                const title = document.createElement('div')
-                title.className = 'cm-latex-tooltip-title'
-                title.textContent = isDeprecated
-                  ? `弃用别名「${tok}」→ 建议「${hit.term}」`
-                  : `${hit.term}${hit.symbol && hit.symbol !== hit.term ? ` (${hit.symbol})` : ''}`
-                dom.appendChild(title)
-                if (hit.definition) {
-                  const p = document.createElement('p')
-                  p.className = 'cm-latex-tooltip-meta'
-                  p.textContent = hit.definition
-                  dom.appendChild(p)
-                }
-                return { dom }
-              },
+      const textLow = text.toLowerCase()
+      const isAsciiWord = (ch: string | undefined) => Boolean(ch && /[A-Za-z0-9_]/.test(ch))
+      let best: {
+        entry: GlossaryEntry
+        tok: string
+        isDeprecated: boolean
+        start: number
+        end: number
+      } | null = null
+      for (const e of gEntries) {
+        const candidates: Array<{ needle: string; isDeprecated: boolean }> = []
+        for (const a of e.aliases) {
+          const s = a.trim()
+          if (s) candidates.push({ needle: s, isDeprecated: true })
+        }
+        for (const raw of [e.term, e.symbol]) {
+          const s = raw.trim()
+          if (s) candidates.push({ needle: s, isDeprecated: false })
+        }
+        for (const cand of candidates) {
+          const { needle, isDeprecated } = cand
+          const caseSensitive = e.category === 'notation' || needle.startsWith('\\')
+          const hay = caseSensitive ? text : textLow
+          const sub = caseSensitive ? needle : needle.toLowerCase()
+          const checkLeft = isAsciiWord(needle[0])
+          const checkRight = isAsciiWord(needle[needle.length - 1])
+          let idx = 0
+          while ((idx = hay.indexOf(sub, idx)) !== -1) {
+            const end = idx + needle.length
+            const leftOk = !checkLeft || (idx === 0 || (!isAsciiWord(text[idx - 1]) && text[idx - 1] !== '\\'))
+            const rightOk = !checkRight || !isAsciiWord(text[end])
+            if (leftOk && rightOk && col >= idx && col <= end) {
+              if (
+                !best ||
+                needle.length > best.tok.length ||
+                (needle.length === best.tok.length && isDeprecated && !best.isDeprecated)
+              ) {
+                best = { entry: e, tok: text.slice(idx, end), isDeprecated, start: idx, end }
+              }
             }
+            idx += 1
           }
+        }
+      }
+      if (best) {
+        const { entry: hit, tok, isDeprecated, start, end } = best
+        const spanStart = lineObj.from + start
+        const spanEnd = lineObj.from + end
+        return {
+          pos: spanStart,
+          end: spanEnd,
+          above: true,
+          create() {
+            const dom = document.createElement('div')
+            dom.className = 'cm-latex-tooltip'
+            const title = document.createElement('div')
+            title.className = 'cm-latex-tooltip-title'
+            title.textContent = isDeprecated
+              ? `弃用别名「${tok}」→ 建议「${hit.term}」`
+              : `${hit.term}${hit.symbol && hit.symbol !== hit.term ? ` (${hit.symbol})` : ''}`
+            dom.appendChild(title)
+            if (hit.definition) {
+              const p = document.createElement('p')
+              p.className = 'cm-latex-tooltip-meta'
+              p.textContent = hit.definition
+              dom.appendChild(p)
+            }
+            return { dom }
+          },
         }
       }
     }

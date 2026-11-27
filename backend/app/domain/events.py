@@ -70,6 +70,7 @@ EventKind = Literal[
     "auth.login",
     "member.changed",
     "admin.user",
+    "admin.backup_exported",
     "template.created",
     "template.removed",
     "template.restored",

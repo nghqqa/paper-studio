@@ -174,22 +174,37 @@ def list_shared_library(uid: str | None) -> list[dict]:
         return _read_list(_lib_path(uid), "items")
 
 
+def _safe_citation_key(raw_key: str, *, title: str, authors: list[str], year: str | None) -> str:
+    clean = raw_key.strip()[:120]
+    if clean and library.KEY_RE.match(clean):
+        return clean
+    tmp_ent = library.LibraryEntry(
+        reference_id="tmp",
+        citation_key="tmp",
+        title=title,
+        authors=authors,
+        year=year,
+    )
+    cand = library.suggested_key(tmp_ent)
+    ascii_cand = re.sub(r"[^A-Za-z0-9_:.+/#-]", "", cand)[:120]
+    if ascii_cand and library.KEY_RE.match(ascii_cand):
+        return ascii_cand
+    y = re.sub(r"[^0-9]", "", str(year or ""))[:8]
+    return f"ref{y}_{uuid.uuid4().hex[:6]}"
+
+
 def _norm_lib_item(raw: dict) -> dict:
     title = str(raw.get("title") or "").strip()[:500]
-    ckey = str(raw.get("citation_key") or "").strip()[:120]
-    if not ckey:
-        ckey = library.suggested_key(
-            {"title": title, "authors": raw.get("authors") or [], "year": raw.get("year")},
-            existing=set(),
-        )
     authors = [str(a).strip() for a in (raw.get("authors") or []) if str(a).strip()][:30]
+    year = str(raw.get("year") or "").strip() or None
+    ckey = _safe_citation_key(str(raw.get("citation_key") or ""), title=title, authors=authors, year=year)
     return {
         "id": str(raw.get("id") or f"sref_{uuid.uuid4().hex[:10]}"),
         "citation_key": ckey,
         "entry_type": str(raw.get("entry_type") or "article").strip() or "article",
         "title": title,
         "authors": authors,
-        "year": str(raw.get("year") or "").strip() or None,
+        "year": year,
         "venue": str(raw.get("venue") or "").strip() or None,
         "doi": str(raw.get("doi") or "").strip() or None,
         "arxiv_id": str(raw.get("arxiv_id") or "").strip() or None,
@@ -279,6 +294,25 @@ def upsert_snippet(uid: str | None, payload: dict) -> tuple[dict, list[dict]]:
             cur.insert(0, saved)
         _write_list(p, "items", cur)
         return saved, cur
+
+
+def update_snippet(uid: str | None, sid: str, payload: dict) -> tuple[dict | None, list[dict]]:
+    title = str(payload.get("title") or "").strip()[:80]
+    code = str(payload.get("code") or "")
+    if not title or not code.strip():
+        raise kind_error("validation", "片段标题与 LaTeX 代码均不能为空")
+    cat = str(payload.get("category") or "常用").strip()[:32] or "常用"
+    desc = str(payload.get("description") or "").strip()[:240]
+
+    with atomic.studio_lock(config.PROJECTS_DIR, _lock_name(uid)):
+        p = _snp_path(uid)
+        cur = _read_list(p, "items") if os.path.isfile(p) else [{**s, "builtin": True, "updated_at": time.time()} for s in DEFAULT_SNIPPETS]
+        hit = next((x for x in cur if x.get("id") == sid), None)
+        if hit is None:
+            return None, cur
+        hit.update(title=title, category=cat, description=desc, code=code, updated_at=time.time())
+        _write_list(p, "items", cur)
+        return dict(hit), cur
 
 
 def delete_snippet(uid: str | None, sid: str) -> tuple[bool, list[dict]]:

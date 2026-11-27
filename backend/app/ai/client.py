@@ -342,9 +342,17 @@ def read_usage(project_dir: str) -> list[dict]:
 class ChatStream:
     """chat(stream=True) 的返回：逐 delta 迭代；流正常结束后 .result 可读（模型 / usage / fallback / 拼接全文）。"""
 
-    def __init__(self, agen):
+    def __init__(self, agen, result_box: list[ChatResult | None] | None = None):
         self._agen = agen
-        self.result: ChatResult | None = None
+        self._result_box = result_box if result_box is not None else [None]
+
+    @property
+    def result(self) -> ChatResult | None:
+        return self._result_box[0]
+
+    @result.setter
+    def result(self, value: ChatResult | None) -> None:
+        self._result_box[0] = value
 
     def __aiter__(self):
         return self
@@ -353,7 +361,8 @@ class ChatStream:
         return await self._agen.__anext__()
 
     async def aclose(self):
-        await self._agen.aclose()
+        if self._agen is not None:
+            await self._agen.aclose()
 
 
 class AiClient:
@@ -410,9 +419,9 @@ class AiClient:
         if not self.key_present:
             raise AiError("no_key", "未配置 PATENT_STUDIO_AI_KEY，无法调用 AI 中转站", 503)
         if stream:
-            cs = ChatStream(None)
-            cs._agen = self._stream(cs, messages, purpose, project_dir, max_tokens, temperature, job_id, user)
-            return cs
+            result_box: list[ChatResult | None] = [None]
+            agen = self._stream(result_box, messages, purpose, project_dir, max_tokens, temperature, job_id, user)
+            return ChatStream(agen, result_box)
         return await self._complete(messages, purpose, project_dir, max_tokens, temperature, job_id, user)
 
     def _meta(self, messages, purpose, project_dir, stream, job_id, user):
@@ -467,7 +476,17 @@ class AiClient:
             assert last is not None
             raise last
 
-    async def _stream(self, cs: ChatStream, messages, purpose, project_dir, max_tokens, temperature, job_id, user):
+    async def _stream(
+        self,
+        result_box: list[ChatResult | None],
+        messages,
+        purpose,
+        project_dir,
+        max_tokens,
+        temperature,
+        job_id,
+        user,
+    ):
         meta = self._meta(messages, purpose, project_dir, True, job_id, user)
         timeout = TIMEOUTS[purpose]
         async with _SEM:
@@ -515,7 +534,7 @@ class AiClient:
                 ms = int((time.monotonic() - t0) * 1000)
                 self.last_usage = usage
                 self._record(project_dir, model=model, fallback=fallback, usage=usage, ms=ms, ok=True, **meta)
-                cs.result = ChatResult(text="".join(parts), model=model, usage=usage, ms=ms, fallback=fallback)
+                result_box[0] = ChatResult(text="".join(parts), model=model, usage=usage, ms=ms, fallback=fallback)
                 return
             assert last is not None
             raise last

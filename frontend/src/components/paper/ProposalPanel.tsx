@@ -132,7 +132,10 @@ export function ProposalPanel({
           setWritingFocus((v) => v + 1)
         }}
         onGenerate={(a) => void act.generate(a, undefined, useSection, { useGlossary, citeKeys })}
-        onClearReading={() => act.setReading(null)}
+        onClearReading={() => {
+          act.cancelReading()
+          act.setReading(null)
+        }}
       />
 
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-line bg-panel px-2.5 py-1 text-2xs text-fg-muted">
@@ -141,7 +144,7 @@ export function ProposalPanel({
             type="checkbox"
             className="accent-primary"
             checked={useGlossary}
-            disabled={act.busy}
+            disabled={act.busy || act.readingBusy}
             onChange={(e) => setUseGlossary(e.target.checked)}
             data-testid="proposal-use-glossary"
           />
@@ -281,7 +284,7 @@ export function ProposalPanel({
             <Button
               size="xs"
               className="ml-auto"
-              disabled={act.busy || !canEdit || act.batchSel.size === 0}
+              disabled={act.busy || act.readingBusy || !canEdit || act.batchSel.size === 0}
               onClick={() => void act.doBatch(pending)}
               data-testid="proposal-batch"
             >
@@ -297,7 +300,7 @@ export function ProposalPanel({
               expanded={act.expanded === p.proposal_id}
               onToggle={() => act.setExpanded(act.expanded === p.proposal_id ? null : p.proposal_id)}
               canEdit={canEdit}
-              busy={act.busy}
+              busy={act.busy || act.readingBusy}
               acked={act.protectedAck.has(p.proposal_id)}
               onAck={() => act.setProtectedAck((prev) => new Set(prev).add(p.proposal_id))}
               batchChecked={act.batchSel.has(p.proposal_id)}
@@ -348,7 +351,7 @@ export function ProposalPanel({
       </div>
 
       <InstructionBar
-        busy={act.busy}
+        busy={act.busy || act.readingBusy}
         canEdit={canEdit}
         mode={bottomMode}
         onMode={setBottomMode}
@@ -363,7 +366,7 @@ export function ProposalPanel({
                 type="checkbox"
                 className="accent-primary"
                 checked={useSection}
-                disabled={act.busy}
+                disabled={act.busy || act.readingBusy}
                 onChange={(e) => setUseSection(e.target.checked)}
                 data-testid="proposal-gen-section"
               />

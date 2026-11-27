@@ -571,6 +571,8 @@ def append_single_item(
     safe_cids = [str(cid).strip() for cid in (comment_ids or []) if _COMMENT_ID_RE.match(str(cid).strip())]
     with atomic.studio_lock(project_dir, "rebuttal"):
         st = load_state(project_dir)
+        if len(st["items"]) >= MAX_ITEMS:
+            raise RebuttalError(f"当前轮审稿意见已达上限（{MAX_ITEMS} 条），请先开启新一轮", status=409, kind="conflict")
         st["round"] = max(int(st.get("round") or 0), 1)
         nxt = _next_seq(st["items"])
         item = _norm_item(
@@ -585,7 +587,7 @@ def append_single_item(
                 "comment_ids": safe_cids,
             }
         )
-        st["items"] = (st["items"] + [item])[:MAX_ITEMS]
+        st["items"] = [*st["items"], item]
         st["updated_at"] = _now()
         _write(project_dir, st)
     return item
@@ -639,26 +641,42 @@ def _parse_draft_response(raw_text: str) -> tuple[str, str, list[str]]:
     return resp, summ, warnings
 
 
-def prepare_draft_context(store, pid: str, item_id: str, context: str | None = None) -> tuple[str, list[dict]]:
+def prepare_draft_context_with_round(
+    store, pid: str, item_id: str, context: str | None = None
+) -> tuple[str, list[dict], int]:
     project = store.get(pid)
     d = project.dir
     with atomic.studio_lock(d, "rebuttal"):
         st = load_state(d)
         it = _find(st, item_id)
+        expected_round = int(st.get("round") or 0)
         snap = {
             "reviewer": it["reviewer"],
             "category": it["category"],
             "text": it["text"],
             "location": it.get("location"),
         }
-    return d, _draft_messages(project.title, snap, context)
+    return d, _draft_messages(project.title, snap, context), expected_round
 
 
-def save_draft_result(d: str, item_id: str, resp: str, summ: str) -> dict:
+def prepare_draft_context(store, pid: str, item_id: str, context: str | None = None) -> tuple[str, list[dict]]:
+    d, messages, _round = prepare_draft_context_with_round(store, pid, item_id, context)
+    return d, messages
+
+
+def save_draft_result(
+    d: str, item_id: str, resp: str, summ: str, *, expected_round: int | None = None
+) -> dict:
+    clean_resp = _clip(resp, "response").strip()
+    if not clean_resp:
+        raise RebuttalError("AI 未返回有效的回复正文", status=502, kind="ai")
+    clean_summ = _clip(summ, "edits_summary").strip()
     with atomic.studio_lock(d, "rebuttal"):
         st = load_state(d)
+        if expected_round is not None and int(st.get("round") or 0) != expected_round:
+            raise RebuttalError("审稿意见轮次已切换，请重新生成草稿", status=409, kind="conflict")
         it = _find(st, item_id)
-        it["ai_draft"] = {"response_draft": resp, "edits_summary_draft": summ, "created_at": _now()}
+        it["ai_draft"] = {"response_draft": clean_resp, "edits_summary_draft": clean_summ, "created_at": _now()}
         it["updated_at"] = _now()
         st["updated_at"] = _now()
         _write(d, st)
@@ -668,17 +686,17 @@ def save_draft_result(d: str, item_id: str, resp: str, summ: str) -> dict:
 async def generate_draft(store, pid: str, ai, item_id: str, context: str | None = None) -> tuple[dict, list[str]]:
     """AI 起草单条回复建议 → (条目, warnings)。
 
-    锁内读条目快照 → 锁外 await ai.chat（等待上游不持项目写锁）→ 重新加锁复核条目仍存在
-    （并发 replace 可能已删条 ⇒ 409）→ 写 ai_draft。
+    锁内读条目快照 → 锁外 await ai.chat（等待上游不持项目写锁）→ 重新加锁复核条目与轮次一致
+    （并发 replace 可能已删条或切轮 ⇒ 409）→ 写 ai_draft。
     只写 ai_draft——用户手写的 response / edits_summary 一律不动，稿件文件零接触。
     AiError → RebuttalError(kind="ai_<kind>", status=e.status)，路由层统一翻译。"""
-    d, messages = prepare_draft_context(store, pid, item_id, context)
+    d, messages, expected_round = prepare_draft_context_with_round(store, pid, item_id, context)
     try:
         r = await ai.chat(messages, "interactive", project_dir=d)
         resp, summ, warnings = _parse_draft_response(r.text)
     except ai_client.AiError as e:
         raise RebuttalError(str(e), status=e.status, kind=f"ai_{e.kind}") from e
-    it = save_draft_result(d, item_id, resp, summ)
+    it = save_draft_result(d, item_id, resp, summ, expected_round=expected_round)
     return it, warnings
 
 
@@ -830,8 +848,10 @@ _TEX_RE = re.compile("|".join(re.escape(k) for k in _TEX_ESCAPES))
 
 def _tex_escape(text: str) -> str:
     # 单遍正则替换，避免 \textbackslash{} 里的 {} 被后续规则二次转义成 \{\}
-    escaped = _TEX_RE.sub(lambda m: _TEX_ESCAPES[m.group(0)], text)
-    return escaped.replace("\r\n", "\n").replace("\n", "\\\\ ")
+    norm = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip("\n")
+    escaped = _TEX_RE.sub(lambda m: _TEX_ESCAPES[m.group(0)], norm)
+    paras = re.split(r"\n{2,}", escaped)
+    return "\n\n".join(p.replace("\n", r"\\\relax ") for p in paras)
 
 
 def _export_tex(project: dict, items: list[dict], round_no: int = 1) -> str:

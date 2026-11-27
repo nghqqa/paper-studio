@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import { LibraryPanel } from '@/components/paper/LibraryPanel'
 import { ProposalPanel } from '@/components/paper/ProposalPanel'
@@ -65,9 +65,13 @@ export function LatexRightSidebar({
     }
   })
   const dragRef = useRef<{ startX: number; startW: number } | null>(null)
+  const dragCleanupRef = useRef<(() => void) | null>(null)
+
+  useEffect(() => () => { dragCleanupRef.current?.() }, [])
 
   const onResizeStart = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault()
+    dragCleanupRef.current?.()
     dragRef.current = { startX: e.clientX, startW: width }
     const onMove = (ev: PointerEvent) => {
       if (!dragRef.current) return
@@ -79,13 +83,17 @@ export function LatexRightSidebar({
         /* ignore */
       }
     }
-    const onUp = () => {
+    const cleanup = () => {
       dragRef.current = null
+      dragCleanupRef.current = null
       window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointerup', cleanup)
+      window.removeEventListener('pointercancel', cleanup)
     }
+    dragCleanupRef.current = cleanup
     window.addEventListener('pointermove', onMove)
-    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointerup', cleanup)
+    window.addEventListener('pointercancel', cleanup)
   }
 
   const jumpAcrossFiles = (file: string, line: number) => {

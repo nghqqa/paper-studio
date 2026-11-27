@@ -3,6 +3,7 @@ import { Check, Copy, ExternalLink, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { libraryApi, type LibraryEntry } from '@/lib/api/library'
+import { copyText } from '@/lib/download'
 
 export function LibraryPdfDialog({
   open,
@@ -26,6 +27,8 @@ export function LibraryPdfDialog({
     let active = true
     setLoading(true)
     setErr('')
+    setText('')
+    setPages(entry.pdf?.pages ?? 0)
     libraryApi
       .entryPdfText(pid, entry.reference_id)
       .then((res) => {
@@ -42,17 +45,17 @@ export function LibraryPdfDialog({
     return () => {
       active = false
     }
-  }, [open, pid, entry.reference_id])
+  }, [open, pid, entry.reference_id, entry.pdf?.pages, entry.pdf?.uploaded_at])
 
-  const pdfUrl = libraryApi.entryPdfUrl(pid, entry.reference_id)
+  const pdfUrl = libraryApi.entryPdfUrl(pid, entry.reference_id, entry.pdf?.uploaded_at)
 
   const copyCite = async () => {
-    try {
-      await navigator.clipboard.writeText(`\\cite{${entry.citation_key}}`)
+    const ok = await copyText(`\\cite{${entry.citation_key}}`)
+    if (ok) {
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* ignore */
+    } else {
+      setErr('无法复制，请允许浏览器访问剪贴板后重试')
     }
   }
 
@@ -88,7 +91,13 @@ export function LibraryPdfDialog({
         </div>
         <div className="grid min-h-96 flex-1 grid-cols-1 gap-3 overflow-hidden md:grid-cols-2">
           <div className="min-h-80 overflow-hidden rounded border border-line bg-app">
-            <iframe src={pdfUrl} title={entry.title || entry.citation_key} className="h-full min-h-96 w-full border-0" />
+            {err ? (
+              <div className="flex h-full min-h-96 items-center justify-center p-4 text-center text-xs text-danger">
+                PDF 加载失败：{err}
+              </div>
+            ) : (
+              <iframe src={pdfUrl} title={entry.title || entry.citation_key} className="h-full min-h-96 w-full border-0" />
+            )}
           </div>
           <div className="flex min-h-80 flex-col overflow-hidden rounded border border-line bg-sunken p-2">
             <div className="mb-1 shrink-0 text-xs font-medium text-fg-strong">文字层全文摘录（前 12 页）</div>

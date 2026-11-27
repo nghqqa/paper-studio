@@ -62,6 +62,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (conflictMergeOpen) return
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'p') {
         e.preventDefault()
         setQuickOpen(true)
@@ -69,7 +70,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [])
+  }, [conflictMergeOpen])
 
   const wordExportRef = useRefPlaceholder<((rel: string, content: string) => void) | null>(null)
   const session = useLatexSession({
@@ -99,6 +100,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
     citeDataRef: session.citeDataRef,
     glossaryRef: session.glossaryRef,
     contentIndex: session.contentIndex,
+    indexStamp: session.indexStamp,
     onSearchOpen: () => setSearchSignal((t) => t + 1),
     onLocateFlash: (msg) => syncTexRef.current?.(msg),
     onProposeFixFromDiag: (d) => proposeFixRef.current?.(d),
@@ -112,6 +114,10 @@ export function LatexWorkbench({ pid }: { pid: string }) {
   const permLost = session.snap?.permLost ?? false
   const notice = session.snap?.notice ?? null
   const error = session.snap?.error ?? null
+
+  useEffect(() => {
+    if (!conflict || !session.active) setConflictMergeOpen(false)
+  }, [conflict, session.active])
 
   const syncTex = useLatexSyncTex({
     pid,
@@ -154,6 +160,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
     file: session.active,
     line: editor.cursorLine,
     mode: 'latex',
+    enabled: !permLost,
   })
 
   const pdfUrl = session.previewBuildId
@@ -368,7 +375,7 @@ export function LatexWorkbench({ pid }: { pid: string }) {
         onOpenChange={setQuickOpen}
         onPick={session.switchFile}
       />
-      {conflictMergeOpen && session.active && (
+      {conflict && conflictMergeOpen && session.active && (
         <LatexConflictDialog
           pid={pid}
           file={session.active}

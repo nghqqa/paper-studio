@@ -154,11 +154,25 @@ def test_charts_new_types_and_vision_from_image(env, monkeypatch):
         assert body["data_url"].startswith("data:image/png;base64,")
         assert body["width_px"] > 100 and body["height_px"] > 100
 
-    # Vision OCR 图表还原测试（mock 多模态模型返回值 + 非法扩展名拦截 422）
+    # Vision OCR 图表还原测试（mock 多模态模型返回值 + 非法扩展名/参数型 SVG/伪造头拦截 422）
     assert (
         owner.post(
             "/api/charts/from-image",
             files={"file": ("notes.txt", b"not-an-image", "text/plain")},
+        ).status_code
+        == 422
+    )
+    assert (
+        owner.post(
+            "/api/charts/from-image",
+            files={"file": ("vec.svg", b"<svg/>", "image/svg+xml; charset=utf-8")},
+        ).status_code
+        == 422
+    )
+    assert (
+        owner.post(
+            "/api/charts/from-image",
+            files={"file": ("fake.png", b"<svg>xss</svg>", "image/png")},
         ).status_code
         == 422
     )
@@ -171,11 +185,11 @@ def test_charts_new_types_and_vision_from_image(env, monkeypatch):
         text = json.dumps(
             {
                 "type": "radar",
-                "title": "Extracted Radar",
-                "x_label": "",
+                "title": None,
+                "x_label": None,
                 "y_label": "",
-                "categories": ["Precision", "Recall", "Speed"],
-                "series": [{"name": "ModelA", "values": [92.1, 88.4, 79.0]}],
+                "categories": [2022, 2023, 2024],
+                "series": [{"name": 2024, "values": [92.1, 88.4, 79.0]}],
             }
         )
         model = "m-vision"
@@ -194,7 +208,8 @@ def test_charts_new_types_and_vision_from_image(env, monkeypatch):
     assert rv.status_code == 200, rv.text
     out = rv.json()
     assert out["chart"]["type"] == "radar"
-    assert out["chart"]["categories"] == ["Precision", "Recall", "Speed"]
+    assert out["chart"]["title"] == ""
+    assert out["chart"]["categories"] == ["2022", "2023", "2024"]
     assert isinstance(captured[0][0][1]["content"], list)
     assert captured[0][0][1]["content"][1]["type"] == "image_url"
 
@@ -220,6 +235,8 @@ def test_oidc_sso_discovery_pkce_and_login(env, monkeypatch):
         def json(self):
             return self._payload
 
+    userinfo_box = [{"email": "sso.researcher@wave3.example.com", "email_verified": True, "name": "SSO Researcher"}]
+
     class _FakeHttp:
         def __init__(self, *args, **kwargs):
             pass
@@ -241,7 +258,7 @@ def test_oidc_sso_discovery_pkce_and_login(env, monkeypatch):
                     },
                 )
             if url == "https://sso.fake.example/userinfo":
-                return _FakeResp(200, {"email": "sso.researcher@wave3.example.com", "name": "SSO Researcher"})
+                return _FakeResp(200, userinfo_box[0])
             return _FakeResp(404, {})
 
         async def post(self, url, **kwargs):
@@ -256,9 +273,24 @@ def test_oidc_sso_discovery_pkce_and_login(env, monkeypatch):
     assert qs["code_challenge_method"] == ["S256"]
     state = qs["state"][0]
 
-    # 无效 state 拒绝 400
+    # 无效 state 或跨客户端无状态 Cookie (Login CSRF) 拒绝 400，且不破坏合法客户端的 state
     assert anon.get("/api/auth/oidc/callback?state=bad-state&code=c1", follow_redirects=False).status_code == 400
+    attacker = TestClient(env["app"])
+    assert attacker.get(f"/api/auth/oidc/callback?state={state}&code=c1", follow_redirects=False).status_code == 400
 
+    # email_verified=False / 缺失 / 仅 preferred_username 均被拒绝
+    for bad_uinfo, expect_code in (
+        ({"email": "bad1@wave3.example.com", "email_verified": False}, 403),
+        ({"email": "bad2@wave3.example.com"}, 403),
+        ({"preferred_username": "bad3@wave3.example.com", "email_verified": True}, 422),
+    ):
+        userinfo_box[0] = bad_uinfo
+        c_bad = TestClient(env["app"])
+        rl_b = c_bad.get("/api/auth/oidc/login", follow_redirects=False)
+        st_b = parse_qs(urlparse(rl_b.headers["location"]).query)["state"][0]
+        assert c_bad.get(f"/api/auth/oidc/callback?state={st_b}&code=good", follow_redirects=False).status_code == expect_code
+
+    userinfo_box[0] = {"email": "sso.researcher@wave3.example.com", "email_verified": True, "name": "SSO Researcher"}
     # 有效回调自动建号并签发 Cookie 会话，跳转 /#/
     r_cb = anon.get(f"/api/auth/oidc/callback?state={state}&code=good-code", follow_redirects=False)
     assert r_cb.status_code == 302, r_cb.text
@@ -277,9 +309,31 @@ def test_portable_project_archive_export_import_and_security(env):
     pid = r.json()["id"]
     assert owner.put(f"/api/projects/{pid}/members", json={"email": "viewer@wave3.example.com", "role": "viewer"}).status_code == 200
 
-    # 写入术语与回复信状态验证整档完整携带
+    # 写入术语、回复信、提案以及敏感文件验证整档白名单隔离与往返保留
     assert owner.post(f"/api/projects/{pid}/glossary", json={"term": "GraphSAGE", "category": "term"}).status_code == 200
     assert owner.post(f"/api/projects/{pid}/rebuttal/parse", json={"text": "Reviewer 1\nClarify dataset split."}).status_code == 200
+    proj_dir = env["projects"] / pid
+    (proj_dir / ".studio" / "git-remote.json").write_text('{"pat": "ghp_secret"}', encoding="utf-8")
+    (proj_dir / ".studio" / "public_access.jsonl").write_text('{"token": "pub_secret"}\n', encoding="utf-8")
+    pp_dir = proj_dir / ".studio" / "paper-proposals"
+    pp_dir.mkdir(parents=True, exist_ok=True)
+    (pp_dir / f"{pid}.jsonl").write_text(
+        json.dumps(
+            {
+                "proposal_id": "prop_arch_1",
+                "project_id": pid,
+                "mode": "latex",
+                "action": "polish",
+                "anchor": {"file": "main.tex", "base_sha": "abc", "original_text": "hi"},
+                "suggested_text": "hello",
+                "status": "pending",
+                "created_at": 1700000000,
+                "updated_at": 1700000000,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     # 协作禁下载开启后拒绝导出整档
     owner.put(f"/api/projects/{pid}/collab-settings", json={"allow_download": False})
@@ -292,21 +346,24 @@ def test_portable_project_archive_export_import_and_security(env):
         names = set(zf.namelist())
         assert {"manifest.json", "studio.json", ".studio/glossary.json", ".studio/rebuttal/state.json"}.issubset(names)
         assert not any(".studio/latex-builds" in n for n in names)
+        assert ".studio/git-remote.json" not in names
+        assert ".studio/public_access.jsonl" not in names
 
-    # Zip-Slip 恶意路径拦截 422
-    bad_buf = io.BytesIO()
-    with zipfile.ZipFile(bad_buf, "w") as zf:
-        zf.writestr("manifest.json", json.dumps({"schema": "paper-studio/archive@1"}))
-        zf.writestr("../../escaped.txt", "pwn")
-    assert (
-        owner.post(
-            "/api/projects/archive/import",
-            files={"file": ("bad.zip", bad_buf.getvalue(), "application/zip")},
-        ).status_code
-        == 422
-    )
+    # Zip-Slip 及恶意受限 .studio/* 路径拦截 422
+    for malicious_rel in ("../../escaped.txt", ".studio/history/config", ".studio/word/state.json"):
+        bad_buf = io.BytesIO()
+        with zipfile.ZipFile(bad_buf, "w") as zf:
+            zf.writestr("manifest.json", json.dumps({"schema": "paper-studio/archive@1"}))
+            zf.writestr(malicious_rel, "pwn")
+        assert (
+            owner.post(
+                "/api/projects/archive/import",
+                files={"file": ("bad.zip", bad_buf.getvalue(), "application/zip")},
+            ).status_code
+            == 422
+        )
 
-    # 导入为全新独立项目，原术语/回复信完整保留且导入者自动获得 owner 权限
+    # 导入为全新独立项目，原术语/回复信/提案完整保留且导入者自动获得 owner 权限
     imp = owner.post(
         "/api/projects/archive/import",
         files={"file": ("project.zip", arch.content, "application/zip")},
@@ -319,6 +376,8 @@ def test_portable_project_archive_export_import_and_security(env):
     assert any(e["term"] == "GraphSAGE" for e in gl["entries"])
     reb = owner.get(f"/api/projects/{new_pid}/rebuttal").json()
     assert len(reb["items"]) == 1
+    props = owner.get(f"/api/projects/{new_pid}/paper-proposals").json()["proposals"]
+    assert any(p["proposal_id"] == "prop_arch_1" for p in props)
 
 
 def test_admin_data_health_and_backup_isolation(env, tmp_path):
@@ -326,8 +385,22 @@ def test_admin_data_health_and_backup_isolation(env, tmp_path):
     owner = env["users"]["owner"]
     viewer = env["users"]["viewer"]
 
-    # 创建至少一条 PAT，验证平台备份绝不泄露 pat-tokens
+    # 创建 PAT 与共享资产，设置邀请码并验证平台备份脱敏
     assert owner.post("/api/tokens", json={"name": "LeakCheckToken"}).status_code == 201
+    assert (
+        owner.post(
+            "/api/shared/library",
+            json={"entries": [{"title": "User Asset Paper", "authors": ["Bob"], "year": "2024"}]},
+        ).status_code
+        == 200
+    )
+    assert (
+        admin.put(
+            "/api/admin/settings",
+            json={"registration": {"mode": "invite_only", "invite_code": "secret-invite-code"}},
+        ).status_code
+        == 200
+    )
 
     # 非超管拒绝 403
     assert viewer.get("/api/admin/data/health").status_code == 403
@@ -339,23 +412,29 @@ def test_admin_data_health_and_backup_isolation(env, tmp_path):
     assert h["project_count"] >= 1
     assert h["db"]["ok"] is True
     assert h["storage"]["total_bytes"] > 0
+    assert h["storage"]["shared_assets_bytes"] > 0
     assert h["disk"]["free_bytes"] > 0
 
-    rb = admin.get("/api/admin/data/backup?include_projects=true")
-    assert rb.status_code == 200 and rb.headers["content-type"] == "application/zip"
-    with zipfile.ZipFile(io.BytesIO(rb.content)) as zf:
-        names = set(zf.namelist())
-        assert "studio.db" in names
-        assert "backup-manifest.json" in names
-        assert not any("pat-tokens" in n for n in names)
-        org_data = json.loads(zf.read(".studio/org.json").decode("utf-8"))
-        assert org_data["ai_provider"]["api_key"] == ""
+    try:
+        rb = admin.get("/api/admin/data/backup?include_projects=true")
+        assert rb.status_code == 200 and rb.headers["content-type"] == "application/zip"
+        with zipfile.ZipFile(io.BytesIO(rb.content)) as zf:
+            names = set(zf.namelist())
+            assert "studio.db" in names
+            assert "backup-manifest.json" in names
+            assert any(n.startswith(".studio/user-assets/") for n in names)
+            assert not any("pat-tokens" in n for n in names)
+            org_data = json.loads(zf.read(".studio/org.json").decode("utf-8"))
+            assert org_data["ai_provider"]["api_key"] == ""
+            assert org_data["registration"]["invite_code"] == ""
 
-        db_out = tmp_path / "restored.db"
-        db_out.write_bytes(zf.read("studio.db"))
-        conn = sqlite3.connect(db_out)
-        try:
-            chk = conn.execute("PRAGMA integrity_check").fetchone()
-            assert chk and chk[0] == "ok"
-        finally:
-            conn.close()
+            db_out = tmp_path / "restored.db"
+            db_out.write_bytes(zf.read("studio.db"))
+            conn = sqlite3.connect(db_out)
+            try:
+                chk = conn.execute("PRAGMA integrity_check").fetchone()
+                assert chk and chk[0] == "ok"
+            finally:
+                conn.close()
+    finally:
+        admin.put("/api/admin/settings", json={"registration": {"mode": "open", "invite_code": ""}})

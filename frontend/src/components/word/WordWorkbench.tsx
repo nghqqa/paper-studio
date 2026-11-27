@@ -5,7 +5,7 @@ import { PresenceAvatars } from '@/components/shell/PresenceAvatars'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useProjectPresence } from '@/hooks/useProjectPresence'
-import { ApiError } from '@/lib/api/net'
+import { ApiError, triggerBlobDownload } from '@/lib/api/net'
 import { wordApi, type WordCitationStyle, type WordRenumberResult, type WordState, type WordVersionDiff } from '@/lib/api/word'
 import { downloadFile } from '@/lib/download'
 import { selectCanManage, useStudio } from '@/store'
@@ -36,11 +36,13 @@ function WordSession({ pid }: { pid: string }) {
   const editorPending = useRef(false)
   const operation = useRef<AbortController | null>(null)
   const uploadInput = useRef<HTMLInputElement>(null)
+  const diffSeqRef = useRef(0)
   const [phase, setPhase] = useState<'loading' | 'ready' | 'error' | 'unconfigured'>('loading')
   const [error, setError] = useState('')
   const [actionError, setActionError] = useState('')
   const [notice, setNotice] = useState('')
   const [state, setState] = useState<WordState | null>(null)
+  const [canEdit, setCanEdit] = useState(false)
   const [canSave, setCanSave] = useState(false)
   const [canDownload, setCanDownload] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
@@ -79,34 +81,54 @@ function WordSession({ pid }: { pid: string }) {
   }
 
   const handleRestoreVersion = async (vid: string) => {
-    if (versionBusyId) return
+    if (versionBusyId || operation.current) return
+    if (dirty.current || editorPending.current) {
+      const ok = window.confirm('当前有未保存修改，恢复历史版本将放弃未保存内容并重载编辑器，确定继续？')
+      if (!ok) return
+    }
+    const controller = new AbortController()
+    operation.current = controller
     setVersionBusyId(vid); setActionError(''); setNotice('')
     try {
       const next = await wordApi.restoreVersion(pid, vid, state?.sha)
+      dirty.current = false
+      editorPending.current = false
+      setHasChanges(false)
+      setDiffPair({ base: '', target: '' })
+      const changed = next.doc_key !== docKey || next.version !== state?.version
       setState(next)
       setConfirmRestoreId(null)
-      setNotice('已非破坏式恢复历史版本并生成最新记录；原版本均已完整保留')
+      setNotice(
+        changed
+          ? '已非破坏式恢复历史版本并生成最新记录；正在重载编辑器…'
+          : '所选历史版本与当前最新内容一致，无需变更',
+      )
+      if (changed) setAttempt((v) => v + 1)
     } catch (e) {
       setActionError(errorText(e))
       void wordApi.state(pid).then((latest) => setState(latest)).catch(() => undefined)
     } finally {
+      if (operation.current === controller) operation.current = null
       setVersionBusyId(null)
     }
   }
 
   const loadDiffPair = async (baseVid: string, targetVid: string) => {
+    const seq = ++diffSeqRef.current
     setDiffPair({ base: baseVid, target: targetVid })
     setDiffOpen(true)
     setDiffLoading(true)
     setDiffErr('')
     try {
       const res = await wordApi.diffVersions(pid, baseVid, targetVid)
+      if (diffSeqRef.current !== seq) return
       setDiffData(res)
     } catch (e) {
+      if (diffSeqRef.current !== seq) return
       setDiffData(null)
       setDiffErr(errorText(e))
     } finally {
-      setDiffLoading(false)
+      if (diffSeqRef.current === seq) setDiffLoading(false)
     }
   }
 
@@ -116,14 +138,7 @@ function WordSession({ pid }: { pid: string }) {
     try {
       const pairBody = diffPair.base && diffPair.target ? { base_vid: diffPair.base, target_vid: diffPair.target } : undefined
       const blob = await wordApi.exportRevisionKit(pid, pairBody)
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${title || pid}-word-revision-kit.zip`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      URL.revokeObjectURL(url)
+      triggerBlobDownload(blob, `${title || pid}-word-revision-kit.zip`)
       setNotice('已导出 Word 返修包（ZIP）')
     } catch (e) {
       setActionError(errorText(e))
@@ -143,7 +158,7 @@ function WordSession({ pid }: { pid: string }) {
     let readyTimer: number | undefined
     let instance: OnlyOfficeEditor | null = null
     setPhase('loading'); setError(''); setActionError(''); setState(null)
-    setCanSave(false); setCanDownload(false); setHasChanges(dirty.current); setBusy(false)
+    setCanEdit(false); setCanSave(false); setCanDownload(false); setHasChanges(dirty.current); setBusy(false)
     // 重试加载同一稿件时仍保留待确认标记，不能把重连当成一次成功保存。
     editorPending.current = false
     const fail = (e: unknown) => {
@@ -159,7 +174,9 @@ function WordSession({ pid }: { pid: string }) {
         if (!alive) return
         setState(initial)
         const permissions = reply.config.document?.permissions
-        setCanSave(reply.config.editorConfig?.mode !== 'view' && (permissions?.edit !== false || permissions?.review === true))
+        const editable = reply.config.editorConfig?.mode !== 'view' && permissions?.edit !== false
+        setCanEdit(editable)
+        setCanSave(editable || permissions?.review === true)
         setCanDownload(permissions?.download !== false)
         const api = await loadOnlyOffice(reply.document_server_url)
         if (!alive || !mount) return
@@ -202,6 +219,8 @@ function WordSession({ pid }: { pid: string }) {
 
   // 仅切换稿件时清提示；attempt 重载（上传新版本后）保留成功提示供用户核对。
   useEffect(() => { setNotice('') }, [pid])
+
+  useEffect(() => { setDiffPair({ base: '', target: '' }) }, [state?.version])
 
   // 状态只代表回传到服务器的 DOCX，不用编辑器的“已同步”事件冒充已落盘。
   useEffect(() => {
@@ -411,7 +430,7 @@ function WordSession({ pid }: { pid: string }) {
           <WordSidePanels
             pid={pid}
             docKey={docKey}
-            canEdit={canSave}
+            canEdit={canEdit}
             saving={Boolean(state?.saving)}
             stateSha={state?.sha ?? null}
             stateVersion={state?.version ?? null}
@@ -509,12 +528,12 @@ function WordSession({ pid }: { pid: string }) {
                         对比上版
                       </Button>
                     )}
-                    {canSave && (
+                    {canEdit && (
                       <Button size="xs" variant="outline" onClick={() => setLabelEditing({ id: version.id, text: version.label ?? '' })} data-testid={`word-version-tag-${version.id}`}>
                         <Tag aria-hidden /> {version.label ? '改标签' : '标里程碑'}
                       </Button>
                     )}
-                    {canSave && (confirmRestoreId === version.id ? (
+                    {canEdit && (confirmRestoreId === version.id ? (
                       <>
                         <Button size="xs" variant="default" disabled={busyThis} onClick={() => void handleRestoreVersion(version.id)} data-testid={`word-version-restore-confirm-${version.id}`}>
                           <RotateCcw aria-hidden /> {busyThis ? '恢复中…' : '确认恢复'}
@@ -534,7 +553,16 @@ function WordSession({ pid }: { pid: string }) {
           {!state?.versions.length && <p className="text-xs text-fg-muted">暂无版本记录</p>}
         </aside>}
       </main>
-      <Dialog open={diffOpen} onOpenChange={setDiffOpen}>
+      <Dialog
+        open={diffOpen}
+        onOpenChange={(open) => {
+          setDiffOpen(open)
+          if (!open) {
+            diffSeqRef.current += 1
+            setDiffPair({ base: '', target: '' })
+          }
+        }}
+      >
         <DialogContent className="sm:max-w-4xl max-h-screen overflow-y-auto" data-testid="word-diff-dialog">
           <DialogHeader>
             <DialogTitle>Word 版本文本差异对比（.docx）</DialogTitle>

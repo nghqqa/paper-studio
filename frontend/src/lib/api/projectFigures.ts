@@ -4,7 +4,17 @@ import { req } from './net'
  *  旧数据（无 kind）一律视为 chart —— 与后端读端缺省口径一致。 */
 export type FigurePalette = 'default' | 'academic' | 'colorblind' | 'grayscale'
 
-export type ChartFigureType = 'line' | 'bar' | 'scatter' | 'pie' | 'heatmap' | 'boxplot'
+export type ChartFigureType =
+  | 'line'
+  | 'bar'
+  | 'scatter'
+  | 'pie'
+  | 'heatmap'
+  | 'boxplot'
+  | 'radar'
+  | 'violin'
+  | 'forest'
+  | 'grouped_bar'
 
 export interface FigureSeries {
   name: string

@@ -16,6 +16,15 @@ export const ANON_HINT_KEY = 'patent-studio:auth-anon'
 
 const readAnonHint = (): boolean => {
   try {
+    if (typeof document !== 'undefined' && /(?:^|;\s*)ps_oidc_ok=1(?:;|$)/.test(document.cookie)) {
+      document.cookie = 'ps_oidc_ok=; Max-Age=0; Path=/'
+      try {
+        localStorage.removeItem(ANON_HINT_KEY)
+      } catch {
+        /* ignore */
+      }
+      return false
+    }
     return localStorage.getItem(ANON_HINT_KEY) === '1'
   } catch {
     return false
@@ -57,6 +66,7 @@ export interface AuthSlice {
   /** 清账号级/机构级残留（通知/账号/机构/PAT/期限/台账表/标签字典）——logout 与 expireSession 共用 */
   clearSession(): void
   clearAuthError(): void
+  clearAnonHint(): void
   loadMembers(pid: string): Promise<void>
   setMember(pid: string, email: string, role: Role): Promise<void>
   removeMember(pid: string, userId: string): Promise<void>
@@ -164,6 +174,10 @@ export const authSlice: Slice<AuthSlice> = (set, get) => ({
     get().toast('登录已过期，请重新登录', 'error')
   },
   clearAuthError: () => set({ authError: null }),
+  clearAnonHint: () => {
+    writeAnonHint(false)
+    if (get().authStatus === 'anon') set({ authStatus: 'unknown' })
+  },
 
   loadMembers: async (pid) => {
     set({ membersLoading: true, membersError: null })

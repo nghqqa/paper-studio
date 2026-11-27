@@ -52,8 +52,12 @@ export function useProposalActions({
 
   useEffect(() => {
     return () => {
-      genAbortRef.current?.abort()
-      readAbortRef.current?.abort()
+      const g = genAbortRef.current
+      genAbortRef.current = null
+      g?.abort()
+      const r = readAbortRef.current
+      readAbortRef.current = null
+      r?.abort()
     }
   }, [])
 
@@ -73,16 +77,15 @@ export function useProposalActions({
 
   const cancelGenerate = useCallback(() => {
     genAbortRef.current?.abort()
-    genAbortRef.current = null
   }, [])
 
   const cancelReading = useCallback(() => {
     readAbortRef.current?.abort()
-    readAbortRef.current = null
   }, [])
 
   const runGenerateRequest = useCallback(
     async (payload: GenerateProposalInput, taskKey: string, label: string) => {
+      readAbortRef.current?.abort()
       genAbortRef.current?.abort()
       const ac = new AbortController()
       genAbortRef.current = ac
@@ -96,21 +99,26 @@ export function useProposalActions({
         const r = await paperProposalApi.generateStream(pid, payload, {
           signal: ac.signal,
           onDelta: (chunk) => {
+            if (genAbortRef.current !== ac) return
             raw += chunk
             setStreamingPreview(extractJsonStreamField(raw, 'text'))
           },
         })
+        if (genAbortRef.current !== ac) return
         setNotice(`已生成提案（${label}），请在下方审阅`)
         setExpanded(r.proposal.proposal_id)
         await refresh()
       } catch (e) {
+        if (genAbortRef.current !== ac) return
         if (isAbortError(e)) setNotice('已停止生成提案')
         else setError(errText(e))
       } finally {
-        if (genAbortRef.current === ac) genAbortRef.current = null
-        setStreamingPreview(null)
-        setBusy(false)
-        setActiveTask(null)
+        if (genAbortRef.current === ac) {
+          genAbortRef.current = null
+          setStreamingPreview(null)
+          setBusy(false)
+          setActiveTask((cur) => (cur === taskKey ? null : cur))
+        }
       }
     },
     [pid, refresh],
@@ -131,9 +139,15 @@ export function useProposalActions({
       if (!activePath) return
       const insertMode = action === 'writing'
       let text = sel ? sel.text : ''
+      let rangeFrom = sel ? sel.from : undefined
+      let rangeTo = sel ? sel.to : undefined
       if (!insertMode && useSection) {
         const range = sectionRangeOf(sel!.doc, sel!.from)
-        if (range) text = sel!.doc.slice(range.from, range.to)
+        if (range) {
+          text = sel!.doc.slice(range.from, range.to)
+          rangeFrom = range.from
+          rangeTo = range.to
+        }
       }
       if (text.length > 8000) {
         setError('选区过长（>8000 字符），请缩小范围（不支持外发整篇论文）')
@@ -141,7 +155,7 @@ export function useProposalActions({
       }
       const payloadSel = insertMode
         ? { original_text: '', context_before: '', context_after: '' }
-        : payloadFor(sel!.doc, text)
+        : payloadFor(sel!.doc, text, rangeFrom, rangeTo)
       const baseSha = await sha256Hex(sel ? sel.doc : '')
       await runGenerateRequest(
         {
@@ -167,7 +181,7 @@ export function useProposalActions({
     async (base: PaperProposal, instruction: string) => {
       const trimmed = instruction.trim()
       if (!trimmed) return
-      const nextAction: ProposalAction = base.action === 'writing' ? 'custom' : base.action
+      const nextAction: ProposalAction = base.action
       await runGenerateRequest(
         {
           mode,
@@ -199,6 +213,7 @@ export function useProposalActions({
       setReadingError('选区过长（>2 万字符），请缩小范围')
       return
     }
+    genAbortRef.current?.abort()
     readAbortRef.current?.abort()
     const ac = new AbortController()
     readAbortRef.current = ac
@@ -214,13 +229,16 @@ export function useProposalActions({
         {
           signal: ac.signal,
           onDelta: (chunk) => {
+            if (readAbortRef.current !== ac) return
             acc += chunk
             setReading({ answer: acc, model: '流式生成中' })
           },
         },
       )
+      if (readAbortRef.current !== ac) return
       setReading({ answer: r.answer, model: r.model })
     } catch (e) {
+      if (readAbortRef.current !== ac) return
       if (isAbortError(e)) {
         if (!acc) setReading(null)
         else setReading((prev) => (prev ? { ...prev, model: '已停止' } : null))
@@ -228,9 +246,11 @@ export function useProposalActions({
         setReadingError(errText(e))
       }
     } finally {
-      if (readAbortRef.current === ac) readAbortRef.current = null
-      setReadingBusy(false)
-      setActiveTask(null)
+      if (readAbortRef.current === ac) {
+        readAbortRef.current = null
+        setReadingBusy(false)
+        setActiveTask((cur) => (cur === 'read' ? null : cur))
+      }
     }
   }, [getSelection, pid, activePath, mode])
 

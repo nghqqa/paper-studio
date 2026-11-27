@@ -160,10 +160,36 @@ async def public_pdf(token: str, request: Request):
     return Response(data, media_type="application/pdf", headers=headers)
 
 
+def _sanitize_public_comment(raw: dict) -> dict:
+    d = dict(raw)
+    d.pop("linked_issue_id", None)
+    d.pop("linked_rebuttal_id", None)
+    d.pop("mentions", None)
+    anchor = dict(d.get("anchor") or {})
+    anchor.pop("file", None)
+    anchor.pop("sha", None)
+    d["anchor"] = anchor
+    clean_replies = []
+    for rep in d.get("replies") or []:
+        r = dict(rep)
+        r.pop("mentions", None)
+        author = dict(r.get("author") or {})
+        author["id"] = None
+        r["author"] = author
+        clean_replies.append(r)
+    d["replies"] = clean_replies
+    return d
+
+
 @router.get("/api/public/{token}/comments")
 async def public_comments(token: str, request: Request):
     g = await _grant(token, request)
-    return [c.to_dict() for c in load_reanchored(request.app.state.store, g.pid)]
+    comments = [
+        _sanitize_public_comment(c.to_dict())
+        for c in load_reanchored(request.app.state.store, g.pid)
+        if c.source == "client"
+    ]
+    return comments
 
 
 @router.post("/api/public/{token}/comments", status_code=201)
@@ -233,14 +259,16 @@ async def public_revisions(token: str, request: Request):
                     raw_versions[-2]["id"],
                     raw_versions[-1]["id"],
                 )
+                diff_text = d["unified_diff"][:12000] if g.allow_copy else ""
                 latest_diff = {
                     "kind": "word",
                     "base_vid": d["base_vid"],
                     "target_vid": d["target_vid"],
                     "added": d["added"],
                     "removed": d["removed"],
-                    "unified_diff": d["unified_diff"][:12000],
-                    "truncated": d["truncated"] or len(d["unified_diff"]) > 12000,
+                    "unified_diff": diff_text,
+                    "truncated": (d["truncated"] or len(d["unified_diff"]) > 12000) if g.allow_copy else False,
+                    **({"redacted": True} if not g.allow_copy else {}),
                 }
             except ProjectError:
                 latest_diff = None

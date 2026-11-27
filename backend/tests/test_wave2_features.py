@@ -194,16 +194,61 @@ def test_glossary_crud_extract_preflight_and_ai_injection(env, monkeypatch):
     assert "Neural Network" in terms
     assert "FAM" in terms or "\\lossop" in terms
 
-    # Preflight 应检出弃用别名 "neural net"（告警 warn）
+    # 符号大小写区分（\Sigma 与 \sigma 共存不互相覆盖/误删别名）
+    assert (
+        owner.post(
+            f"/api/projects/{pid}/glossary",
+            json={"term": "\\Sigma", "category": "notation", "aliases": ["\\sigma"], "symbol": "\\Sigma", "enforce": True},
+        ).status_code
+        == 200
+    )
+    # 含嵌套花括号与 \acro 的提取不截断
+    assert owner.put(
+        f"/api/projects/{pid}/latex/files/main.tex",
+        json={
+            "content": (
+                "\\documentclass{article}\n"
+                "\\newcommand{\\lossop}{\\mathcal{L}}\n"
+                "\\acro{AGR}[AGR]{Adaptive Gradient Routing}\n"
+                "\\begin{document}\n"
+                "We compute $\\sigma$ using neural net training.\n"
+                "\\end{document}\n"
+            )
+        },
+    ).status_code == 200
+    rx2 = owner.post(f"/api/projects/{pid}/glossary/extract", json={"commit": False}).json()
+    cand_map = {(c["category"], c["term"]): c for c in rx2["candidates"]}
+    assert cand_map[("notation", "\\lossop")]["definition"] == "\\mathcal{L}"
+    assert cand_map[("acronym", "AGR")]["definition"] == "Adaptive Gradient Routing"
+
+    # Preflight 应检出弃用别名 "neural net" 与符号别名 "\sigma"（告警 warn），且术语表变更刷新缓存
     rp = owner.post(f"/api/projects/{pid}/latex/preflight", json={"ruleset": "latex-general"})
     assert rp.status_code == 200, rp.text
     items = {it["rule_id"]: it for it in rp.json()["report"]["items"]}
     assert "latex-glossary-consistency" in items
     assert items["latex-glossary-consistency"]["status"] == "warn"
     assert "neural net" in items["latex-glossary-consistency"]["evidence"]
+    assert "\\sigma" in items["latex-glossary-consistency"]["evidence"]
+
+    # 修改术语表（新增未入档别名）后，GET preflight 缓存应立即失效 expired=True
+    assert (
+        owner.post(
+            f"/api/projects/{pid}/glossary",
+            json={"term": "Gradient Routing", "category": "term", "aliases": ["gradient route"], "enforce": True},
+        ).status_code
+        == 200
+    )
+    cached_pf = owner.get(f"/api/projects/{pid}/latex/preflight?ruleset=latex-general")
+    if cached_pf.json().get("report") is not None:
+        assert cached_pf.json()["expired"] is True
 
     # 替换为规范术语后，Preflight 术语一致性变为 pass
-    fixed_tex = tex.replace("neural net", "Neural Network")
+    fixed_tex = (
+        "\\documentclass{article}\n"
+        "\\begin{document}\n"
+        "We compute $\\Sigma$ using Neural Network training.\n"
+        "\\end{document}\n"
+    )
     r_put = owner.put(f"/api/projects/{pid}/latex/files/main.tex", json={"content": fixed_tex})
     assert r_put.status_code == 200
     sha = r_put.json()["sha"]
@@ -342,6 +387,11 @@ def test_pat_mcp_server_and_proposal_only_acl(env):
     hdr_owner = {"Authorization": f"Bearer {plain_pat}"}
     hdr_viewer = {"Authorization": f"Bearer {vt}"}
 
+    # PAT 仅允许访问 /api/mcp，任何其他 REST 路由一律 403
+    assert anon.get("/api/tokens", headers=hdr_owner).status_code == 403
+    assert anon.get(f"/api/projects/{pid}", headers=hdr_owner).status_code == 403
+    assert anon.put(f"/api/projects/{pid}/latex/files/main.tex", headers=hdr_owner, json={"content": "evil"}).status_code == 403
+
     r_init = anon.post("/api/mcp", headers=hdr_owner, json={"jsonrpc": "2.0", "id": 1, "method": "initialize"})
     assert r_init.status_code == 200 and r_init.json()["result"]["serverInfo"]["name"] == "paper-studio-mcp"
 
@@ -431,7 +481,29 @@ def test_shared_library_and_snippets_cross_project(env):
     )
     assert cs.status_code == 200, cs.text
     sid = cs.json()["item"]["id"]
+    # PATCH 不存在片段返回 404（不静默建新）
+    assert (
+        owner.patch(
+            "/api/shared/snippets/snp_not_exists",
+            json={"title": "Ghost", "category": "表格", "code": "% ghost"},
+        ).status_code
+        == 404
+    )
     assert owner.delete(f"/api/shared/snippets/{sid}").status_code == 200
+
+    # 个人共享文献库：省略 citation_key 与中文标题不崩溃，且生成合法 KEY_RE（独立项目验证导入）
+    zh_res = owner.post(
+        "/api/shared/library",
+        json={"entries": [{"title": "基于注意力机制的深度网络模型", "authors": ["张三"], "year": "2025"}]},
+    )
+    assert zh_res.status_code == 200, zh_res.text
+    zh_item = zh_res.json()["items"][0]
+    from app.domain.library import KEY_RE
+
+    assert KEY_RE.match(zh_item["citation_key"])
+    pid_zh = _create_latex_project(env)
+    assert owner.post(f"/api/projects/{pid_zh}/library/import-from-shared", json={"item_ids": [zh_item["id"]]}).status_code == 200
+    assert owner.delete(f"/api/shared/library/{zh_item['id']}").status_code == 200
 
     # 个人共享文献库存入 + 导入至 LaTeX 项目并自动去重改名 key
     bib = "@article{lecun2015deep,\n  title={Deep learning},\n  author={LeCun, Yann},\n  journal={Nature},\n  year={2015}\n}"
@@ -486,9 +558,18 @@ def test_wave2c_comments_promote_public_revisions_deadlines_and_presence(env):
     rb2 = owner.post(f"/api/projects/{pid}/comments/{cid}/promote-to-rebuttal")
     assert rb2.status_code == 200 and rb2.json()["already_linked"] is True
 
-    # 2) 公开审阅链接脱敏版本演进摘要（Word + LaTeX）
+    # 文件级批注 (line=0) 转回复信不 500
+    rc_zero = viewer.post(
+        f"/api/projects/{pid}/comments",
+        json={"anchor": {"file": "main.tex", "line": 0}, "body": "Global check"},
+    )
+    assert rc_zero.status_code == 201, rc_zero.text
+    assert owner.post(f"/api/projects/{pid}/comments/{rc_zero.json()['id']}/promote-to-rebuttal").status_code == 200
+
+    # 2) 公开审阅链接脱敏版本演进摘要（Word + LaTeX）+ public/comments 不泄露内部批注
     tok_l = owner.post(f"/api/projects/{pid}/public-links", json={"scope": "comment", "ttl_days": 7}).json()["token"]
     anon = TestClient(env["app"])
+    assert anon.get(f"/api/public/{tok_l}/comments").json() == []
     pub_rev_l = anon.get(f"/api/public/{tok_l}/revisions")
     assert pub_rev_l.status_code == 200, pub_rev_l.text
     assert pub_rev_l.json()["source_format"] == "latex"
@@ -518,12 +599,19 @@ def test_wave2c_comments_promote_public_revisions_deadlines_and_presence(env):
     assert pub_rev_w.json()["latest_diff"]["added"] >= 1
     assert "Added experimental benchmark table." in pub_rev_w.json()["latest_diff"]["unified_diff"]
 
-    # 3) 截稿日历 + RFC 5545 .ics + 站内提醒（同日去重）
+    # allow_copy=False 时 public/revisions 脱敏 unified_diff
+    owner.put(f"/api/projects/{wpid}/collab-settings", json={"allow_copy": False})
+    pub_rev_w_redacted = anon.get(f"/api/public/{tok_w}/revisions").json()
+    assert pub_rev_w_redacted["latest_diff"]["unified_diff"] == ""
+    assert pub_rev_w_redacted["latest_diff"]["redacted"] is True
+    owner.put(f"/api/projects/{wpid}/collab-settings", json={"allow_copy": True})
+
+    # 3) 截稿日历 + RFC 5545 .ics（孤立 \r 转义防注入） + 站内提醒（同日去重）
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
     assert (
         owner.put(
             f"/api/projects/{pid}/settings",
-            json={"submission": {"venue": "NeurIPS 2027", "deadline": tomorrow, "stage": "draft"}},
+            json={"submission": {"venue": "NeurIPS 2027\rINJECTED:1", "deadline": tomorrow, "stage": "draft"}},
         ).status_code
         == 200
     )
@@ -534,6 +622,7 @@ def test_wave2c_comments_promote_public_revisions_deadlines_and_presence(env):
     ics = owner.get("/api/deadlines/calendar.ics")
     assert ics.status_code == 200 and "text/calendar" in ics.headers["content-type"]
     assert "BEGIN:VCALENDAR\r\n" in ics.text and f"UID:deadline-{pid}@paper-studio.local" in ics.text
+    assert "\rINJECTED:1" not in ics.text and "\\nINJECTED:1" in ics.text
     assert "TRIGGER:-P7D" in ics.text and "TRIGGER:-P1D" in ics.text
 
     rem1 = owner.post("/api/deadlines/remind-check").json()
@@ -543,13 +632,15 @@ def test_wave2c_comments_promote_public_revisions_deadlines_and_presence(env):
     notifs = owner.get("/api/notifications").json()["items"]
     assert any(n["kind"] == "deadline" and n["project_id"] == pid for n in notifs)
 
-    # 4) 协同 Presence 心跳（viewer 允许上报/读取/离开）
+    # 4) 协同 Presence 心跳（viewer 允许上报/读取/离开，且不可被他人越权删除）
     p1 = viewer.post(
         f"/api/projects/{pid}/presence",
         json={"client_id": "cli-viewer-1", "file": "main.tex", "line": 12, "mode": "latex"},
     )
     assert p1.status_code == 200, p1.text
     assert any(p["client_id"] == "cli-viewer-1" and p["line"] == 12 for p in p1.json()["peers"])
+    assert len(owner.get(f"/api/projects/{pid}/presence").json()["peers"]) == 1
+    assert owner.delete(f"/api/projects/{pid}/presence?client_id=cli-viewer-1").status_code == 204
     assert len(owner.get(f"/api/projects/{pid}/presence").json()["peers"]) == 1
     assert viewer.delete(f"/api/projects/{pid}/presence?client_id=cli-viewer-1").status_code == 204
     assert owner.get(f"/api/projects/{pid}/presence").json()["peers"] == []

@@ -10,6 +10,7 @@ W4-B（docs/plan/14）：角色加 reviewer（viewer < reviewer < editor）；�
 `check_source_write`（reviewer 只允许 CriticMarkup 建议 / 批注，否则 403）；`access_touch` 是访问记录写入点。
 """
 
+import asyncio
 import os
 from typing import Annotated
 
@@ -120,7 +121,7 @@ async def _resolve_user(request: Request):
         from app.auth.models import User
         from app.domain import pat as pat_mod
 
-        rec = pat_mod.verify_token(auth_hdr[7:].strip())
+        rec = await asyncio.to_thread(pat_mod.verify_token, auth_hdr[7:].strip())
         if not rec:
             return None
         uid = str(rec.get("user_id") or "")
@@ -133,6 +134,8 @@ async def _resolve_user(request: Request):
             u = await session.get(User, uid_obj)
         if u is None or not u.is_active:
             return None
+        request.state.auth_via = "pat"
+        request.state.pat_scopes = set(rec.get("scopes") or ("read", "propose"))
         return u
 
     from app.auth.users import read_cookie_user
@@ -144,9 +147,12 @@ async def _check_access(request: Request, user, pid: str, need: str) -> None:
     """superuser 放行；查 projects_acl；未登录 401 kind=auth；角色不足 403 kind=forbidden。
     非成员 ∧ pid 不存在 ⇒ 404 not_found（“不泄露存在性”只对真存在的案子有意义）。"""
     from app.auth import acl
+    from app.domain import projects
 
     if user is None:
         raise login_required()
+    if not projects.ID_RE.match(pid) or pid in (".", ".."):
+        raise HTTPException(404, error_detail("not_found", "项目不存在"))
     if user.is_superuser:
         return
     role = await acl.role_for(pid, user.id)
@@ -222,6 +228,11 @@ async def project_access(request: Request, user: CurrentUser) -> None:
     # ONLYOFFICE 服务端无用户 cookie——必须豁免全局登录校验，否则 DS 拉文档恒 401、编辑器「下载失败」。
     if request.url.path.startswith("/api/office/"):
         return
+    if getattr(request.state, "auth_via", None) == "pat" and request.url.path != "/api/mcp":
+        raise HTTPException(
+            403,
+            error_detail("forbidden", "个人访问令牌（PAT）仅允许访问 /api/mcp 端点", detail="pat_scope"),
+        )
     pid = request.path_params.get("pid")
     if pid is None:
         return

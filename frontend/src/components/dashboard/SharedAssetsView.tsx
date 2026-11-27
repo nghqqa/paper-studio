@@ -100,6 +100,38 @@ export function SharedAssetsView() {
     }
   }
 
+  const deleteLibraryItem = async (id: string) => {
+    if (busy) return
+    setBusy(true); setErr(''); setNotice('')
+    try {
+      const r = await sharedAssetsApi.deleteLibraryItem(id)
+      setLibItems(r.items)
+      setSelectedIds((prev) => {
+        if (!prev.has(id)) return prev
+        const next = new Set(prev)
+        next.delete(id)
+        return next
+      })
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const deleteSnippet = async (sid: string) => {
+    if (busy) return
+    setBusy(true); setErr(''); setNotice('')
+    try {
+      const r = await sharedAssetsApi.deleteSnippet(sid)
+      setSnippets(r.items)
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-4 p-4 text-sm" data-testid="shared-assets-view">
       <div className="flex flex-wrap items-center gap-2 border-b border-border pb-2">
@@ -222,7 +254,8 @@ export function SharedAssetsView() {
                     size="icon-xs"
                     variant="ghost"
                     className="text-danger"
-                    onClick={() => void sharedAssetsApi.deleteLibraryItem(it.id).then((r) => setLibItems(r.items))}
+                    disabled={busy}
+                    onClick={() => void deleteLibraryItem(it.id)}
                     aria-label={`移除 ${it.citation_key}`}
                   >
                     <Trash2 aria-hidden className="size-3" />
@@ -278,7 +311,8 @@ export function SharedAssetsView() {
                       size="icon-xs"
                       variant="ghost"
                       className="text-danger"
-                      onClick={() => void sharedAssetsApi.deleteSnippet(s.id).then((r) => setSnippets(r.items))}
+                      disabled={busy}
+                      onClick={() => void deleteSnippet(s.id)}
                       aria-label={`删除 ${s.title}`}
                     >
                       <Trash2 aria-hidden className="size-3" />

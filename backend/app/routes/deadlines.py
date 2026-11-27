@@ -2,6 +2,7 @@
 """投稿截稿日历汇总、RFC 5545 .ics 导出与临近截稿站内提醒。"""
 from __future__ import annotations
 
+import re
 from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -9,27 +10,51 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app import auth, config
-from app.auth.models import Notification
 from app.domain import db_sink as sink
 from app.errors import ProjectError
 
 router = APIRouter(tags=["deadlines"])
 
+_CTRL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
 
 def _ics_escape(value: str) -> str:
+    clean = _CTRL_RE.sub("", value)
     return (
-        value.replace("\\", "\\\\")
+        clean.replace("\\", "\\\\")
         .replace(";", "\\;")
         .replace(",", "\\,")
         .replace("\r\n", "\\n")
+        .replace("\r", "\\n")
         .replace("\n", "\\n")
     )
+
+
+def _ics_fold(line: str, limit: int = 75) -> str:
+    raw = line.encode("utf-8")
+    if len(raw) <= limit:
+        return line
+    out: list[str] = []
+    cur = bytearray()
+    first = True
+    for ch in line:
+        b = ch.encode("utf-8")
+        cap = limit if first else limit - 1
+        if cur and len(cur) + len(b) > cap:
+            out.append(cur.decode("utf-8"))
+            cur = bytearray(b)
+            first = False
+        else:
+            cur.extend(b)
+    if cur:
+        out.append(cur.decode("utf-8"))
+    return "\r\n ".join(out)
 
 
 async def _collect_deadlines(request: Request, user) -> tuple[list[dict], date]:
     store = request.app.state.store
     pids = await auth.visible_pids(user, store.list_ids())
-    today = date.today()
+    today = datetime.now(config.TZ).date()
     items: list[dict] = []
     for pid in pids:
         try:
@@ -129,7 +154,7 @@ async def export_deadlines_ics(request: Request, user: auth.CurrentUser):
             "END:VEVENT",
         ])
     lines.append("END:VCALENDAR")
-    payload = "\r\n".join(lines) + "\r\n"
+    payload = "\r\n".join(_ics_fold(ln) for ln in lines) + "\r\n"
     return Response(
         payload,
         media_type="text/calendar; charset=utf-8",
@@ -146,7 +171,10 @@ async def remind_deadlines(request: Request, user: auth.CurrentUser):
     ]
     notified = 0
     if config.AUTH_ON and user is not None and due_soon:
-        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+        from app.auth.models import Notification
+
+        local_today = datetime.now(config.TZ).date()
+        today_start = datetime.combine(local_today, datetime.min.time(), tzinfo=config.TZ).astimezone(UTC)
         with Session(sink.engine()) as sess:
             existing = set(
                 sess.scalars(

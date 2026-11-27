@@ -59,6 +59,9 @@ function readInitial(): Locale {
 }
 
 let currentLocale: Locale = readInitial()
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = currentLocale
+}
 
 export function getLocale(): Locale {
   return currentLocale
@@ -71,6 +74,10 @@ export function setLocale(next: Locale): void {
     if (typeof window !== 'undefined') {
       window.localStorage?.setItem(STORAGE_KEY, next)
     }
+  } catch {
+    /* ignore */
+  }
+  try {
     if (typeof document !== 'undefined') {
       document.documentElement.lang = next
     }

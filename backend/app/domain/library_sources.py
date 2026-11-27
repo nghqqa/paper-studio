@@ -239,7 +239,7 @@ async def lookup_doi(doi: str) -> dict[str, Any]:
     hit = _cache_get(cache_key)
     if hit is not None:
         return hit
-    r = await _get("api.crossref.org", f"https://api.crossref.org/works/{doi}")
+    r = await _get("api.crossref.org", f"https://api.crossref.org/works/{_q(doi)}")
     try:
         message = r.json().get("message", {})
     except Exception as e:  # noqa: BLE001

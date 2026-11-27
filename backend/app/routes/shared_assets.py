@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
-from app import auth, config
+from app import atomic, auth, config
 from app.domain import library, shared_assets
 from app.domain.library import KEY_RE, LibraryEntry, bib_files, create_bib_file, format_bibtex
 from app.errors import kind_error
@@ -82,19 +83,7 @@ async def delete_shared_library_item(item_id: str, user: auth.CurrentUser = None
     return {"ok": True, "items": items}
 
 
-@router.post("/api/projects/{pid}/library/import-from-shared")
-async def import_from_shared(pid: str, body: ImportFromSharedIn, request: Request, user: auth.CurrentUser = None):
-    uid = _uid(user)
-    project = request.app.state.store.get(pid)
-    fmt = project.settings.get("source_format")
-    shared = await asyncio.to_thread(shared_assets.list_shared_library, uid)
-    want = set(body.item_ids)
-    picked = [x for x in shared if x.get("id") in want]
-    if not picked:
-        raise kind_error("not_found", "未找到所选共享文献条目")
-
-    existing_idx = await asyncio.to_thread(library.load_index, project.dir)
-    used_keys = {e.citation_key for e in existing_idx.entries}
+def _build_import_entries(picked: list[dict], used_keys: set[str]) -> list[LibraryEntry]:
     new_entries: list[LibraryEntry] = []
     for raw in picked:
         ent = LibraryEntry(
@@ -113,7 +102,10 @@ async def import_from_shared(pid: str, body: ImportFromSharedIn, request: Reques
         )
         base_key = str(raw.get("citation_key") or "").strip()
         if not base_key or not KEY_RE.match(base_key):
-            base_key = library.suggested_key(ent)
+            raw_sugg = library.suggested_key(ent)
+            base_key = re.sub(r"[^A-Za-z0-9_:.+/#-]", "", raw_sugg)[:120]
+            if not base_key or not KEY_RE.match(base_key):
+                base_key = f"ref{re.sub(r'[^0-9]', '', ent.year or '')[:8]}_{ent.reference_id[-6:]}"
         key = base_key
         suffix = 2
         while key in used_keys:
@@ -121,11 +113,39 @@ async def import_from_shared(pid: str, body: ImportFromSharedIn, request: Reques
             suffix += 1
         used_keys.add(key)
         ent.citation_key = key
-        if not ent.raw_bibtex or key != base_key:
+        if not ent.raw_bibtex or key != str(raw.get("citation_key") or "").strip():
             ent.raw_bibtex = format_bibtex(ent)
         new_entries.append(ent)
+    return new_entries
+
+
+def _append_non_latex_library(project_dir: str, picked: list[dict]) -> tuple[list[str], int]:
+    with atomic.studio_lock(project_dir, "library"):
+        index = library.load_index(project_dir)
+        used_keys = {e.citation_key for e in index.entries}
+        new_entries = _build_import_entries(picked, used_keys)
+        for ent in new_entries:
+            ent.origin = "import"
+            index.entries.append(ent)
+        library.save_index(project_dir, index)
+        return [e.reference_id for e in new_entries], len(index.entries)
+
+
+@router.post("/api/projects/{pid}/library/import-from-shared")
+async def import_from_shared(pid: str, body: ImportFromSharedIn, request: Request, user: auth.CurrentUser = None):
+    uid = _uid(user)
+    project = request.app.state.store.get(pid)
+    fmt = project.settings.get("source_format")
+    shared = await asyncio.to_thread(shared_assets.list_shared_library, uid)
+    want = set(body.item_ids)
+    picked = [x for x in shared if x.get("id") in want]
+    if not picked:
+        raise kind_error("not_found", "未找到所选共享文献条目")
 
     if fmt == "latex":
+        existing_idx, _bib_errs = await asyncio.to_thread(library.rebuild_from_bib, project)
+        used_keys = {e.citation_key for e in existing_idx.entries}
+        new_entries = _build_import_entries(picked, used_keys)
         bibs = bib_files(project)
         target_bib = body.target_bib if body.target_bib in bibs else (bibs[0] if bibs else None)
         if not target_bib:
@@ -136,17 +156,17 @@ async def import_from_shared(pid: str, body: ImportFromSharedIn, request: Reques
         await asyncio.to_thread(library.append_entries_to_bib, project, target_bib, new_entries, None)
         hints = {(target_bib, ent.citation_key): ent.reference_id for ent in new_entries}
         index, _errors = await asyncio.to_thread(library.rebuild_from_bib, project, hints)
-    else:
-        index = existing_idx
-        for ent in new_entries:
-            ent.origin = "import"
-            index.entries.append(ent)
-        await asyncio.to_thread(library.save_index, project.dir, index)
+        return {
+            "imported": len(new_entries),
+            "reference_ids": [e.reference_id for e in new_entries],
+            "total": len(index.entries),
+        }
 
+    ref_ids, total = await asyncio.to_thread(_append_non_latex_library, project.dir, picked)
     return {
-        "imported": len(new_entries),
-        "reference_ids": [e.reference_id for e in new_entries],
-        "total": len(index.entries),
+        "imported": len(ref_ids),
+        "reference_ids": ref_ids,
+        "total": total,
     }
 
 
@@ -164,8 +184,9 @@ async def save_shared_snippet(body: SnippetIn, user: auth.CurrentUser = None):
 
 @router.patch("/api/shared/snippets/{sid}", dependencies=[Depends(auth.require_login)])
 async def update_shared_snippet(sid: str, body: SnippetIn, user: auth.CurrentUser = None):
-    payload = {**body.model_dump(), "id": sid}
-    saved, items = await asyncio.to_thread(shared_assets.upsert_snippet, _uid(user), payload)
+    saved, items = await asyncio.to_thread(shared_assets.update_snippet, _uid(user), sid, body.model_dump())
+    if saved is None:
+        raise kind_error("not_found", "片段不存在", detail=sid)
     return {"item": saved, "items": items}
 
 

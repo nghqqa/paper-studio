@@ -362,8 +362,8 @@ export const libraryApi = {
       body: fd,
     })
   },
-  entryPdfUrl: (pid: string, rid: string) =>
-    `/api/projects/${enc(pid)}/library/entries/${enc(rid)}/pdf`,
+  entryPdfUrl: (pid: string, rid: string, version?: number | string) =>
+    `/api/projects/${enc(pid)}/library/entries/${enc(rid)}/pdf${version ? `?v=${encodeURIComponent(String(version))}` : ''}`,
   entryPdfText: (pid: string, rid: string) =>
     req<{
       filename: string

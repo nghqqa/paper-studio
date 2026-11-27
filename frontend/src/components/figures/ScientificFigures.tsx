@@ -1,7 +1,8 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { Loader2, Plus, Trash2, Download, Copy, FileText, ImageUp, PencilLine, SendToBack } from 'lucide-react'
 import { figuresApi, type FigurePalette, type ProjectFigure } from '@/lib/api/projectFigures'
-import { netFetch, req } from '@/lib/api/net'
+import { req } from '@/lib/api/net'
+import { copyText } from '@/lib/download'
 import { extractNumericValue, parseDelimitedTable } from '@/lib/latexTable'
 import type { ProjectSummary } from '@/lib/types'
 import { useStudio } from '@/store'
@@ -155,13 +156,12 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
   }
 
   async function handleVisionUpload(file: File) {
-    if (!canEdit || visionBusy) return
+    if (!canEdit || visionBusy || busy) return
     setVisionBusy(true); setErr(''); setNotice(''); setPreview(null)
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const r = await netFetch('/api/charts/from-image', { method: 'POST', body: fd })
-      const payload = (await r.json()) as {
+      const payload = await req<{
         chart?: {
           type?: string
           title?: string
@@ -170,11 +170,9 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
           categories?: string[]
           series?: { name: string; values: number[]; errors?: number[] }[]
         }
-        detail?: { message?: string } | string
-      }
-      if (!r.ok || !payload.chart) {
-        const msg = typeof payload.detail === 'object' ? payload.detail?.message : payload.detail
-        throw new Error(msg || `图片识别失败 (${r.status})`)
+      }>('/api/charts/from-image', { method: 'POST', body: fd })
+      if (!payload.chart) {
+        throw new Error('图片识别未返回有效图表数据')
       }
       const ch = payload.chart
       if (alive.current) {
@@ -193,7 +191,7 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
   }
 
   async function renderPreview() {
-    if (!canEdit || busy) return
+    if (!canEdit || busy || visionBusy) return
     setBusy(true); setErr(''); setNotice(''); setPreview(null)
     try {
       const response = await req<{ data_url: string }>('/api/charts/render', {
@@ -205,7 +203,7 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
   }
 
   async function save() {
-    if (!canEdit || busy || !previewUrl) return
+    if (!canEdit || busy || visionBusy || !previewUrl) return
     setBusy(true); setErr(''); setNotice('')
     try {
       // pid 属于本次挂载；切换项目后，旧请求仍只写入发起时的项目。
@@ -219,7 +217,7 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
   }
 
   async function remove(fid: string) {
-    if (!canEdit || busy) return
+    if (!canEdit || busy || visionBusy) return
     if (!confirm('确认删除该图表？')) return
     setBusy(true); setErr(''); setNotice('')
     try {
@@ -234,10 +232,10 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
     if (!fig) return
     const code = `\\begin{figure}[htbp]\n  \\centering\n  \\includegraphics[width=0.85\\linewidth]{figures/${fid}.png}\n  \\caption{${fig.title || fig.name}}\n  \\label{fig:${fid}}\n\\end{figure}`
     setErr(''); setNotice('')
-    try {
-      await navigator.clipboard.writeText(code)
-      if (alive.current) setNotice('已复制 LaTeX 引用')
-    } catch { if (alive.current) setErr('无法复制，请允许浏览器访问剪贴板后重试') }
+    const ok = await copyText(code)
+    if (!alive.current) return
+    if (ok) setNotice('已复制 LaTeX 引用')
+    else setErr('无法复制，请允许浏览器访问剪贴板后重试')
   }
 
   return (
@@ -255,7 +253,7 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
         )}
         {canEdit && !loading && !loadError && (
           <>
-            <button type="button" className="paper-primary" onClick={() => setShowForm((v) => !v)} disabled={busy} data-testid="figures-new">
+            <button type="button" className="paper-primary" onClick={() => setShowForm((v) => !v)} disabled={busy || visionBusy} data-testid="figures-new">
               <Plus aria-hidden /> {showForm ? '收起表单' : '新建图表'}
             </button>
             <button type="button" className="paper-primary" onClick={() => setEditorFig(null)} disabled={busy} data-testid="figures-new-diagram">
@@ -354,7 +352,7 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
                     <button
                       type="button"
                       className="inline-flex items-center gap-1 text-xs text-link hover:underline"
-                      disabled={visionBusy}
+                      disabled={busy || visionBusy}
                       onClick={() => visionInputRef.current?.click()}
                       data-testid="figure-vision-upload"
                     >
@@ -392,9 +390,9 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
                 <textarea id="fig-data" rows={4} value={dataJson} onChange={(e) => setDataJson(e.target.value)} className="paper-figures-json" />
               </div>
               <div className="paper-figures-form-actions">
-                <button type="button" className="paper-secondary" onClick={renderPreview} disabled={busy}>预览</button>
-                <button type="submit" className="paper-primary" disabled={busy || previewUrl === ''}>保存</button>
-                {busy && <Loader2 className="paper-figures-loading-inline" aria-hidden />}
+                <button type="button" className="paper-secondary" onClick={renderPreview} disabled={busy || visionBusy}>预览</button>
+                <button type="submit" className="paper-primary" disabled={busy || visionBusy || previewUrl === ''}>保存</button>
+                {(busy || visionBusy) && <Loader2 className="paper-figures-loading-inline" aria-hidden />}
               </div>
               {previewUrl && <img src={previewUrl} alt="预览" className="paper-figures-preview" />}
             </form>
@@ -435,7 +433,7 @@ function ProjectFigures({ pid, project, projects, canEdit, embedded, onPublished
                       <button type="button" title="发布到 LaTeX" aria-label={`发布 ${f.name} 到 LaTeX`} onClick={() => setPublishFig(f)}><SendToBack aria-hidden /></button>
                     )}
                     {canEdit && (
-                      <button type="button" title="删除" aria-label={`删除 ${f.name}`} disabled={busy} onClick={() => void remove(f.id)}><Trash2 aria-hidden /></button>
+                      <button type="button" title="删除" aria-label={`删除 ${f.name}`} disabled={busy || visionBusy} onClick={() => void remove(f.id)}><Trash2 aria-hidden /></button>
                     )}
                   </figcaption>
                 </figure>

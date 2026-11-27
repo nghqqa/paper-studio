@@ -176,6 +176,7 @@ async def delete_entry(pid: str, rid: str, body: DeleteIn, request: Request, use
             sha = await asyncio.to_thread(library.remove_entry_from_bib, project, rel, ent.raw_bibtex, base)
             shas.append({"file": rel, "sha": sha})
         await asyncio.to_thread(library.rebuild_from_bib, project)
+        await asyncio.to_thread(library_pdf.delete_pdf, project.dir, rid)
         return {"ok": True, "files": shas}
     index = await asyncio.to_thread(load_index, project.dir)
     before = len(index.entries)
@@ -183,6 +184,7 @@ async def delete_entry(pid: str, rid: str, body: DeleteIn, request: Request, use
     if len(index.entries) == before:
         raise kind_error("not_found", "条目不存在", detail=rid)
     await asyncio.to_thread(library.save_index, project.dir, index)
+    await asyncio.to_thread(library_pdf.delete_pdf, project.dir, rid)
     return {"ok": True, "files": []}
 
 
@@ -250,6 +252,7 @@ async def merge(pid: str, body: MergeIn, request: Request, user: auth.CurrentUse
             project,
             [{"path": u.get("path"), "base": u.get("base"), "renames": renames} for u in body.tex_updates],
         )
+    await asyncio.to_thread(library_pdf.delete_pdf, project.dir, body.loser_rid)
     return {
         "merged_reference_id": merged.reference_id,
         "renames": renames,
@@ -525,11 +528,20 @@ async def get_entry_pdf(pid: str, rid: str, request: Request):
         raise kind_error("validation", "reference_id 不合法", detail=rid)
     project, _store = _project(request, pid)
     _require_paperish(project)
+    index = await _current_index(project)
+    if not any(e.reference_id == rid for e in index.entries):
+        raise kind_error("not_found", "文献条目不存在", detail=rid)
     try:
         pdf_path, fname = await asyncio.to_thread(library_pdf.get_pdf_path, project.dir, rid)
     except FileNotFoundError as e:
         raise kind_error("not_found", str(e), detail=rid)
-    return FileResponse(pdf_path, media_type="application/pdf", filename=fname, content_disposition_type="inline")
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        filename=fname,
+        content_disposition_type="inline",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/library/entries/{rid}/pdf/text")

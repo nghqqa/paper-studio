@@ -44,8 +44,17 @@ export function useRebuttalState({
 
   const [saving, setSaving] = useState(false)
   const [aiBusy, setAiBusy] = useState(false)
+  const [draftItemId, setDraftItemId] = useState<string | null>(null)
   const [streamingDraft, setStreamingDraft] = useState<string | null>(null)
   const draftAbortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    return () => {
+      const ac = draftAbortRef.current
+      draftAbortRef.current = null
+      ac?.abort()
+    }
+  }, [])
   const [exportFmt, setExportFmt] = useState<RebuttalExportFormat | null>(null)
   const [rounds, setRounds] = useState<RebuttalRoundSummary[]>([])
   const [viewRound, setViewRound] = useState<'current' | number>('current')
@@ -167,35 +176,42 @@ export function useRebuttalState({
 
   const cancelDraft = useCallback(() => {
     draftAbortRef.current?.abort()
-    draftAbortRef.current = null
   }, [])
 
   const runDraft = async () => {
-    if (!selected || !canEdit || !aiEnabled || aiBusy) return
+    if (!selected || !canEdit || !aiEnabled || (aiBusy && draftItemId === selected.id)) return
+    const targetId = selected.id
     draftAbortRef.current?.abort()
     const ac = new AbortController()
     draftAbortRef.current = ac
+    setDraftItemId(targetId)
     setAiBusy(true)
     setBanner('')
     setStreamingDraft('')
     let raw = ''
     try {
-      const r = await rebuttalApi.draftStream(pid, selected.id, undefined, {
+      const r = await rebuttalApi.draftStream(pid, targetId, undefined, {
         signal: ac.signal,
         onDelta: (chunk) => {
+          if (draftAbortRef.current !== ac) return
           raw += chunk
           setStreamingDraft(extractJsonStreamField(raw, 'response'))
         },
       })
+      if (draftAbortRef.current !== ac) return
       setState((s) => (s ? { ...s, items: s.items.map((x) => (x.id === r.item.id ? r.item : x)) } : s))
       setNotice(r.warnings.length ? r.warnings.join('；') : null)
     } catch (e) {
+      if (draftAbortRef.current !== ac) return
       if (e instanceof DOMException && e.name === 'AbortError') setNotice('已停止生成回复草稿')
       else setBanner(msgOf(e))
     } finally {
-      if (draftAbortRef.current === ac) draftAbortRef.current = null
-      setStreamingDraft(null)
-      setAiBusy(false)
+      if (draftAbortRef.current === ac) {
+        draftAbortRef.current = null
+        setDraftItemId(null)
+        setStreamingDraft(null)
+        setAiBusy(false)
+      }
     }
   }
 
@@ -243,6 +259,7 @@ export function useRebuttalState({
     dirty,
     saving,
     aiBusy,
+    draftItemId,
     streamingDraft,
     exportFmt,
     rounds,
